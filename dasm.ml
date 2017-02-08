@@ -3,6 +3,11 @@ type processor_mode =
   | Mode32bit
   | Mode64bit
 
+let encode_processor_mode = function
+  | Mode16bit -> 0
+  | Mode32bit -> 1
+  | Mode64bit -> 2
+
 type gpr_set =
   | Reg8bitLegacy
   | Reg8bitUniform
@@ -193,7 +198,7 @@ type inst =
   | Inst_MI  of int * g_operand * int
   | Inst_MII of int * g_operand * int * int
 
-let disassemble s =
+let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
   let opcode = int_of_char (Stream.next s) in
   let inst_format =
     int_of_char begin
@@ -206,10 +211,13 @@ let disassemble s =
           inst_format_table.[opcode]
     end
   in
-  if inst_format land 0x10 <> 0
+  let compute_opcodef r =
+    let mode_enc = encode_processor_mode mode in
+    (opcode lsl 3 lor r) lsl 5 lor mode_enc in
+  if inst_format land 0x10 <> 0 (* has g-operand *)
   then
     let r, g = read_g_operand s in
-    let opcodef = (opcode lsl 3 lor r) lsl 5 in
+    let opcodef = compute_opcodef r in
     match inst_format land 7 with
     | 0 -> Inst_M   (opcodef, g)
     | 1 -> Inst_MI  (opcodef, g, read_imm 1 s)
@@ -226,7 +234,7 @@ let disassemble s =
     | _ -> assert false
     (*Printf.sprintf "%02x\t%d, %s" opcode r (string_of_g_operand g)*)
   else
-    let opcodef = opcode lsl 8 in
+    let opcodef = compute_opcodef 0 in
     match inst_format land 7 with
     | 0 -> Inst_N  (opcodef)
     | 1 -> Inst_I  (opcodef, read_imm 1 s)
@@ -442,7 +450,7 @@ let () =
   let in_chan = open_in in_path in
   let in_stream = Stream.of_channel in_chan in
   let rec loop () =
-    let inst = disassemble in_stream in
+    let inst = disassemble Mode32bit in_stream in
     let () = Printf.printf "%s\n" (string_of_inst inst) in
     loop ()
   in
