@@ -160,7 +160,7 @@ let read_g_operand (s : char Stream.t) : int * g_operand =
         else
           G_mem { base = Some (r); index = None; disp = read_imm 4 s }
     | 3 ->
-        G_reg ((modrm lsr 3 land 7))
+        G_reg r
     | _ -> assert false
     end
   in
