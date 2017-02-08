@@ -119,16 +119,16 @@ let read_sib (s : char Stream.t) : int * ((int * int) option) =
 
 let read_imm (n : int) (s : char Stream.t) =
   let rec f n' acc =
-    if n' = 0
+    if n' = n
     then
       if acc land (1 lsl (n*8-1)) = 0
       then acc
       else acc - (1 lsl (n*8)) (* sign-extend immediate *)
     else
       let b = int_of_char (Stream.next s) in
-      f (n'-1) (acc lsl 8 lor b)
+      f (n'+1) (acc lor (b lsl (n'*8)))
   in
-  f n 0
+  f 0 0
 
 let read_g_operand (s : char Stream.t) : int * g_operand =
   let modrm = int_of_char (Stream.next s) in
