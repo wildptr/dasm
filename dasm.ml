@@ -109,10 +109,8 @@ let read_sib (s : char Stream.t) : int * ((int * int) option) =
   let sib_b = sib land 3 in
   let index =
     if sib_b = 4
-    then
-      None
-    else
-      Some (sib_i, 1 lsl sib_s)
+    then None
+    else Some (sib_i, 1 lsl sib_s)
   in
   let base = sib_b in
   (base, index)
@@ -134,31 +132,29 @@ let read_g_operand (s : char Stream.t) : int * g_operand =
   let modrm = int_of_char (Stream.next s) in
   let r = modrm land 7 in
   let g =
-    begin match modrm lsr 6 with (* mode field (modrm[7:6]) *)
+    let m = modrm lsr 6 in (* mode field (modrm[7:6]) *)
+    begin match m with
     | 0 ->
         begin match r with
         | 4 -> (* SIB follows *)
             let (base, index) = read_sib s in
             G_mem { base = Some base; index; disp = 0 }
         | 5 ->
-            G_mem { base = None; index = None; disp = read_imm 4 s }
+            let disp = read_imm 4 s in
+            G_mem { base = None; index = None; disp }
         | _ ->
-            G_mem { base = Some (r); index = None; disp = 0 }
+            G_mem { base = Some r; index = None; disp = 0 }
         end
-    | 1 ->
+    | 1 | 2 ->
+        let disp_size = if m = 1 then 1 else 4 in
         if r = 4
         then
           let (base, index) = read_sib s in
-          G_mem { base = Some base; index; disp = read_imm 1 s }
+          let disp = read_imm disp_size s in
+          G_mem { base = Some base; index; disp }
         else
-          G_mem { base = Some (r); index = None; disp = read_imm 1 s }
-    | 2 ->
-        if r = 4
-        then
-          let (base, index) = read_sib s in
-          G_mem { base = Some base; index; disp = read_imm 4 s }
-        else
-          G_mem { base = Some (r); index = None; disp = read_imm 4 s }
+          let disp = read_imm disp_size s in
+          G_mem { base = Some r; index = None; disp }
     | 3 ->
         G_reg r
     | _ -> assert false
