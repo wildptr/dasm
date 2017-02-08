@@ -118,12 +118,15 @@ let read_sib (s : char Stream.t) : int * ((int * int) option) =
   (base, index)
 
 let read_imm (n : int) (s : char Stream.t) =
-  let rec f n acc =
-    if n = 0
-    then acc
+  let rec f n' acc =
+    if n' = 0
+    then
+      if acc land (1 lsl (n*8-1)) = 0
+      then acc
+      else acc - (1 lsl (n*8)) (* sign-extend immediate *)
     else
       let b = int_of_char (Stream.next s) in
-      f (n-1) (acc lsl 8 lor b)
+      f (n'-1) (acc lsl 8 lor b)
   in
   f n 0
 
