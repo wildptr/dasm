@@ -105,10 +105,10 @@ let format_g_operand mode alt_data_size alt_addr_size w = function
 let read_sib (s : char Stream.t) : int * ((int * int) option) =
   let sib = int_of_char (Stream.next s) in
   let sib_s = sib lsr 6 in
-  let sib_i = sib lsr 3 land 3 in
-  let sib_b = sib land 3 in
+  let sib_i = sib lsr 3 land 7 in
+  let sib_b = sib land 7 in
   let index =
-    if sib_b = 4
+    if sib_i = 4
     then None
     else Some (sib_i, 1 lsl sib_s)
   in
@@ -138,7 +138,12 @@ let read_g_operand (s : char Stream.t) : int * g_operand =
         begin match r with
         | 4 -> (* SIB follows *)
             let (base, index) = read_sib s in
-            G_mem { base = Some base; index; disp = 0 }
+            if base = 5
+            then
+              let disp = read_imm 4 s in
+              G_mem { base = None; index; disp }
+            else
+              G_mem { base = Some base; index; disp = 0 }
         | 5 ->
             let disp = read_imm 4 s in
             G_mem { base = None; index = None; disp }
@@ -445,7 +450,7 @@ let string_of_inst : inst -> string =
       "<TODO>"
 
 let () =
-  let in_path = if true then "code" else Sys.argv.(1) in
+  let in_path = Sys.argv.(1) in
   let in_chan = open_in in_path in
   let in_stream = Stream.of_channel in_chan in
   let rec loop () =
@@ -453,4 +458,7 @@ let () =
     let () = Printf.printf "%s\n" (string_of_inst inst) in
     loop ()
   in
-  loop ()
+  let () = print_string "[bits 32]\n" in
+  try
+    loop ()
+  with Stream.Failure -> ()
