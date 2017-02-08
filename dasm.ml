@@ -406,7 +406,7 @@ let format_inst opcodef g i =
           | 'i' -> string_of_int i
           | 'm' ->
               begin match g with
-              | G_reg r -> "R" ^ (int_of_string r) (* TODO proper error handling *)
+              | G_reg r -> "R" ^ (string_of_int r) (* TODO proper error handling *)
               | G_mem m -> format_mem_operand mode alt_addr m
               end
           | 'o' -> if i = 0 then "$" else Printf.sprintf "$%+d" i
