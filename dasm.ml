@@ -65,7 +65,7 @@ type mem_operand = {
   disp : int;
 }
 
-let format_mem_operand (mode : processor_mode) (alt_addr_size : bool) (m : mem_operand) : string =
+let format_mem_operand (mode : processor_mode) (alt_addr_size : bool) (size_annot : string option) (m : mem_operand) : string =
   let gpr_set =
     begin match mode, alt_addr_size with
     | Mode16bit, false -> Reg16bit
@@ -83,30 +83,50 @@ let format_mem_operand (mode : processor_mode) (alt_addr_size : bool) (m : mem_o
     then Printf.sprintf "%s*%d" index_reg_s scale
     else index_reg_s
   in
-  match m.base, m.index with
-  | Some base, Some index ->
-      let base_s = gpr_name gpr_set base in
-      let index_s = string_of_index index in
-      let disp_s = if m.disp = 0 then "" else Printf.sprintf "%+d" m.disp in
-      Printf.sprintf "[%s+%s%s]" base_s index_s disp_s
-  | Some base, None ->
-      let base_s = gpr_name gpr_set base in
-      let disp_s = if m.disp = 0 then "" else Printf.sprintf "%+d" m.disp in
-      Printf.sprintf "[%s%s]" base_s disp_s
-  | None, Some index ->
-      let index_s = string_of_index index in
-      let disp_s = if m.disp = 0 then "" else Printf.sprintf "%+d" m.disp in
-      Printf.sprintf "[%s%s]" index_s disp_s
-  | None, None ->
-      Printf.sprintf "[%d]" m.disp
+  let m_s =
+    match m.base, m.index with
+    | Some base, Some index ->
+        let base_s = gpr_name gpr_set base in
+        let index_s = string_of_index index in
+        let disp_s = if m.disp = 0 then "" else Printf.sprintf "%+d" m.disp in
+        Printf.sprintf "[%s+%s%s]" base_s index_s disp_s
+    | Some base, None ->
+        let base_s = gpr_name gpr_set base in
+        let disp_s = if m.disp = 0 then "" else Printf.sprintf "%+d" m.disp in
+        Printf.sprintf "[%s%s]" base_s disp_s
+    | None, Some index ->
+        let index_s = string_of_index index in
+        let disp_s = if m.disp = 0 then "" else Printf.sprintf "%+d" m.disp in
+        Printf.sprintf "[%s%s]" index_s disp_s
+    | None, None ->
+        Printf.sprintf "[%d]" m.disp
+  in
+  match size_annot with
+  | Some s -> Printf.sprintf "%s %s" s m_s
+  | None -> m_s
 
 type g_operand =
   | G_reg of int
   | G_mem of mem_operand
 
-let format_g_operand mode alt_data_size alt_addr_size w = function
+let format_g_operand mode alt_data_size alt_addr_size w sized = function
   | G_reg r -> format_reg_operand mode alt_data_size w r
-  | G_mem m -> format_mem_operand mode alt_addr_size m
+  | G_mem m ->
+      let size_annot =
+        if sized
+        then Some
+          begin match w, mode, alt_data_size with
+          | false, _, _ -> "byte"
+          |  true, Mode16bit, false
+          |  true, Mode32bit,  true
+          |  true, Mode64bit,  true -> "word"
+          |  true, Mode16bit,  true
+          |  true, Mode32bit, false
+          |  true, Mode64bit, false -> "dword"
+          end
+        else None
+      in
+      format_mem_operand mode alt_addr_size size_annot m
 
 let read_sib (s : char Stream.t) : int * ((int * int) option) =
   let sib = int_of_char (Stream.next s) in
@@ -378,7 +398,7 @@ let format_of_inst (opcode : int) (r : int) : string * string =
       in
       (mnemonics.(opcode land 15), "o")
   | 0x80 | 0x81 | 0x82 | 0x83 ->
-      (mnemonics_add.(r), if opcode land 1 = 0 then "gb,i" else "gw,i")
+      (mnemonics_add.(r), if opcode land 1 = 0 then "Gb,i" else "Gw,i")
   | 0x84 | 0x85 | 0x86 | 0x87 ->
       (if opcode land 2 = 0 then "test" else "xchg"),
       (if opcode land 1 = 0 then "gb,rb" else "gw,rw")
@@ -396,14 +416,14 @@ let format_of_inst (opcode : int) (r : int) : string * string =
   | 0xb8 | 0xb9 | 0xba | 0xbb | 0xbc | 0xbd | 0xbe | 0xbf ->
       ("mov", if opcode land 8 = 0 then "qb,i" else "qw,i")
   | 0xc0 | 0xc1 ->
-      (mnemonics_rol.(r), if opcode land 1 = 0 then "gb,i" else "gw,i")
+      (mnemonics_rol.(r), if opcode land 1 = 0 then "Gb,i" else "Gw,i")
   | 0xc2 ->
       ("ret", "i")
   | 0xc4 | 0xc5 ->
       (if opcode land 1 = 0 then "les" else "lds"), "rw,m"
   | 0xc6 | 0xc7 ->
       (if r = 0 then "mov" else ""),
-      (if opcode land 1 = 0 then "gb,i" else "gw,i")
+      (if opcode land 1 = 0 then "Gb,i" else "Gw,i")
   | 0xca ->
       ("retf", "i")
   | 0xcd ->
@@ -488,25 +508,26 @@ let format_inst opcodef g i =
       then ""
       else
         let format_operand spec =
-          let format_g (g : g_operand) : string =
+          let format_g (sized : bool) (g : g_operand) : string =
             begin match spec.[1] with
-            | 'b' -> format_g_operand mode alt_data alt_addr false g
-            | 'w' -> format_g_operand mode alt_data alt_addr true g
+            | 'b' -> format_g_operand mode alt_data alt_addr false sized g
+            | 'w' -> format_g_operand mode alt_data alt_addr  true sized g
             | _ -> assert false
             end
           in
           match spec.[0] with
-          | 'a' -> format_g (G_reg 0)
-          | 'g' -> format_g g
+          | 'a' -> format_g false (G_reg 0)
+          | 'g' -> format_g false g
+          | 'G' -> format_g  true g
           | 'i' -> string_of_int i
           | 'm' ->
               begin match g with
               | G_reg r -> "R" ^ (string_of_int r) (* TODO proper error handling *)
-              | G_mem m -> format_mem_operand mode alt_addr m
+              | G_mem m -> format_mem_operand mode alt_addr None m
               end
           | 'o' -> if i = 0 then "$" else Printf.sprintf "$%+d" i
-          | 'q' -> format_g (G_reg (opcode land 7))
-          | 'r' -> format_g (G_reg r)
+          | 'q' -> format_g false (G_reg (opcode land 7))
+          | 'r' -> format_g false (G_reg r)
           | '\'' -> String.sub spec 1 (String.length spec - 1)
           | _ -> assert false
         in
