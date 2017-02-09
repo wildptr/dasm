@@ -8,6 +8,12 @@ let encode_processor_mode = function
   | Mode32bit -> 1
   | Mode64bit -> 2
 
+let decode_processor_mode = function
+  | 0 -> Mode16bit
+  | 1 -> Mode32bit
+  | 2 -> Mode64bit
+  | _ -> assert false
+
 type gpr_set =
   | Reg8bitLegacy
   | Reg8bitUniform
@@ -202,8 +208,88 @@ type inst =
   | Inst_MI  of int * g_operand * int
   | Inst_MII of int * g_operand * int * int
 
+type prefix =
+  | Prefix_26
+  | Prefix_2e
+  | Prefix_36
+  | Prefix_3e
+  | Prefix_64
+  | Prefix_65
+  | Prefix_66
+  | Prefix_67
+  | Prefix_f0
+  | Prefix_f2
+  | Prefix_f3
+
+let prefix_of_char = function
+  | '\x26' -> Some Prefix_26
+  | '\x2e' -> Some Prefix_2e
+  | '\x36' -> Some Prefix_36
+  | '\x3e' -> Some Prefix_3e
+  | '\x64' -> Some Prefix_64
+  | '\x65' -> Some Prefix_65
+  | '\x66' -> Some Prefix_66
+  | '\x67' -> Some Prefix_67
+  | '\xf0' -> Some Prefix_f0
+  | '\xf2' -> Some Prefix_f2
+  | '\xf3' -> Some Prefix_f3
+  | _ -> None
+
+let prefix_mask = function
+  | Prefix_26
+  | Prefix_2e
+  | Prefix_36
+  | Prefix_3e
+  | Prefix_64
+  | Prefix_65 -> 0xc
+  | Prefix_66 -> 0x10
+  | Prefix_67 -> 0x20
+  | Prefix_f0
+  | Prefix_f2
+  | Prefix_f3 -> 3
+
+let prefix_value = function
+  | Prefix_26 -> 1 lsl 2
+  | Prefix_2e -> 2 lsl 2
+  | Prefix_36 -> 3 lsl 2
+  | Prefix_3e -> 4 lsl 2
+  | Prefix_64 -> 5 lsl 2
+  | Prefix_65 -> 6 lsl 2
+  | Prefix_66 -> 1 lsl 4
+  | Prefix_67 -> 1 lsl 5
+  | Prefix_f0 -> 1
+  | Prefix_f2 -> 2
+  | Prefix_f3 -> 3
+
+exception MutuallyExclusivePrefixes
+
+(* prefixes are packed into an int *)
+let read_prefix_and_opcode (s : char Stream.t) : int * int =
+  let rec f acc =
+    let c = Stream.next s in
+    match prefix_of_char c with
+    | Some prefix ->
+        if acc land prefix_mask prefix = 0
+        then f (acc lor prefix_value prefix)
+        else raise MutuallyExclusivePrefixes
+    | None ->
+        (acc, int_of_char c)
+  in
+  f 0
+
+let encode_opcode opcode r prefix mode =
+  let mode_enc = encode_processor_mode mode in
+  ((opcode lsl 3 lor r) lsl 6 lor prefix) lsl 2 lor mode_enc
+
+let decode_opcode opcodef =
+  (opcodef lsr 11,
+   opcodef lsr 8 land 7,
+   opcodef lsr 2 land 0x3f,
+   decode_processor_mode (opcodef land 3))
+
 let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
-  let opcode = int_of_char (Stream.next s) in
+  let prefix, opcode = read_prefix_and_opcode s in
+  let () = Printf.printf "; prefix=%x opcode=%x\n" prefix opcode in
   let inst_format =
     int_of_char begin
       match opcode with
@@ -215,17 +301,16 @@ let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
           inst_format_table.[opcode]
     end
   in
-  let compute_opcodef r =
-    let mode_enc = encode_processor_mode mode in
-    (opcode lsl 3 lor r) lsl 5 lor mode_enc in
+  let alt_data = prefix land 0x10 <> 0 in
+  let word_size = if alt_data then 2 else 4 in
   if inst_format land 0x10 <> 0 (* has g-operand *)
   then
     let r, g = read_g_operand s in
-    let opcodef = compute_opcodef r in
+    let opcodef = encode_opcode opcode r prefix mode in
     match inst_format land 7 with
     | 0 -> Inst_M   (opcodef, g)
     | 1 -> Inst_MI  (opcodef, g, read_imm 1 s)
-    | 2 -> Inst_MI  (opcodef, g, read_imm 4 s)
+    | 2 -> Inst_MI  (opcodef, g, read_imm word_size s)
     | 3 -> Inst_MI  (opcodef, g, read_imm 2 s)
     | 4 ->
         let imm1 = read_imm 2 s in
@@ -233,19 +318,24 @@ let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
         Inst_MII (opcodef, g, imm1, imm2)
     | 5 ->
         let imm1 = read_imm 2 s in
-        let imm2 = read_imm 4 s in
+        let imm2 = read_imm word_size s in
         Inst_MII (opcodef, g, imm1, imm2)
     | _ -> assert false
-    (*Printf.sprintf "%02x\t%d, %s" opcode r (string_of_g_operand g)*)
   else
-    let opcodef = compute_opcodef 0 in
+    let opcodef = encode_opcode opcode 0 prefix mode in
     match inst_format land 7 with
     | 0 -> Inst_N  (opcodef)
     | 1 -> Inst_I  (opcodef, read_imm 1 s)
-    | 2 -> Inst_I  (opcodef, read_imm 4 s)
+    | 2 -> Inst_I  (opcodef, read_imm word_size s)
     | 3 -> Inst_I  (opcodef, read_imm 2 s)
-    | 4 -> Inst_II (opcodef, read_imm 2 s, read_imm 1 s)
-    | 5 -> Inst_II (opcodef, read_imm 2 s, read_imm 4 s)
+    | 4 ->
+        let imm1 = read_imm 2 s in
+        let imm2 = read_imm 1 s in
+        Inst_II (opcodef, imm1, imm2)
+    | 5 ->
+        let imm1 = read_imm 2 s in
+        let imm2 = read_imm word_size s in
+        Inst_II (opcodef, imm1, imm2)
     | _ -> assert false
 
 let mnemonics_add = [|"add";"or" ;"adc";"sbb";"and";"sub";"xor";"cmp"|]
@@ -339,19 +429,13 @@ let format_of_inst (opcode : int) (r : int) : string * string =
       ([|"inc";"dec";"call";"callf";"jmp";"jmpf";"push";""|].(r),
        match r with (* call/jmp far *) 3 | 5 -> "m" | _ -> "gw")
   | _ ->
-      let () = Printf.printf "format_of_inst: opcode=%02x r=%d\n" opcode r in
+      let () = Printf.fprintf stderr "format_of_inst: opcode=%02x r=%d\n" opcode r in
       assert false
 
 let format_inst opcodef g i =
-  let mode = match opcodef land 3 with
-  | 0 -> Mode16bit
-  | 1 -> Mode32bit
-  | 2 -> Mode64bit
-  | _ -> assert false
-  in
-  let alt_data = opcodef land 4 = 1 in
-  let alt_addr = opcodef land 8 = 1 in
-  let opcode = opcodef lsr 8 in
+  let opcode, r, prefix, mode = decode_opcode opcodef in
+  let alt_data = prefix land 0x10 <> 0 in
+  let alt_addr = prefix land 0x20 <> 0 in
   let long_mode = false (* FIXME *) in
   match opcode with
   | 0x27 -> "daa"
@@ -399,7 +483,6 @@ let format_inst opcodef g i =
   | 0xfc -> "cld"
   | 0xfd -> "std"
   | _ ->
-      let r = opcodef lsr 5 land 7 in
       let mne, fmt = format_of_inst opcode r in
       if mne = "" (* invalid instruction *)
       then ""
@@ -425,7 +508,7 @@ let format_inst opcodef g i =
           | 'q' -> format_g (G_reg (opcode land 7))
           | 'r' -> format_g (G_reg r)
           | '\'' -> String.sub spec 1 (String.length spec - 1)
-          | _ -> let () = Printf.printf "spec=%s\n" spec in assert false
+          | _ -> assert false
         in
         Printf.sprintf "%s %s" mne
           begin
