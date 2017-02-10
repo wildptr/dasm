@@ -290,7 +290,6 @@ let decode_opcode opcodef =
 
 let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
   let prefix, opcode = read_prefix_and_opcode s in
-  let () = Printf.printf "; prefix=%x opcode=%x\n" prefix opcode in
   let inst_format =
     int_of_char begin
       match opcode with
