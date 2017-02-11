@@ -242,9 +242,9 @@ let prefix_mask = function
   | Prefix_36
   | Prefix_3e
   | Prefix_64
-  | Prefix_65 -> 0xc
-  | Prefix_66 -> 0x10
-  | Prefix_67 -> 0x20
+  | Prefix_65 -> 0x1c
+  | Prefix_66 -> 0x20
+  | Prefix_67 -> 0x40
   | Prefix_f0
   | Prefix_f2
   | Prefix_f3 -> 3
@@ -256,8 +256,8 @@ let prefix_value = function
   | Prefix_3e -> 4 lsl 2
   | Prefix_64 -> 5 lsl 2
   | Prefix_65 -> 6 lsl 2
-  | Prefix_66 -> 1 lsl 4
-  | Prefix_67 -> 1 lsl 5
+  | Prefix_66 -> 1 lsl 5
+  | Prefix_67 -> 1 lsl 6
   | Prefix_f0 -> 1
   | Prefix_f2 -> 2
   | Prefix_f3 -> 3
@@ -280,12 +280,12 @@ let read_prefix_and_opcode (s : char Stream.t) : int * int =
 
 let encode_opcode opcode r prefix mode =
   let mode_enc = encode_processor_mode mode in
-  ((opcode lsl 3 lor r) lsl 6 lor prefix) lsl 2 lor mode_enc
+  ((opcode lsl 3 lor r) lsl 7 lor prefix) lsl 2 lor mode_enc
 
 let decode_opcode opcodef =
-  (opcodef lsr 11,
-   opcodef lsr 8 land 7,
-   opcodef lsr 2 land 0x3f,
+  (opcodef lsr 12,
+   opcodef lsr 9 land 7,
+   opcodef lsr 2 land 0x7f,
    decode_processor_mode (opcodef land 3))
 
 let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
@@ -301,7 +301,7 @@ let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
           inst_format_table.[opcode]
     end
   in
-  let alt_data = prefix land 0x10 <> 0 in
+  let alt_data = prefix land (prefix_mask Prefix_66) <> 0 in
   let word_size = if alt_data then 2 else 4 in
   if inst_format land 0x10 <> 0 (* has g-operand *)
   then
@@ -434,8 +434,8 @@ let format_of_inst (opcode : int) (r : int) : string * string =
 
 let format_inst opcodef g i =
   let opcode, r, prefix, mode = decode_opcode opcodef in
-  let alt_data = prefix land 0x10 <> 0 in
-  let alt_addr = prefix land 0x20 <> 0 in
+  let alt_data = prefix land (prefix_mask Prefix_66) <> 0 in
+  let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in
   let long_mode = false (* FIXME *) in
   match opcode with
   | 0x27 -> "daa"
