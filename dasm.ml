@@ -436,34 +436,92 @@ let format_inst opcodef g i =
   let opcode, r, prefix, mode = decode_opcode opcodef in
   let alt_data = prefix land (prefix_mask Prefix_66) <> 0 in
   let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in
-  let long_mode = false (* FIXME *) in
+  let word_size =
+    match mode, alt_data with
+    | Mode16bit, false
+    | Mode32bit,  true
+    | Mode64bit,  true -> Reg16bit
+    | Mode16bit,  true
+    | Mode32bit, false
+    | Mode64bit, false -> Reg32bit
+  in
   match opcode with
   | 0x27 -> "daa"
   | 0x2f -> "das"
   | 0x3f -> "aas"
-  | 0x60 -> "pusha"
-  | 0x61 -> "popa"
+  | 0x60 ->
+      begin match word_size with
+      | Reg16bit -> "pusha"
+      | Reg32bit -> "pushad"
+      | _ -> failwith "TODO"
+      end
+  | 0x61 ->
+      begin match word_size with
+      | Reg16bit -> "popa"
+      | Reg32bit -> "popad"
+      | _ -> failwith "TODO"
+      end
   | 0x6c -> "insb"
-  | 0x6d -> if long_mode then "insd" else "insw"
+  | 0x6d ->
+      begin match word_size with
+      | Reg16bit -> "insw"
+      | Reg32bit -> "insd"
+      | _ -> failwith "TODO"
+      end
   | 0x6e -> "outsb"
-  | 0x6f -> if long_mode then "outsd" else "outsw"
+  | 0x6f ->
+      begin match word_size with
+      | Reg16bit -> "outsw"
+      | Reg32bit -> "outsd"
+      | _ -> failwith "TODO"
+      end
   | 0x98 -> "cbw"
-  | 0x99 -> if long_mode then "cdq" else "cwd"
+  | 0x99 ->
+      begin match word_size with
+      | Reg16bit -> "cwd"
+      | Reg32bit -> "cdq"
+      | _ -> failwith "TODO"
+      end
   | 0x9b -> "wait"
   | 0x9c -> "pushf"
   | 0x9d -> "popf"
   | 0x9e -> "sahf"
   | 0x9f -> "lahf"
   | 0xa4 -> "movsb"
-  | 0xa5 -> if long_mode then "movsd" else "movsw"
+  | 0xa5 ->
+      begin match word_size with
+      | Reg16bit -> "movsw"
+      | Reg32bit -> "movsd"
+      | _ -> failwith "TODO"
+      end
   | 0xa6 -> "cmpsb"
-  | 0xa7 -> if long_mode then "cmpsd" else "cmpsw"
+  | 0xa7 ->
+      begin match word_size with
+      | Reg16bit -> "cmpsw"
+      | Reg32bit -> "cmpsd"
+      | _ -> failwith "TODO"
+      end
   | 0xaa -> "stosb"
-  | 0xab -> if long_mode then "stosd" else "stosw"
+  | 0xab ->
+      begin match word_size with
+      | Reg16bit -> "stosw"
+      | Reg32bit -> "stosd"
+      | _ -> failwith "TODO"
+      end
   | 0xac -> "lodsb"
-  | 0xad -> if long_mode then "lodsd" else "lodsw"
+  | 0xad ->
+      begin match word_size with
+      | Reg16bit -> "lodsw"
+      | Reg32bit -> "lodsd"
+      | _ -> failwith "TODO"
+      end
   | 0xae -> "scasb"
-  | 0xaf -> if long_mode then "scasd" else "scasw"
+  | 0xaf ->
+      begin match word_size with
+      | Reg16bit -> "scasw"
+      | Reg32bit -> "scasd"
+      | _ -> failwith "TODO"
+      end
   | 0xc3 -> "ret"
   | 0xc9 -> "leave"
   | 0xcb -> "retf"
