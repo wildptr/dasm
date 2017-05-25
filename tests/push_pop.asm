@@ -1,3 +1,4 @@
+[bits 32]
 ; 66ff/6 push g16
 push word [eax]
 ; ff/6 push g32
