@@ -1,5 +1,10 @@
-tmpdir=~/tmp
+if [ -d ~/tmp ]; then
+	tmpdir=~/tmp
+else
+	tmpdir="/tmp/$USER"
+fi
 set -e
+mkdir -p "$tmpdir"
 for f; do
 	stem=`basename "$f" .asm`
 	binfile="$tmpdir/$stem.bin"
