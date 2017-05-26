@@ -283,6 +283,7 @@ let prefix_value = function
   | Prefix_f3 -> 3
 
 exception MutuallyExclusivePrefixes
+exception NotImplemented
 
 (* prefixes are packed into an int *)
 let read_prefix_and_opcode (s : char Stream.t) : int * int =
@@ -375,9 +376,23 @@ let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
 let mnemonics_add = [|"add";"or" ;"adc";"sbb";"and";"sub";"xor";"cmp"|]
 let mnemonics_rol = [|"rol";"ror";"rcl";"rcr";"shl";"shr";""   ;"sar"|]
 
+let operand_size_prefix (mode : processor_mode) (prefix : int) : string option =
+  if prefix land (prefix_mask Prefix_66) <> 0
+  then
+    match mode with
+    | Mode16bit -> Some "o32"
+    | Mode32bit
+    | Mode64bit -> Some "o16"
+  else None
+
+let with_operand_size_prefix (mode : processor_mode) (prefix : int) (m : string) : string =
+  match operand_size_prefix mode prefix with
+  | Some o -> sprintf "%s %s" o m
+  | None -> m
+
 (* r is ModRM[5:3] *)
 (* returns ("", _) if (opcode, r) does not denote a valid instruction *)
-let format_of_inst_0 (opcode : int) (r : int) : string * string =
+let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : int) : string * string =
   (* let () = printf "; format_of_inst: opcode=%02x r=%d\n" opcode r in *)
   match opcode with
   | 0x00 | 0x01 | 0x02 | 0x03 | 0x04 | 0x05
@@ -391,8 +406,9 @@ let format_of_inst_0 (opcode : int) (r : int) : string * string =
       let formats = [|"gb,rb";"gw,rw";"rb,gb";"rw,gw";"ab,i";"aw,i"|] in
       (mnemonics_add.(opcode lsr 3), formats.(opcode land 7))
   | 0x06 | 0x07 | 0x0e | 0x16 | 0x17 | 0x1e | 0x1f ->
-      (if opcode land 1 = 0 then "push" else "pop"),
-       [|"'es";"'cs";"'ss";"'ds"|].(opcode lsr 3)
+      let m = if opcode land 1 = 0 then "push" else "pop" in
+      with_operand_size_prefix mode prefix m,
+      [|"'es";"'cs";"'ss";"'ds"|].(opcode lsr 3)
   | 0x40 | 0x41 | 0x42 | 0x43 | 0x44 | 0x45 | 0x46 | 0x47
   | 0x48 | 0x49 | 0x4a | 0x4b | 0x4c | 0x4d | 0x4e | 0x4f
   | 0x50 | 0x51 | 0x52 | 0x53 | 0x54 | 0x55 | 0x56 | 0x57
@@ -401,7 +417,16 @@ let format_of_inst_0 (opcode : int) (r : int) : string * string =
   | 0x62 ->
       ("bound", "rw,m")
   | 0x68 | 0x6a ->
-      ("push", "i")
+      let spec =
+        if prefix land (prefix_mask Prefix_66) <> 0
+        then
+          match mode with
+          | Mode16bit -> "i4"
+          | Mode32bit
+          | Mode64bit -> "i2"
+        else "i"
+      in
+      "push", spec
   | 0x69 | 0x6b ->
       ("imul", "rw,gw,i")
   | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77
@@ -466,13 +491,15 @@ let format_of_inst_0 (opcode : int) (r : int) : string * string =
       fprintf stderr "fatal: format_of_inst: opcode=%02x r=%d\n" opcode r;
       assert false
 
-let format_of_inst_0f (opcode : int) (r : int) : string * string =
+let format_of_inst_0f (mode : processor_mode) (prefix : int) (opcode : int) (r : int) : string * string =
   match opcode with
-  | 0xa0 -> "push", "'fs"
-  | 0xa8 -> "push", "'gs"
+  | 0xa0 | 0xa1 | 0xa8 | 0xa9 ->
+      let m = if opcode land 1 = 0 then "push" else "pop" in
+      with_operand_size_prefix mode prefix m,
+      [|"'fs";"'gs"|].(opcode lsr 3 land 1)
   | _ -> assert false
 
-let format_of_inst (opcode : int) (r : int) : string * string =
+let format_of_inst (mode : processor_mode) (prefix : int) (opcode : int) (r : int) : string * string =
   let opcode1 = opcode lsr 8 in
   let opcode2 = opcode land 0xff in
   let f =
@@ -481,7 +508,7 @@ let format_of_inst (opcode : int) (r : int) : string * string =
     | 0x0f -> format_of_inst_0f
     | _ -> assert false
   in
-  f opcode2 r
+  f mode prefix opcode2 r
 
 let format_inst opf g i =
   let opcode, r, prefix, mode = decode_opcode opf in
@@ -592,7 +619,7 @@ let format_inst opf g i =
   | 0xfc -> "cld"
   | 0xfd -> "std"
   | _ ->
-      let mne, fmt = format_of_inst opcode r in
+      let mne, fmt = format_of_inst mode prefix opcode r in
       if mne = "" (* invalid instruction *)
       then ""
       else
@@ -633,7 +660,17 @@ let format_inst opf g i =
           | 'a' -> format_r 0
           | 'g' -> format_g false g
           | 'G' -> format_g  true g
-          | 'i' -> string_of_int i
+          | 'i' ->
+              if String.length spec > 1
+              then
+                let prefix =
+                  match spec.[1] with
+                  | '2' -> "word"
+                  | '4' -> "dwrod"
+                  | _ -> raise NotImplemented
+                in
+                sprintf "%s %d" prefix i
+              else string_of_int i
           | 'm' ->
               begin match g with
               | G_reg r -> "R" ^ (string_of_int r) (* TODO proper error handling *)
