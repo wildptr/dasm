@@ -421,7 +421,7 @@ let format_of_inst_0 (opcode : int) (r : int) : string * string =
   | 0x8d ->
       ("lea", "rw,m")
   | 0x8f ->
-      (if r = 0 then "pop" else ""), "gw"
+      (if r = 0 then "pop" else ""), "Gw"
   | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 ->
       ("xchg", "aw,qw")
   | 0xa8 | 0xa9 ->
@@ -461,7 +461,7 @@ let format_of_inst_0 (opcode : int) (r : int) : string * string =
       (m, "g8")
   | 0xff ->
       ([|"inc";"dec";"call";"callf";"jmp";"jmpf";"push";""|].(r),
-       match r with (* call/jmp far *) 3 | 5 -> "m" | _ -> "gw")
+       match r with (* call/jmp far *) 3 | 5 -> "m" | _ -> "Gw")
   | _ ->
       fprintf stderr "fatal: format_of_inst: opcode=%02x r=%d\n" opcode r;
       assert false
