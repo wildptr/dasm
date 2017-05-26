@@ -184,8 +184,7 @@ let read_g_operand (s : char Stream.t) : int * g_operand =
  * 3 = I16
  * 4 = I16I8
  * 5 = I16Iw
- * 6 = I8 abs
- * 7 = Iw abs
+ * 6 = Ia abs
  *)
 let inst_format_table =
   "\x10\x10\x10\x10\x01\x02\x00\x00\x10\x10\x10\x10\x01\x02\x00\x00\
@@ -198,10 +197,10 @@ let inst_format_table =
    \x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01\
    \x11\x12\x11\x11\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x05\x00\x00\x00\x00\x00\
-   \x06\x07\x06\x07\x00\x00\x00\x00\x01\x02\x00\x00\x00\x00\x00\x00\
+   \x06\x06\x06\x06\x00\x00\x00\x00\x01\x02\x00\x00\x00\x00\x00\x00\
    \x01\x01\x01\x01\x01\x01\x01\x01\x02\x02\x02\x02\x02\x02\x02\x02\
    \x11\x11\x03\x00\x10\x10\x11\x12\x04\x00\x03\x00\x00\x01\x00\x00\
-   \x10\x10\x10\x10\x00\x00\x00\x00\x10\x10\x10\x10\x10\x10\x10\x10\
+   \x10\x10\x10\x10\x01\x01\x00\x00\x10\x10\x10\x10\x10\x10\x10\x10\
    \x01\x01\x01\x01\x01\x01\x01\x01\x02\x02\x05\x01\x00\x00\x00\x00\
    \x00\x00\x00\x00\x00\x00\x10\x10\x00\x00\x00\x00\x00\x00\x10\x10"
 
@@ -215,7 +214,7 @@ let inst_format_table_0f =
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
    \x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\
-   \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+   \x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\
    \x00\x00\x00\x00\x00\x00\x10\x10\x00\x00\x00\x00\x00\x00\x10\x10\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
@@ -488,7 +487,9 @@ let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
         assert false
   in
   let alt_data = prefix land (prefix_mask Prefix_66) <> 0 in
+  let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in 
   let word_size = if alt_data then 2 else 4 in
+  let addr_size = if alt_addr then 2 else 4 in
   if inst_format land 0x10 <> 0 (* has g-operand *)
   then
     let r, g = read_g_operand s in
@@ -509,7 +510,9 @@ let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
         end
     | 0xf6 | 0xf7 ->
         if r = 0
-        then Inst_MI (opf, g, read_imm word_size s)
+        then
+          let imm_size = if opcode land 1 = 0 then 1 else word_size in
+          Inst_MI (opf, g, read_imm imm_size s)
         else Inst_M  (opf, g)
     | _ ->
         begin match inst_format land 7 with
@@ -544,12 +547,7 @@ let disassemble (mode : processor_mode) (s : char Stream.t) : inst =
         Inst_II (opf, imm1, imm2)
     | 6 ->
         let g =
-          G_mem { base = None; index = None; disp = read_imm 1 s }
-        in
-        Inst_M (opf, g)
-    | 7 ->
-        let g =
-          G_mem { base = None; index = None; disp = read_imm word_size s }
+          G_mem { base = None; index = None; disp = read_imm addr_size s }
         in
         Inst_M (opf, g)
     | _ -> assert false
@@ -682,6 +680,10 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
       let m = mnemonics_rol.(r) in
       let s = [|"g1,'1";"gw,'1";"g1,'cl";"gw,'cl"|].(opcode land 3) in
       Some (m, s)
+  | 0xd4 | 0xd5 ->
+      let m = if opcode land 1 = 0 then "aam" else "aad" in
+      Some (m, "i")
+  | 0xd6 -> None
   | 0xd8 | 0xd9 | 0xda | 0xdb | 0xdc | 0xdd | 0xde | 0xdf ->
       fpu_mnem_table1.((opcode land 7) lsl 3 lor r)
   | 0xe0 | 0xe1 | 0xe2 | 0xe3 ->
@@ -693,6 +695,10 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
   | 0xe8 | 0xe9 | 0xeb ->
       let m = if opcode land 1 = 0 then "call" else "jmp" in
       Some (m, "o")
+  | 0xec | 0xed | 0xee | 0xef ->
+      let m = if opcode land 2 = 0 then "in" else "out" in
+      let s = if opcode land 1 = 0 then "a1,'dx" else "aw,'dx" in
+      Some (m, s)
   | 0xf6 | 0xf7 ->
       if r = 1 then None
       else
@@ -722,7 +728,7 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
           | 1 -> "dec"
           | _ -> assert false
         in
-        Some (m, "g8")
+        Some (m, "g1")
   | 0xff ->
       let m = [|"inc";"dec";"call";"callf";"jmp";"jmpf";"push";""|].(r) in
       let s =
@@ -741,6 +747,9 @@ let format_of_inst_0f (mode : processor_mode) (prefix : int) (opcode : int) (r :
   | 0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87
   | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f ->
       Some ("j"^cond_code.(opcode land 15), "o")
+  | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97
+  | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f ->
+      Some ("set"^cond_code.(opcode land 15), "g1")
   | 0xa0 | 0xa1 | 0xa8 | 0xa9 ->
       let m = if opcode land 1 = 0 then "push" else "pop" in
       let s = [|"'fs";"'gs"|].(opcode lsr 3 land 1) in
@@ -882,8 +891,6 @@ let format_inst opf g i =
   | 0xcc -> "int3"
   | 0xce -> "into"
   | 0xcf -> "iret"
-  | 0xd4 -> "aam"
-  | 0xd5 -> "aad"
   | 0xd7 -> "xlat"
   | 0xf1 -> "int1"
   | 0xf4 -> "hlt"
@@ -913,7 +920,9 @@ let format_inst opf g i =
                 | Mode64bit, false -> 4
                 | Mode64bit, true  -> 2
                 end
-            | _ -> assert false
+            | _ ->
+                fprintf stderr "invalid spec: %s\n" spec;
+                assert false
           in
           let format_r (r : int) : string =
             let gpr_set = gpr_set_of_reg_operand mode (data_size spec.[1]) in
