@@ -77,6 +77,7 @@ let format_size = function
   | 4 -> "dword"
   | 8 -> "qword"
   | 10 -> "tword"
+  | 16 -> "oword"
   | _ -> assert false
 
 let format_mem_operand (addr_reg_set : gpr_set) (size_opt : int option) (m : mem_operand) : string =
@@ -235,7 +236,7 @@ let inst_format_table =
 
 let inst_format_table_0f =
   "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
-   \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
+   \x10\x10\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
@@ -407,13 +408,15 @@ let fpu_mnem_table2 : fpu_inst_format array =
     FPU_A "";
   |]
 
-type inst =
-  | Inst_N   of int
-  | Inst_I   of int * int
-  | Inst_II  of int * int * int
-  | Inst_M   of int * g_operand
-  | Inst_MI  of int * g_operand * int
-  | Inst_MII of int * g_operand * int * int
+type inst_operand =
+  | Op_N
+  | Op_I   of int
+  | Op_II  of int * int
+  | Op_M   of g_operand
+  | Op_MI  of g_operand * int
+  | Op_MII of g_operand * int * int
+
+type inst = int * int * inst_operand
 
 type prefix =
   | Prefix_26
@@ -504,6 +507,8 @@ let decode_opcode opf =
    decode_processor_mode (opf land 3))
 
 let disassemble (mode : processor_mode) (s : Char_stream.t) : inst =
+  let start_pos = Char_stream.pos s in
+  let inst_len () = (Char_stream.pos s) - start_pos in
   let prefix, opcode = read_prefix_and_opcode s in
   let inst_format =
     let opcode1 = opcode lsr 8 in
@@ -530,56 +535,65 @@ let disassemble (mode : processor_mode) (s : Char_stream.t) : inst =
         | G_reg r' ->
             let opcode2 = (3 lsl 3 lor r) lsl 3 lor r' in
             let opf' = encode_opcode (opcode lsl 8 lor opcode2) 0 prefix mode in
-            begin match fpu_mnem_table2.(index) with
-            | FPU_A _ -> Inst_M (opf', g)
-            | FPU_B _ -> Inst_N opf'
-            end
-        | G_mem _ ->
-            Inst_M (opf, g)
+            let operand =
+              match fpu_mnem_table2.(index) with
+              | FPU_A _ -> Op_M g
+              | FPU_B _ -> Op_N
+            in
+            opf', inst_len (), operand
+        | G_mem _ -> opf, inst_len (), Op_M g
         end
     | 0xf6 | 0xf7 ->
-        if r = 0
-        then
-          let imm_size = if opcode land 1 = 0 then 1 else word_size in
-          Inst_MI (opf, g, read_imm imm_size s)
-        else Inst_M  (opf, g)
+        let operand =
+          if r = 0
+          then
+            let imm_size = if opcode land 1 = 0 then 1 else word_size in
+            Op_MI (g, read_imm imm_size s)
+          else Op_M g
+        in
+        opf, inst_len (), operand
     | _ ->
-        begin match inst_format land 7 with
-        | 0 -> Inst_M   (opf, g)
-        | 1 -> Inst_MI  (opf, g, read_imm 1 s)
-        | 2 -> Inst_MI  (opf, g, read_imm word_size s)
-        | 3 -> Inst_MI  (opf, g, read_imm 2 s)
-        | 4 ->
-            let imm1 = read_imm 2 s in
-            let imm2 = read_imm 1 s in
-            Inst_MII (opf, g, imm1, imm2)
-        | 5 ->
-            let imm1 = read_imm 2 s in
-            let imm2 = read_imm word_size s in
-            Inst_MII (opf, g, imm1, imm2)
-        | _ -> assert false
-        end
+        let operand =
+          match inst_format land 7 with
+          | 0 -> Op_M g
+          | 1 -> Op_MI (g, read_imm 1 s)
+          | 2 -> Op_MI (g, read_imm word_size s)
+          | 3 -> Op_MI (g, read_imm 2 s)
+          | 4 ->
+              let imm1 = read_imm 2 s in
+              let imm2 = read_imm 1 s in
+              Op_MII (g, imm1, imm2)
+          | 5 ->
+              let imm1 = read_imm 2 s in
+              let imm2 = read_imm word_size s in
+              Op_MII (g, imm1, imm2)
+          | _ -> assert false
+        in
+        opf, inst_len (), operand
   else
     let opf = encode_opcode opcode 0 prefix mode in
-    match inst_format land 7 with
-    | 0 -> Inst_N  (opf)
-    | 1 -> Inst_I  (opf, read_imm 1 s)
-    | 2 -> Inst_I  (opf, read_imm word_size s)
-    | 3 -> Inst_I  (opf, read_imm 2 s)
-    | 4 ->
-        let imm1 = read_imm 2 s in
-        let imm2 = read_imm 1 s in
-        Inst_II (opf, imm1, imm2)
-    | 5 ->
-        let imm1 = read_imm 2 s in
-        let imm2 = read_imm word_size s in
-        Inst_II (opf, imm1, imm2)
-    | 6 ->
-        let g =
-          G_mem { base = None; index = None; disp = read_imm addr_size s }
-        in
-        Inst_M (opf, g)
-    | _ -> assert false
+    let operand =
+      match inst_format land 7 with
+      | 0 -> Op_N
+      | 1 -> Op_I (read_imm 1 s)
+      | 2 -> Op_I (read_imm word_size s)
+      | 3 -> Op_I (read_imm 2 s)
+      | 4 ->
+          let imm1 = read_imm 2 s in
+          let imm2 = read_imm 1 s in
+          Op_II (imm1, imm2)
+      | 5 ->
+          let imm1 = read_imm 2 s in
+          let imm2 = read_imm word_size s in
+          Op_II (imm1, imm2)
+      | 6 ->
+          let g =
+            G_mem { base = None; index = None; disp = read_imm addr_size s }
+          in
+          Op_M g
+      | _ -> assert false
+    in
+    opf, inst_len (), operand
 
 let mnemonics_add = [|"add";"or" ;"adc";"sbb";"and";"sub";"xor";"cmp"|]
 let mnemonics_rol = [|"rol";"ror";"rcl";"rcr";"shl";"shr";""   ;"sar"|]
@@ -608,48 +622,104 @@ let seg_reg_name =
 (* r is ModRM[5:3] *)
 (* returns None if (opcode, r) does not denote a valid instruction *)
 let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : int) : (string * string) option =
-  (* let () = printf "; format_of_inst: opcode=%02x r=%d\n" opcode r in *)
+  let has_prefix_66 () = prefix land (prefix_mask Prefix_66) <> 0 in
+  let word_size () =
+    match mode, has_prefix_66 () with
+    | Mode16bit, false
+    | Mode32bit, true
+    | Mode64bit, true -> 2
+    | Mode16bit, true
+    | Mode32bit, false
+    | Mode64bit, false -> 4
+  in
+  let fmt_00 () =
+    let formats = [|"g1,r1";"gw,rw";"r1,g1";"rw,gw";"a1,i";"aw,i"|] in
+    Some (mnemonics_add.(opcode lsr 3), formats.(opcode land 7))
+  in
+  let fmt_06 () =
+    let m = if opcode land 1 = 0 then "push" else "pop" in
+    Some (with_operand_size_prefix mode prefix m, [|"'es";"'cs";"'ss";"'ds"|].(opcode lsr 3))
+  in
+  let fmt_68 () =
+    let spec =
+      if prefix land (prefix_mask Prefix_66) <> 0
+      then
+        match mode with
+        | Mode16bit -> "i4"
+        | Mode32bit
+        | Mode64bit -> "i2"
+      else "i"
+    in
+    Some ("push", spec)
+  in
+  let fmt_80 () =
+    Some (mnemonics_add.(r), if opcode land 1 = 0 then "G1,i" else "Gw,i")
+  in
+  let fmt_e8 () =
+    let m = if opcode land 1 = 0 then "call" else "jmp" in
+    Some (m, "o")
+  in
   match opcode with
-  | 0x00 | 0x01 | 0x02 | 0x03 | 0x04 | 0x05
-  | 0x08 | 0x09 | 0x0a | 0x0b | 0x0c | 0x0d
-  | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x15
-  | 0x18 | 0x19 | 0x1a | 0x1b | 0x1c | 0x1d
-  | 0x20 | 0x21 | 0x22 | 0x23 | 0x24 | 0x25
-  | 0x28 | 0x29 | 0x2a | 0x2b | 0x2c | 0x2d
-  | 0x30 | 0x31 | 0x32 | 0x33 | 0x34 | 0x35
-  | 0x38 | 0x39 | 0x3a | 0x3b | 0x3c | 0x3d ->
-      let formats = [|"g1,r1";"gw,rw";"r1,g1";"rw,gw";"a1,i";"aw,i"|] in
-      Some (mnemonics_add.(opcode lsr 3), formats.(opcode land 7))
-  | 0x06 | 0x07 | 0x0e | 0x16 | 0x17 | 0x1e | 0x1f ->
-      let m = if opcode land 1 = 0 then "push" else "pop" in
-      Some (with_operand_size_prefix mode prefix m, [|"'es";"'cs";"'ss";"'ds"|].(opcode lsr 3))
+  | 0x00 | 0x01 | 0x02 | 0x03 | 0x04 | 0x05 -> fmt_00 ()
+  | 0x06 | 0x07 -> fmt_06 ()
+  | 0x08 | 0x09 | 0x0a | 0x0b | 0x0c | 0x0d -> fmt_00 ()
+  | 0x0e -> fmt_06 ()
+  | 0x0f -> assert false
+  | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x15 -> fmt_00 ()
+  | 0x16 | 0x17 -> fmt_06 ()
+  | 0x18 | 0x19 | 0x1a | 0x1b | 0x1c | 0x1d -> fmt_00 ()
+  | 0x1e | 0x1f -> fmt_06 ()
+  | 0x20 | 0x21 | 0x22 | 0x23 | 0x24 | 0x25 -> fmt_00 ()
+  | 0x26 -> assert false (* prefix *)
+  | 0x27 -> Some ("daa", "")
+  | 0x28 | 0x29 | 0x2a | 0x2b | 0x2c | 0x2d -> fmt_00 ()
+  | 0x2e -> assert false (* prefix *)
+  | 0x2f -> Some ("das", "")
+  | 0x30 | 0x31 | 0x32 | 0x33 | 0x34 | 0x35 -> fmt_00 ()
+  | 0x36 -> assert false (* prefix *)
   | 0x37 -> Some ("aaa", "")
+  | 0x38 | 0x39 | 0x3a | 0x3b | 0x3c | 0x3d -> fmt_00 ()
+  | 0x3e -> assert false (* prefix *)
+  | 0x3f -> Some ("aas", "")
   | 0x40 | 0x41 | 0x42 | 0x43 | 0x44 | 0x45 | 0x46 | 0x47
   | 0x48 | 0x49 | 0x4a | 0x4b | 0x4c | 0x4d | 0x4e | 0x4f
   | 0x50 | 0x51 | 0x52 | 0x53 | 0x54 | 0x55 | 0x56 | 0x57
   | 0x58 | 0x59 | 0x5a | 0x5b | 0x5c | 0x5d | 0x5e | 0x5f ->
       Some ([|"inc";"dec";"push";"pop"|].(opcode lsr 3 land 3), "qw")
+  | 0x60 | 0x61 ->
+      let m = if opcode land 1 = 0 then "pusha" else "popa" in
+      Some (with_operand_size_prefix mode prefix m, "")
   | 0x62 -> Some ("bound", "rw,m")
   | 0x63 -> Some ("arpl", "g2,r2")
-  | 0x68 | 0x6a ->
-      let spec =
-        if prefix land (prefix_mask Prefix_66) <> 0
-        then
-          match mode with
-          | Mode16bit -> "i4"
-          | Mode32bit
-          | Mode64bit -> "i2"
-        else "i"
+  | 0x64 | 0x65 | 0x66 | 0x67 -> assert false (* prefix *)
+  | 0x68 -> fmt_68 ()
+  | 0x69 -> Some ("imul", sprintf "rw,gw,i%d" (word_size ()))
+  | 0x6a -> fmt_68 ()
+  | 0x6b -> Some ("imul", "rw,gw,i1")
+  | 0x6c -> Some ("insb", "")
+  | 0x6d ->
+      let m =
+        match word_size () with
+        | 2 -> "insw"
+        | 4 -> "insd"
+        | _ -> assert false
       in
-      Some ("push", spec)
-  | 0x69 | 0x6b ->
-      Some ("imul", "rw,gw,i")
+      Some (m, "")
+  | 0x6e -> Some ("outsb", "")
+  | 0x6f ->
+      let m =
+        match word_size () with
+        | 2 -> "outsw"
+        | 4 -> "outsd"
+        | _ -> assert false
+      in
+      Some (m, "")
   | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77
   | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e | 0x7f ->
       Some ("j"^cond_code.(opcode land 15), "o")
-  | 0x80 | 0x81 | 0x83 ->
-      Some (mnemonics_add.(r), if opcode land 1 = 0 then "G1,i" else "Gw,i")
+  | 0x80 | 0x81 -> fmt_80 ()
   | 0x82 -> None (* canonical opcode is 0x80 *)
+  | 0x83 -> fmt_80 ()
   | 0x84 | 0x85 | 0x86 | 0x87 ->
       let m = if opcode land 2 = 0 then "test" else "xchg" in
       let s = if opcode land 1 = 0 then "g1,r1" else "gw,rw" in
@@ -670,7 +740,21 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
       else None
   | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 ->
       Some ("xchg", "aw,qw")
+  | 0x98 -> Some ("cbw", "")
+  | 0x99 ->
+      let m =
+        match word_size () with
+        | 2 -> "cwd"
+        | 4 -> "cdq"
+        | _ -> assert false
+      in
+      Some (m, "")
   | 0x9a -> Some ("call", "p")
+  | 0x9b -> Some ("wait", "")
+  | 0x9c -> Some ("pushf", "")
+  | 0x9d -> Some ("popf", "")
+  | 0x9e -> Some ("sahf", "")
+  | 0x9f -> Some ("lahf", "")
   | 0xa0 | 0xa1 | 0xa2 | 0xa3 ->
       let spec =
         match opcode with
@@ -681,8 +765,53 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
         | _ -> assert false
       in
       Some ("mov", spec)
+  | 0xa4 -> Some ("movsb", "")
+  | 0xa5 ->
+      let m =
+        match word_size () with
+        | 2 -> "movsw"
+        | 4 -> "movsd"
+        | _ -> assert false
+      in
+      Some (m, "")
+  | 0xa6 -> Some ("cmpsb", "")
+  | 0xa7 ->
+      let m =
+        match word_size () with
+        | 2 -> "cmpsw"
+        | 4 -> "cmpsd"
+        | _ -> assert false
+      in
+      Some (m, "")
   | 0xa8 | 0xa9 ->
       Some ("test", if opcode land 1 = 0 then "a1,i" else "aw,i")
+  | 0xaa -> Some ("stosb", "")
+  | 0xab ->
+      let m =
+        match word_size () with
+        | 2 -> "stosw"
+        | 4 -> "stosd"
+        | _ -> assert false
+      in
+      Some (m, "")
+  | 0xac -> Some ("lodsb", "")
+  | 0xad ->
+      let m =
+        match word_size () with
+        | 2 -> "lodsw"
+        | 4 -> "lodsd"
+        | _ -> assert false
+      in
+      Some (m, "")
+  | 0xae -> Some ("scasb", "")
+  | 0xaf ->
+      let m =
+        match word_size () with
+        | 2 -> "scasw"
+        | 4 -> "scasd"
+        | _ -> assert false
+      in
+      Some (m, "")
   | 0xb0 | 0xb1 | 0xb2 | 0xb3 | 0xb4 | 0xb5 | 0xb6 | 0xb7
   | 0xb8 | 0xb9 | 0xba | 0xbb | 0xbc | 0xbd | 0xbe | 0xbf ->
       Some ("mov", if opcode land 8 = 0 then "q1,i" else "qw,i")
@@ -691,8 +820,8 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
       if m = ""
       then None
       else Some (m, if opcode land 1 = 0 then "G1,i" else "Gw,i")
-  | 0xc2 ->
-      Some ("ret", "i")
+  | 0xc2 -> Some ("ret", "i")
+  | 0xc3 -> Some ("ret", "")
   | 0xc4 | 0xc5 ->
       Some ((if opcode land 1 = 0 then "les" else "lds"), "rw,m")
   | 0xc6 | 0xc7 ->
@@ -702,10 +831,13 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
         Some ("mov", s)
       else None
   | 0xc8 -> Some ("enter", "i,j")
-  | 0xca ->
-      Some ("retf", "i")
-  | 0xcd ->
-      Some ("int", "i")
+  | 0xc9 -> Some ("leave", "")
+  | 0xca -> Some ("retf", "i")
+  | 0xcb -> Some ("retf", "")
+  | 0xcc -> Some ("int3", "")
+  | 0xcd -> Some ("int", "i")
+  | 0xce -> Some ("into", "")
+  | 0xcf -> Some ("iret", "")
   | 0xd0 | 0xd1 | 0xd2 | 0xd3 ->
       let m = mnemonics_rol.(r) in
       if m = ""
@@ -717,6 +849,7 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
       let m = if opcode land 1 = 0 then "aam" else "aad" in
       Some (m, "i")
   | 0xd6 -> None
+  | 0xd7 -> Some ("xlat", "")
   | 0xd8 | 0xd9 | 0xda | 0xdb | 0xdc | 0xdd | 0xde | 0xdf ->
       fpu_mnem_table1.((opcode land 7) lsl 3 lor r)
   | 0xe0 | 0xe1 | 0xe2 | 0xe3 ->
@@ -725,14 +858,18 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
       let m = if opcode land 2 = 0 then "in" else "out" in
       let s = if opcode land 1 = 0 then "a1,i" else "aw,i" in
       Some (m, s)
-  | 0xe8 | 0xe9 | 0xeb ->
-      let m = if opcode land 1 = 0 then "call" else "jmp" in
-      Some (m, "o")
+  | 0xe8 | 0xe9 -> fmt_e8 ()
   | 0xea -> Some ("jmp", "p")
+  | 0xeb -> fmt_e8 ()
   | 0xec | 0xed | 0xee | 0xef ->
       let m = if opcode land 2 = 0 then "in" else "out" in
       let s = if opcode land 1 = 0 then "a1,'dx" else "aw,'dx" in
       Some (m, s)
+  | 0xf0 -> assert false (* prefix *)
+  | 0xf1 -> Some ("int1", "")
+  | 0xf2 | 0xf3 -> assert false (* prefix *)
+  | 0xf4 -> Some ("hlt", "")
+  | 0xf5 -> Some ("cmc", "")
   | 0xf6 | 0xf7 ->
       if r = 1 then None
       else
@@ -753,6 +890,12 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
           else (if r = 0 then "Gw,i" else "Gw")
         in
         Some (m, s)
+  | 0xf8 -> Some ("clc", "")
+  | 0xf9 -> Some ("stc", "")
+  | 0xfa -> Some ("cli", "")
+  | 0xfb -> Some ("sti", "")
+  | 0xfc -> Some ("cld", "")
+  | 0xfd -> Some ("std", "")
   | 0xfe ->
       if r >= 2 then None
       else
@@ -762,7 +905,7 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
           | 1 -> "dec"
           | _ -> assert false
         in
-        Some (m, "g1")
+        Some (m, "G1")
   | 0xff ->
       let m = [|"inc";"dec";"call";"callf";"jmp";"jmpf";"push";""|].(r) in
       let s =
@@ -772,12 +915,13 @@ let format_of_inst_0 (mode : processor_mode) (prefix : int) (opcode : int) (r : 
         | _ -> "Gw"
       in
       Some (m, s)
-  | _ ->
-      fprintf stderr "fatal: format_of_inst: opcode=%02x r=%d\n" opcode r;
-      assert false
+  | _ -> assert false
 
 let format_of_inst_0f (mode : processor_mode) (prefix : int) (opcode : int) (_ : int) : (string * string) option =
   match opcode with
+  | 0x10 | 0x11 ->
+      let s = if opcode land 1 = 0 then "x,X" else "X,x" in
+      Some ("movups", s)
   | 0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87
   | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f ->
       Some ("j"^cond_code.(opcode land 15), "o")
@@ -788,6 +932,7 @@ let format_of_inst_0f (mode : processor_mode) (prefix : int) (opcode : int) (_ :
       let m = if opcode land 1 = 0 then "push" else "pop" in
       let s = [|"'fs";"'gs"|].(opcode lsr 3 land 1) in
       Some (with_operand_size_prefix mode prefix m, s)
+  | 0xaf -> Some ("imul", "rw,gw")
   | 0xb6 | 0xb7 | 0xbe | 0xbf ->
       let m = if opcode lsr 3 land 1 = 0 then "movzx" else "movsx" in
       if opcode land 1 = 0
@@ -800,7 +945,6 @@ let format_of_inst_0f (mode : processor_mode) (prefix : int) (opcode : int) (_ :
             Some (m, "r4,g2")
         | _ -> None
         end
-  | 0xaf -> Some ("imul", "rw,gw")
   | _ ->
       let err = sprintf "unknown opcode: 0f %02x" opcode in
       failwith err
@@ -833,234 +977,145 @@ type inst_imm =
   | Imm1 of int
   | Imm2 of int * int
 
-let format_inst opf g imm =
+let string_of_inst (inst : inst) : string =
+  let opf, len, operand = inst in
+  let g, imm =
+    match operand with
+    | Op_N -> G_reg 0, Imm1 0
+    | Op_I i -> G_reg 0, Imm1 i
+    | Op_II (i1, i2) -> G_reg 0, Imm2 (i1, i2)
+    | Op_M g -> g, Imm1 0
+    | Op_MI (g, i) -> g, Imm1 i
+    | Op_MII (g, i1, i2) -> g, Imm2 (i1, i2)
+  in
   let opcode, r, prefix, mode = decode_opcode opf in
   let alt_data = prefix land (prefix_mask Prefix_66) <> 0 in
   let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in
-  let word_size =
-    match mode, alt_data with
-    | Mode16bit, false
-    | Mode32bit,  true
-    | Mode64bit,  true -> Reg16bit
-    | Mode16bit,  true
-    | Mode32bit, false
-    | Mode64bit, false -> Reg32bit
-  in
-  match opcode with
-  | 0x27 -> "daa"
-  | 0x2f -> "das"
-  | 0x3f -> "aas"
-  | 0x60 ->
-      begin match word_size with
-      | Reg16bit -> "pusha"
-      | Reg32bit -> "pushad"
-      | _ -> failwith "TODO"
-      end
-  | 0x61 ->
-      begin match word_size with
-      | Reg16bit -> "popa"
-      | Reg32bit -> "popad"
-      | _ -> failwith "TODO"
-      end
-  | 0x6c -> "insb"
-  | 0x6d ->
-      begin match word_size with
-      | Reg16bit -> "insw"
-      | Reg32bit -> "insd"
-      | _ -> failwith "TODO"
-      end
-  | 0x6e -> "outsb"
-  | 0x6f ->
-      begin match word_size with
-      | Reg16bit -> "outsw"
-      | Reg32bit -> "outsd"
-      | _ -> failwith "TODO"
-      end
-  | 0x98 -> "cbw"
-  | 0x99 ->
-      begin match word_size with
-      | Reg16bit -> "cwd"
-      | Reg32bit -> "cdq"
-      | _ -> failwith "TODO"
-      end
-  | 0x9b -> "wait"
-  | 0x9c -> "pushf"
-  | 0x9d -> "popf"
-  | 0x9e -> "sahf"
-  | 0x9f -> "lahf"
-  | 0xa4 -> "movsb"
-  | 0xa5 ->
-      begin match word_size with
-      | Reg16bit -> "movsw"
-      | Reg32bit -> "movsd"
-      | _ -> failwith "TODO"
-      end
-  | 0xa6 -> "cmpsb"
-  | 0xa7 ->
-      begin match word_size with
-      | Reg16bit -> "cmpsw"
-      | Reg32bit -> "cmpsd"
-      | _ -> failwith "TODO"
-      end
-  | 0xaa -> "stosb"
-  | 0xab ->
-      begin match word_size with
-      | Reg16bit -> "stosw"
-      | Reg32bit -> "stosd"
-      | _ -> failwith "TODO"
-      end
-  | 0xac -> "lodsb"
-  | 0xad ->
-      begin match word_size with
-      | Reg16bit -> "lodsw"
-      | Reg32bit -> "lodsd"
-      | _ -> failwith "TODO"
-      end
-  | 0xae -> "scasb"
-  | 0xaf ->
-      begin match word_size with
-      | Reg16bit -> "scasw"
-      | Reg32bit -> "scasd"
-      | _ -> failwith "TODO"
-      end
-  | 0xc3 -> "ret"
-  | 0xc9 -> "leave"
-  | 0xcb -> "retf"
-  | 0xcc -> "int3"
-  | 0xce -> "into"
-  | 0xcf -> "iret"
-  | 0xd7 -> "xlat"
-  | 0xf1 -> "int1"
-  | 0xf4 -> "hlt"
-  | 0xf5 -> "cmc"
-  | 0xf8 -> "clc"
-  | 0xf9 -> "stc"
-  | 0xfa -> "cli"
-  | 0xfb -> "sti"
-  | 0xfc -> "cld"
-  | 0xfd -> "std"
-  | _ ->
-      let format_opt = format_of_inst mode prefix opcode r in
-      begin match format_opt with
-      | None -> "<invalid instruction>"
-      | Some (mne, fmt) ->
-        let format_operand spec =
-          let data_size = function
-            | '1' -> 1
-            | '2' -> 2
-            | '4' -> 4
-            | 'w' ->
-                begin match mode, alt_data with
-                | Mode16bit, false -> 2
-                | Mode16bit, true  -> 4
-                | Mode32bit, false -> 4
-                | Mode32bit, true  -> 2
-                | Mode64bit, false -> 4
-                | Mode64bit, true  -> 2
-                end
-            | _ ->
-                fprintf stderr "invalid spec: %s\n" spec;
-                assert false
-          in
-          let format_r (r : int) : string =
-            let gpr_set = gpr_set_of_reg_operand mode (data_size spec.[1]) in
-            gpr_name gpr_set r
-          in
-          let format_g (mem_is_sized : bool) (g : g_operand) : string =
-            match g with
-            | G_reg r -> format_r r
-            | G_mem m ->
-                let size_opt = if mem_is_sized then Some (data_size spec.[1]) else None in
-                let addr_reg_set = gpr_set_of_addr_reg mode alt_addr in
-                format_mem_operand addr_reg_set size_opt m
-          in
-          let extract_size spec =
-            let len = String.length spec in
-            if len > 1
-            then Some (int_of_string (String.sub spec ~pos:1 ~len:(len-1)))
-            else None
-          in
-          let format_imm i =
-            let size_opt = extract_size spec in
-            begin match size_opt with
-            | Some size -> sprintf "%s %d" (format_size size) i
-            | None -> string_of_int i
+  let format_opt = format_of_inst mode prefix opcode r in
+  begin match format_opt with
+  | None -> "<invalid instruction>"
+  | Some (mne, fmt) ->
+    let format_operand spec =
+      let data_size = function
+        | '1' -> 1
+        | '2' -> 2
+        | '4' -> 4
+        | 'w' ->
+            begin match mode, alt_data with
+            | Mode16bit, false -> 2
+            | Mode16bit, true  -> 4
+            | Mode32bit, false -> 4
+            | Mode32bit, true  -> 2
+            | Mode64bit, false -> 4
+            | Mode64bit, true  -> 2
             end
-          in
-          match spec.[0] with
-          | 'a' -> format_r 0
-          | 'f' ->
-              begin match g with
-              | G_reg r -> sprintf "st%d" r
-              | G_mem _ -> assert false
-              end
-          | 'g' -> format_g false g
-          | 'G' -> format_g  true g
-          | 'i' ->
-              begin match imm with
-              | Imm1 i -> format_imm i
-              | Imm2 (i1, _) -> format_imm i1
-              end
-          | 'j' ->
-              begin match imm with
-              | Imm2 (_, i2) -> format_imm i2
-              | _ -> assert false
-              end
-          | 'm' ->
-              begin match g with
-              | G_reg r -> "R" ^ (string_of_int r) (* TODO proper error handling *)
-              | G_mem m ->
-                  let size_opt =
-                    let len = String.length spec in
-                    if len > 1
-                    then Some (int_of_string (String.sub spec ~pos:1 ~len:(len-1)))
-                    else None
-                  in
-                  format_mem_operand (gpr_set_of_addr_reg mode alt_addr) size_opt m
-              end
-          | 'o' ->
-              begin match imm with
-              | Imm1 i -> if i = 0 then "$" else sprintf "$%+d" i
-              | _ -> assert false
-              end
-          | 'p' ->
-              (* far pointer *)
-              begin match imm with
-              | Imm2 (i1, i2) -> sprintf "0x%x:0x%x" i1 i2
-              | _ -> assert false
-              end
-          | 'q' -> format_r (opcode land 7)
-          | 'r' -> format_r r
-          | '\'' -> String.sub spec ~pos:1 ~len:(String.length spec - 1)
+        | _ ->
+            fprintf stderr "invalid spec: %s\n" spec;
+            assert false
+      in
+      let format_r (r : int) : string =
+        let gpr_set = gpr_set_of_reg_operand mode (data_size spec.[1]) in
+        gpr_name gpr_set r
+      in
+      let format_g (mem_is_sized : bool) (g : g_operand) : string =
+        match g with
+        | G_reg r -> format_r r
+        | G_mem m ->
+            let size_opt = if mem_is_sized then Some (data_size spec.[1]) else None in
+            let addr_reg_set = gpr_set_of_addr_reg mode alt_addr in
+            format_mem_operand addr_reg_set size_opt m
+      in
+      let extract_size spec =
+        let len = String.length spec in
+        if len > 1
+        then Some (int_of_string (String.sub spec ~pos:1 ~len:(len-1)))
+        else None
+      in
+      let format_imm i =
+        let size_opt = extract_size spec in
+        begin match size_opt with
+        | Some size -> sprintf "%s %d" (format_size size) i
+        | None -> string_of_int i
+        end
+      in
+      match spec.[0] with
+      | 'a' -> format_r 0
+      | 'f' ->
+          begin match g with
+          | G_reg r -> sprintf "st%d" r
+          | G_mem _ -> assert false
+          end
+      | 'g' -> format_g false g
+      | 'G' -> format_g  true g
+      | 'i' ->
+          begin match imm with
+          | Imm1 i -> format_imm i
+          | Imm2 (i1, _) -> format_imm i1
+          end
+      | 'j' ->
+          begin match imm with
+          | Imm2 (_, i2) -> format_imm i2
           | _ -> assert false
-        in
-        if fmt = "" then mne
-        else
-          sprintf "%s %s" mne
-            begin
-              String.split ~on:',' fmt |>
-              List.map ~f:format_operand |>
-              String.concat ~sep:","
-            end
-      end
+          end
+      | 'm' ->
+          begin match g with
+          | G_reg r -> "R" ^ (string_of_int r) (* TODO proper error handling *)
+          | G_mem m ->
+              let size_opt =
+                let len = String.length spec in
+                if len > 1
+                then Some (int_of_string (String.sub spec ~pos:1 ~len:(len-1)))
+                else None
+              in
+              format_mem_operand (gpr_set_of_addr_reg mode alt_addr) size_opt m
+          end
+      | 'o' ->
+          begin match imm with
+          | Imm1 i ->
+              let disp = i + len in
+              if disp = 0 then "$" else sprintf "$%+d" disp
+          | _ -> assert false
+          end
+      | 'p' ->
+          (* far pointer *)
+          begin match imm with
+          | Imm2 (i1, i2) -> sprintf "0x%x:0x%x" i1 i2
+          | _ -> assert false
+          end
+      | 'q' -> format_r (opcode land 7)
+      | 'r' -> format_r r
+      | 'x' -> sprintf "xmm%d" r
+      | 'X' ->
+          begin match g with
+          | G_reg r -> sprintf "xmm%d" r
+          | G_mem m ->
+              let addr_reg_set = gpr_set_of_addr_reg mode alt_addr in
+              format_mem_operand addr_reg_set (Some 16) m
+          end
+      | '\'' -> String.sub spec ~pos:1 ~len:(String.length spec - 1)
+      | _ -> assert false
+    in
+    if fmt = "" then mne
+    else
+      sprintf "%s %s" mne
+        begin
+          String.split ~on:',' fmt |>
+          List.map ~f:format_operand |>
+          String.concat ~sep:","
+        end
+  end
 
-let string_of_inst : inst -> string =
-  function
-  | Inst_N opf ->
-      format_inst opf (G_reg 0) (Imm1 0)
-  | Inst_I (opf, imm) ->
-      format_inst opf (G_reg 0) (Imm1 imm)
-  | Inst_II (opf, imm1, imm2) ->
-      format_inst opf (G_reg 0) (Imm2 (imm1, imm2))
-  | Inst_M (opf, g) ->
-      format_inst opf g (Imm1 0)
-  | Inst_MI (opf, g, imm) ->
-      format_inst opf g (Imm1 imm)
-  | Inst_MII (opf, g, imm1, imm2) ->
-      format_inst opf g (Imm2 (imm1, imm2))
+let opf_of_inst (inst : inst) : int =
+  let opf, _, _ = inst in
+  opf
 
 let inst_valid (inst : inst) : bool =
-  (string_of_inst inst).[0] <> '<'
+  let opf = opf_of_inst inst in
+  let opcode, r, prefix, mode = decode_opcode opf in
+  let format_opt = format_of_inst mode prefix opcode r in
+  match format_opt with
+  | None -> false
+  | Some _ -> true
 
 let () =
   let in_path = Sys.argv.(1) in
