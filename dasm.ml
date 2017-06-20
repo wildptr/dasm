@@ -1,4 +1,4 @@
-open Core_kernel.Std
+open Batteries
 open Printf
 
 type processor_mode =
@@ -521,7 +521,7 @@ let disassemble (mode : processor_mode) (s : Char_stream.t) : inst =
         assert false
   in
   let alt_data = prefix land (prefix_mask Prefix_66) <> 0 in
-  let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in 
+  let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in
   let word_size = if alt_data then 2 else 4 in
   let addr_size = if alt_addr then 2 else 4 in
   if inst_format land 0x10 <> 0 (* has g-operand *)
@@ -1028,7 +1028,7 @@ let string_of_inst (inst : inst) : string =
       let extract_size spec =
         let len = String.length spec in
         if len > 1
-        then Some (int_of_string (String.sub spec ~pos:1 ~len:(len-1)))
+        then Some (int_of_string (String.sub spec 1 (len-1)))
         else None
       in
       let format_imm i =
@@ -1064,7 +1064,7 @@ let string_of_inst (inst : inst) : string =
               let size_opt =
                 let len = String.length spec in
                 if len > 1
-                then Some (int_of_string (String.sub spec ~pos:1 ~len:(len-1)))
+                then Some (int_of_string (String.sub spec 1 (len-1)))
                 else None
               in
               format_mem_operand (gpr_set_of_addr_reg mode alt_addr) size_opt m
@@ -1092,16 +1092,16 @@ let string_of_inst (inst : inst) : string =
               let addr_reg_set = gpr_set_of_addr_reg mode alt_addr in
               format_mem_operand addr_reg_set (Some 16) m
           end
-      | '\'' -> String.sub spec ~pos:1 ~len:(String.length spec - 1)
+      | '\'' -> String.sub spec 1 (String.length spec - 1)
       | _ -> assert false
     in
     if fmt = "" then mne
     else
       sprintf "%s %s" mne
         begin
-          String.split ~on:',' fmt |>
-          List.map ~f:format_operand |>
-          String.concat ~sep:","
+          String.split_on_char ',' fmt |>
+          List.map format_operand |>
+          String.concat ","
         end
   end
 
@@ -1119,7 +1119,9 @@ let inst_valid (inst : inst) : bool =
 
 let () =
   let in_path = Sys.argv.(1) in
-  let code = In_channel.read_all in_path in
+  let in_chan = Pervasives.open_in in_path in
+  let code = really_input_string in_chan (in_channel_length in_chan) in
+  Pervasives.close_in in_chan;
   let s = Char_stream.of_string code in
   let rec loop () =
     let saved_pos = Char_stream.pos s in
