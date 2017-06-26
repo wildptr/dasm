@@ -1,7 +1,7 @@
 {
+open Core
 open Lexing
 open Spec_parser
-open Batteries
 
 exception SyntaxError of string
 
@@ -12,18 +12,16 @@ let next_line lexbuf =
       pos_bol = lexbuf.lex_curr_pos;
       pos_lnum = pos.pos_lnum + 1 }
 
-module String_Map = Map.Make (String)
-
-let keyword_map : token String_Map.t =
+let keyword_map : token String.Map.t =
   [
     "let", K_let;
     "proc", K_proc;
     "return", K_return;
   ]
-  |> List.fold (fun acc (k, v) -> String_Map.add k v acc) String_Map.empty
+  |> String.Map.of_alist_exn
 
-let make_bitvec : string -> bool list =
-  String.map (fun c -> c = '1')
+let make_bitvec (s : string) : bool list =
+  List.map ~f:(fun c -> c = '1') (String.to_list s)
 
 }
 
@@ -32,28 +30,35 @@ let white = [' ' '\t']+
 let newline = '\n'
 let id = ['a'-'z' 'A'-'Z' '_'] ['a'-'z' 'A'-'Z' '_' '0'-'9']*
 let comment = "//" [^'\n']* '\n'
-let bitvec = '\'' ['0' '1']* '\''
 
 rule read = parse
   | white { read lexbuf }
   | comment { next_line lexbuf; read lexbuf }
   | newline { next_line lexbuf; read lexbuf }
   | int { Int (int_of_string (Lexing.lexeme lexbuf)) }
-  | bitvec { Bitvec (make_bitvec (Lexing.lexeme lexbuf)) }
+  | '\'' (['0' '1']* as s) '\'' { Bitvec (make_bitvec s) }
   | id
     { let s = Lexing.lexeme lexbuf in
-      try String_Map.find keyword_map s
-      with Not_found -> Ident s }
+      match String.Map.find keyword_map s with
+      | Some k -> k
+      | None -> Ident s }
   | "==" { EqEq }
+  | '&' { Amp }
   | '(' { LParen }
   | ')' { RParen }
+  | '+' { Plus }
   | ',' { Comma }
+  | '-' { Minus }
+  | '.' { Dot }
   | ':' { Colon }
   | ';' { Semi }
   | '=' { Eq }
   | '[' { LBrack }
   | ']' { RBrack }
+  | '^' { Caret }
   | '{' { LBrace }
+  | '|' { Bar }
   | '}' { RBrace }
+  | '~' { Tilde }
   | eof { EOF }
   | _ { raise (SyntaxError ("Unexpected character: " ^ Lexing.lexeme lexbuf)) }

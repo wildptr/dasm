@@ -5,13 +5,13 @@ proc parity(x:8):1
 
 proc adjust_flag(a:4, b:4):1
 {
-	let sum1 = '0' a + '0' b;
+	let sum1 = '0'.a + '0'.b;
 	return sum1[4];
 }
 
 proc adc8(a:8, b:8, cin:1):8
 {
-	let sum1 = '0' a + '0' b + '0000000' cin;
+	let sum1 = '0'.a + '0'.b + '0000000'.cin;
 	let sum = sum1[7:0];
 	CF = sum1[8];
 	OF = sum1[8] ^ sum1[7] ^ a[7] ^ b[7];
