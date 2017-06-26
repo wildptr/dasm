@@ -13,6 +13,7 @@ let prim_of_binary_op = function
   | And -> P_and
   | Xor -> P_xor
   | Or -> P_or
+  | Seq -> P_seq
 
 type entry = reg option
   (* | Local (* index is position in association list *)
@@ -30,11 +31,12 @@ let init_env =
 let extend_env (key, value) env =
   (key, value) :: env
 
-exception Unbound_variable of string
+exception Unbound of string
+exception Set_const of string
 
 let lookup env key =
   match List.findi env ~f:(fun _ (k, _) -> k = key) with
-  | None -> raise (Unbound_variable key)
+  | None -> raise (Unbound key)
   | Some (i, (_, value)) ->
       begin match value with
       | None -> Local i
@@ -73,3 +75,10 @@ let rec translate_expr env = function
       let value' = translate_expr env value in
       let body' = translate_expr (extend_env (name, None) env) body in
       E_let (value', body')
+  | Expr_set (name, value) ->
+      begin match lookup env name with
+      | Local _ -> raise (Set_const name)
+      | Global r ->
+          let value' = translate_expr env value in
+          E_set (r, value')
+      end

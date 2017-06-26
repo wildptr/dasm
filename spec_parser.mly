@@ -20,16 +20,13 @@ open Spec_ast
 %token LBrack
 %token RBrack
 %token Caret
-%token LBrace
+(* %token LBrace *)
 %token Bar
-%token RBrace
+(* %token RBrace *)
 %token Tilde
 
-%token K_func
 %token K_in
 %token K_let
-%token K_proc
-%token K_return
 
 %left Bar
 %left Caret
@@ -38,45 +35,25 @@ open Spec_ast
 %left Plus Minus
 %left Dot
 
-%type <proc> proc_def
 %start <Spec_ast.ast> top
 %start <Spec_ast.expr> expr_top
 
 %%
 
 top:
-  | decls = list(decl); EOF { decls }
+  | decl*; EOF { $1 }
 
 decl:
   | func_def { Decl_func $1 }
-  | proc_def { Decl_proc $1 }
 
 func_def:
-  | K_func; func_name = Ident;
-    LParen; func_params = separated_nonempty_list(Comma, name_length_pair); RParen;
+  | K_let; func_name = Ident;
+    LParen; func_params = separated_list(Comma, name_length_pair); RParen;
     Eq; func_body = expr
     {{ func_name; func_params; func_body }}
 
-proc_def:
-  | K_proc; proc_name = Ident;
-    LParen; proc_params = separated_nonempty_list(Comma, name_length_pair); RParen;
-    proc_width_opt = option(preceded(Colon, Int)); proc_body = comp_stmt
-    {{ proc_name; proc_params; proc_width_opt; proc_body }}
-
 name_length_pair:
   | name = Ident; Colon; len = Int { name, len }
-
-comp_stmt:
-  | LBrace; stmts = list(stmt); RBrace { Stmt_comp stmts }
-
-stmt:
-  | K_let; lhs = Ident; Eq; rhs = expr; Semi
-    { Stmt_let (lhs, rhs) }
-  | lhs = Ident; Eq; rhs = expr; Semi
-    { Stmt_set (lhs, rhs) }
-  | K_return; e = expr; Semi
-    { Stmt_return e }
-  | comp_stmt {$1}
 
 primary_expr:
   | name = Ident
@@ -123,8 +100,18 @@ binary_expr:
   | e1 = binary_expr; Bar; e2 = binary_expr
     { Expr_binary (Or, e1, e2) }
 
-let_expr:
+set_expr:
   | binary_expr {$1}
+  | lhs = Ident; Eq; rhs = binary_expr
+    { Expr_set (lhs, rhs) }
+
+seq_expr:
+  | set_expr {$1}
+  | e1 = seq_expr; Semi; e2 = set_expr
+    { Expr_binary (Seq, e1, e2) }
+
+let_expr:
+  | seq_expr {$1}
   | K_let; name = Ident; Eq; value = expr; K_in; body = expr
     { Expr_let (name, value, body) }
 

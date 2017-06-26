@@ -22,6 +22,7 @@ type binary_op =
   | And
   | Xor
   | Or
+  | Seq
 
 let string_of_binary_op = function
   | Concat -> "."
@@ -31,6 +32,7 @@ let string_of_binary_op = function
   | And -> "&"
   | Xor -> "^"
   | Or -> "|"
+  | Seq -> ";"
 
 type expr =
   | Expr_sym of string
@@ -40,10 +42,11 @@ type expr =
   | Expr_unary of unary_op * expr
   | Expr_binary of binary_op * expr * expr
   | Expr_let of string * expr * expr
+  | Expr_set of string * expr
 
 let rec string_of_expr = function
   | Expr_sym s -> s
-  | Expr_literal bv -> Bitvec.to_string bv
+  | Expr_literal bv -> sprintf "'%s'" (Bitvec.to_string bv)
   | Expr_index (e, i) -> (string_of_expr e) ^ (string_of_index i)
   | Expr_apply (func_name, args) ->
       sprintf "%s(%s)" func_name (String.concat ~sep:"," (List.map ~f:string_of_expr args))
@@ -53,18 +56,8 @@ let rec string_of_expr = function
       sprintf "(%s%s%s)" (string_of_expr e1) (string_of_binary_op op) (string_of_expr e2)
   | Expr_let (name, value, body) ->
       sprintf "(let %s=%s in %s)" name (string_of_expr value) (string_of_expr body)
-
-type stmt =
-  | Stmt_let of string * expr
-  | Stmt_set of string * expr
-  | Stmt_return of expr
-  | Stmt_comp of stmt list
-
-let rec string_of_stmt = function
-  | Stmt_let (lhs, rhs) -> sprintf "let %s=%s;" lhs (string_of_expr rhs)
-  | Stmt_set (lhs, rhs) -> sprintf "%s=%s;" lhs (string_of_expr rhs)
-  | Stmt_return e -> sprintf "return %s;" (string_of_expr e)
-  | Stmt_comp stmts -> sprintf "{%s}" (String.concat (List.map ~f:string_of_stmt stmts))
+  | Expr_set (name, value) ->
+      sprintf "(%s=%s)" name (string_of_expr value)
 
 type param_list = (string * int) list
 
@@ -78,36 +71,17 @@ type func = {
 }
 
 let string_of_func func =
-  sprintf "func %s(%s)=%s" func.func_name
+  sprintf "let %s(%s)=%s" func.func_name
     (string_of_param_list func.func_params)
     (string_of_expr func.func_body)
 
-type proc = {
-  proc_name : string;
-  proc_params : (string * int) list;
-  proc_width_opt : int option;
-  proc_body : stmt;
-}
-
-let string_of_proc proc =
-  sprintf "proc %s(%s)%s%s" proc.proc_name
-    (String.concat ~sep:"," (List.map ~f:(fun (name, width) -> sprintf "%s:%d" name width) proc.proc_params))
-    begin
-      match proc.proc_width_opt with
-      | Some width -> ":" ^ string_of_int width
-      | None -> ""
-    end
-    (string_of_stmt proc.proc_body)
-
 type decl =
   | Decl_func of func
-  | Decl_proc of proc
 
 let string_of_decl = function
   | Decl_func func -> string_of_func func
-  | Decl_proc proc -> string_of_proc proc
 
 type ast = decl list
 
 let string_of_ast ast =
-  String.concat (List.map ~f:string_of_decl ast)
+  String.concat ~sep:" " (List.map ~f:string_of_decl ast)

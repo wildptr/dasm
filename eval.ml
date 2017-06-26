@@ -28,6 +28,9 @@ let index_of_reg =
 let get_global env r =
   env.env_globals.(index_of_reg r)
 
+let set_global env r value =
+  env.env_globals.(index_of_reg r) <- value
+
 let extend_env value env =
   { env with env_locals = value :: env.env_locals }
 
@@ -73,6 +76,11 @@ let eval_prim prim args =
           List.fold ~init:arg ~f:(fun acc arg -> Bitvec.orv acc arg) args'
       | _ -> assert false
       end
+  | P_seq ->
+      begin match args with
+      | _ :: a2 :: [] -> a2
+      | _ -> assert false
+      end
 
 let rec eval env = function
   | E_literal bv -> bv
@@ -85,3 +93,6 @@ let rec eval env = function
       eval_prim p args'
   | E_let (value, body) ->
       eval (extend_env (eval env value) env) body
+  | E_set (reg, value) ->
+      set_global env reg (eval env value);
+      Bitvec.zero 0

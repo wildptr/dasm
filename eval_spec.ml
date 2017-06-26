@@ -18,7 +18,7 @@ let main () =
   | Spec_parser.Error ->
       report_error filepath lexbuf "syntax error";
       exit 1
-  | Spec_lexer.SyntaxError msg ->
+  | Spec_lexer.Error msg ->
       report_error filepath lexbuf msg;
       exit 1
 

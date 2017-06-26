@@ -17,6 +17,7 @@ type prim =
   | P_and
   | P_xor
   | P_or
+  | P_seq
 
 type expr =
   | E_literal of Bitvec.t
@@ -25,7 +26,4 @@ type expr =
   | E_part of expr * (int * int)
   | E_prim of prim * expr list
   | E_let of expr * expr
-
-type cmd =
-  | C_set_global of reg * expr
-  | C_let of expr * cmd
+  | E_set of reg * expr (* set global *)

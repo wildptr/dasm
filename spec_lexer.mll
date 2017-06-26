@@ -3,7 +3,7 @@ open Core
 open Lexing
 open Spec_parser
 
-exception SyntaxError of string
+exception Error of string
 
 let next_line lexbuf =
   let pos = lexbuf.lex_curr_p in
@@ -14,11 +14,8 @@ let next_line lexbuf =
 
 let keyword_map : token String.Map.t =
   [
-    "func", K_func;
     "in", K_in;
     "let", K_let;
-    "proc", K_proc;
-    "return", K_return;
   ]
   |> String.Map.of_alist_exn
 
@@ -55,9 +52,9 @@ rule read = parse
   | '[' { LBrack }
   | ']' { RBrack }
   | '^' { Caret }
-  | '{' { LBrace }
+  (* | '{' { LBrace } *)
   | '|' { Bar }
-  | '}' { RBrace }
+  (* | '}' { RBrace } *)
   | '~' { Tilde }
   | eof { EOF }
-  | _ { raise (SyntaxError ("Unexpected character: " ^ Lexing.lexeme lexbuf)) }
+  | _ { raise (Error ("Unexpected character: " ^ Lexing.lexeme lexbuf)) }
