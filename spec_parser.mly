@@ -5,7 +5,7 @@ open Spec_ast
 %token EOF
 %token <string> Ident
 %token <int> Int
-%token <bool list> Bitvec
+%token <Bitvec.t> Bitvec
 %token EqEq
 %token Amp
 %token LParen
@@ -25,6 +25,8 @@ open Spec_ast
 %token RBrace
 %token Tilde
 
+%token K_func
+%token K_in
 %token K_let
 %token K_proc
 %token K_return
@@ -38,11 +40,22 @@ open Spec_ast
 
 %type <proc> proc_def
 %start <Spec_ast.ast> top
+%start <Spec_ast.expr> expr_top
 
 %%
 
 top:
-  | procs = list(proc_def); EOF { procs }
+  | decls = list(decl); EOF { decls }
+
+decl:
+  | func_def { Decl_func $1 }
+  | proc_def { Decl_proc $1 }
+
+func_def:
+  | K_func; func_name = Ident;
+    LParen; func_params = separated_nonempty_list(Comma, name_length_pair); RParen;
+    Eq; func_body = expr
+    {{ func_name; func_params; func_body }}
 
 proc_def:
   | K_proc; proc_name = Ident;
@@ -71,8 +84,8 @@ primary_expr:
   | bv = Bitvec
     { Expr_literal bv }
   | LParen; e = expr; RParen { e }
-  | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen
-    { Expr_call (proc_name, args) }
+  | func_name = Ident; LParen; args = separated_list(Comma, expr); RParen
+    { Expr_apply (func_name, args) }
 
 index:
   | LBrack; i = Int; RBrack
@@ -110,5 +123,13 @@ binary_expr:
   | e1 = binary_expr; Bar; e2 = binary_expr
     { Expr_binary (Or, e1, e2) }
 
-expr:
+let_expr:
   | binary_expr {$1}
+  | K_let; name = Ident; Eq; value = expr; K_in; body = expr
+    { Expr_let (name, value, body) }
+
+expr:
+  | let_expr {$1}
+
+expr_top:
+  | expr EOF {$1}

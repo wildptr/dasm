@@ -14,14 +14,13 @@ let next_line lexbuf =
 
 let keyword_map : token String.Map.t =
   [
+    "func", K_func;
+    "in", K_in;
     "let", K_let;
     "proc", K_proc;
     "return", K_return;
   ]
   |> String.Map.of_alist_exn
-
-let make_bitvec (s : string) : bool list =
-  List.map ~f:(fun c -> c = '1') (String.to_list s)
 
 }
 
@@ -36,7 +35,7 @@ rule read = parse
   | comment { next_line lexbuf; read lexbuf }
   | newline { next_line lexbuf; read lexbuf }
   | int { Int (int_of_string (Lexing.lexeme lexbuf)) }
-  | '\'' (['0' '1']* as s) '\'' { Bitvec (make_bitvec s) }
+  | '\'' (['0' '1']* as s) '\'' { Bitvec (Bitvec.of_string s) }
   | id
     { let s = Lexing.lexeme lexbuf in
       match String.Map.find keyword_map s with

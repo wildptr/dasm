@@ -1,13 +1,9 @@
-proc parity(x:8):1
-{
-	return ~(x[7]^x[6]^x[5]^x[4]^x[3]^x[2]^x[1]^x[0]);
-}
+func parity(x:8) =
+	~(x[7]^x[6]^x[5]^x[4]^x[3]^x[2]^x[1]^x[0])
 
-proc adjust_flag(a:4, b:4):1
-{
-	let sum1 = '0'.a + '0'.b;
-	return sum1[4];
-}
+func adjust_flag(a:4, b:4) =
+	let sum1 = '0'.a + '0'.b in
+	sum1[4]
 
 proc adc8(a:8, b:8, cin:1):8
 {
