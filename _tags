@@ -1,2 +1,5 @@
-<*>: package(batteries)
+<*>: package(core)
+<*>: package(ppx_deriving.show)
+<*>: package(ppx_deriving.std)
+<*>: thread
 <*>: use_menhir

@@ -1,28 +1,6 @@
 open Core
+open Inst
 open Printf
-
-type processor_mode =
-  | Mode16bit
-  | Mode32bit
-  | Mode64bit
-
-let encode_processor_mode = function
-  | Mode16bit -> 0
-  | Mode32bit -> 1
-  | Mode64bit -> 2
-
-let decode_processor_mode = function
-  | 0 -> Mode16bit
-  | 1 -> Mode32bit
-  | 2 -> Mode64bit
-  | _ -> assert false
-
-type gpr_set =
-  | Reg8bitLegacy
-  | Reg8bitUniform
-  | Reg16bit
-  | Reg32bit
-  | Reg64bit
 
 let gpr_name (set : gpr_set) (index : int) : string =
   match set with
@@ -45,22 +23,6 @@ let gpr_name (set : gpr_set) (index : int) : string =
       (* assert (index >= 0 && index < 16); *)
       [|"rax";"rcx";"rdx";"rbx";"rsp";"rbp";"rsi";"rdi";
          "r8"; "r9";"r10";"r11";"r12";"r13";"r14";"r15"|].(index)
-
-let gpr_set_of_reg_operand (mode : processor_mode) (data_size : int) : gpr_set =
-  match data_size, mode with
-  | 1, Mode16bit
-  | 1, Mode32bit -> Reg8bitLegacy
-  | 1, Mode64bit -> Reg8bitUniform
-  | 2, _ -> Reg16bit
-  | 4, _ -> Reg32bit
-  | 8, _ -> Reg64bit
-  | _ -> assert false
-
-type mem_operand = {
-  base : int (* reg *) option;
-  index : (int * int) (* reg, scale *) option;
-  disp : int;
-}
 
 let gpr_set_of_addr_reg (mode : processor_mode) (alt_addr_size : bool) =
   match mode, alt_addr_size with
@@ -109,10 +71,6 @@ let format_mem_operand (addr_reg_set : gpr_set) (size_opt : int option) (m : mem
   match size_opt with
   | Some size -> sprintf "%s %s" (format_size size) m_s
   | None -> m_s
-
-type g_operand =
-  | G_reg of int
-  | G_mem of mem_operand
 
 module Char_stream = struct
 
@@ -408,16 +366,6 @@ let fpu_mnem_table2 : fpu_inst_format array =
     FPU_A "";
   |]
 
-type inst_operand =
-  | Op_N
-  | Op_I   of int
-  | Op_II  of int * int
-  | Op_M   of g_operand
-  | Op_MI  of g_operand * int
-  | Op_MII of g_operand * int * int
-
-type inst = int * int * inst_operand
-
 type prefix =
   | Prefix_26
   | Prefix_2e
@@ -499,12 +447,6 @@ let read_prefix_and_opcode (s : Char_stream.t) : int * int =
 let encode_opcode opcode r prefix mode =
   let mode_enc = encode_processor_mode mode in
   ((opcode lsl 3 lor r) lsl 7 lor prefix) lsl 2 lor mode_enc
-
-let decode_opcode opf =
-  (opf lsr 12,
-   opf lsr 9 land 7,
-   opf lsr 2 land 0x7f,
-   decode_processor_mode (opf land 3))
 
 let disassemble (mode : processor_mode) (s : Char_stream.t) : inst =
   let start_pos = Char_stream.pos s in
@@ -988,7 +930,7 @@ let string_of_inst (inst : inst) : string =
     | Op_MI (g, i) -> g, Imm1 i
     | Op_MII (g, i1, i2) -> g, Imm2 (i1, i2)
   in
-  let opcode, r, prefix, mode = decode_opcode opf in
+  let opcode, r, prefix, mode = decode_extopcode opf in
   let alt_data = prefix land (prefix_mask Prefix_66) <> 0 in
   let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in
   let format_opt = format_of_inst mode prefix opcode r in
@@ -1105,23 +1047,17 @@ let string_of_inst (inst : inst) : string =
         end
   end
 
-let opf_of_inst (inst : inst) : int =
-  let opf, _, _ = inst in
-  opf
-
 let inst_valid (inst : inst) : bool =
-  let opf = opf_of_inst inst in
-  let opcode, r, prefix, mode = decode_opcode opf in
+  let opf = extopcode_of_inst inst in
+  let opcode, r, prefix, mode = decode_extopcode opf in
   let format_opt = format_of_inst mode prefix opcode r in
   match format_opt with
   | None -> false
   | Some _ -> true
 
-let () =
+let main () =
   let in_path = Sys.argv.(1) in
-  let in_chan = Pervasives.open_in in_path in
-  let code = really_input_string in_chan (in_channel_length in_chan) in
-  Pervasives.close_in in_chan;
+  let code = In_channel.read_all in_path in
   let s = Char_stream.of_string code in
   let rec loop () =
     let saved_pos = Char_stream.pos s in
@@ -1129,6 +1065,8 @@ let () =
     if inst_valid inst
     then begin
       printf "%s\n" (string_of_inst inst);
+      let e = Elaborate.elaborate_inst inst in
+      Format.printf "{%a}@." e pp_expr;
       loop ()
     end else begin
       Char_stream.set_pos s saved_pos;

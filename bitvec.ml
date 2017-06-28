@@ -57,3 +57,24 @@ let to_string bv =
 
 let of_bool b =
   [b]
+
+let rec of_int size i =
+  assert (size >= 0);
+  if size = 0
+  then []
+  else (i land 1 <> 0) :: of_int (size-1) (i lsr 1)
+
+let rec to_int bv =
+  match bv with
+  | [] -> 0
+  | h :: bv' -> (to_int bv') lsl 1 lor (bit_value h)
+
+let of_bytestring s =
+  let rec f = function
+    | [] -> []
+    | b :: s' -> of_int 8 b @ f s'
+  in
+  f (List.map ~f:int_of_char (String.to_list s))
+
+let pp fmtr bv =
+  Format.fprintf fmtr "%s" (to_string bv)

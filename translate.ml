@@ -2,18 +2,19 @@ open Core
 open Semant
 open Spec_ast
 
-let prim_of_unary_op = function
-  | Not -> P_not
+let prim_of_unary_op (op, e) =
+  match op with
+  | Not -> P_not e
 
-let prim_of_binary_op = function
-  | Concat -> P_concat
-  | Add -> P_add
-  | Sub -> P_sub
-  | Eq -> P_eq
-  | And -> P_and
-  | Xor -> P_xor
-  | Or -> P_or
-  | Seq -> P_seq
+let prim_of_binary_op (op, e1, e2) =
+  match op with
+  | Concat -> P_concat [e1;e2]
+  | Add -> P_add [e1;e2]
+  | Sub -> P_sub (e1,e2)
+  | Eq -> P_eq (e1,e2)
+  | And -> P_and [e1;e2]
+  | Xor -> P_xor [e1;e2]
+  | Or -> P_or [e1;e2]
 
 type entry = reg option
   (* | Local (* index is position in association list *)
@@ -68,9 +69,9 @@ let rec translate_expr env = function
       in
       f args'
   | Expr_unary (op, e) ->
-      E_prim (prim_of_unary_op op, [translate_expr env e])
+      E_prim (prim_of_unary_op (op, translate_expr env e))
   | Expr_binary (op, e1, e2) ->
-      E_prim (prim_of_binary_op op, [translate_expr env e1; translate_expr env e2]);
+      E_prim (prim_of_binary_op (op, translate_expr env e1, translate_expr env e2))
   | Expr_let (name, value, body) ->
       let value' = translate_expr env value in
       let body' = translate_expr (extend_env (name, None) env) body in
@@ -82,3 +83,5 @@ let rec translate_expr env = function
           let value' = translate_expr env value in
           E_set (r, value')
       end
+  | Expr_seq (e1, e2) ->
+      E_seq (translate_expr env e1, translate_expr env e2)

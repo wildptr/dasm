@@ -22,7 +22,6 @@ type binary_op =
   | And
   | Xor
   | Or
-  | Seq
 
 let string_of_binary_op = function
   | Concat -> "."
@@ -32,7 +31,6 @@ let string_of_binary_op = function
   | And -> "&"
   | Xor -> "^"
   | Or -> "|"
-  | Seq -> ";"
 
 type expr =
   | Expr_sym of string
@@ -43,6 +41,7 @@ type expr =
   | Expr_binary of binary_op * expr * expr
   | Expr_let of string * expr * expr
   | Expr_set of string * expr
+  | Expr_seq of expr * expr
 
 let rec string_of_expr = function
   | Expr_sym s -> s
@@ -58,6 +57,8 @@ let rec string_of_expr = function
       sprintf "(let %s=%s in %s)" name (string_of_expr value) (string_of_expr body)
   | Expr_set (name, value) ->
       sprintf "(%s=%s)" name (string_of_expr value)
+  | Expr_seq (e1, e2) ->
+      sprintf "(%s;%s)" (string_of_expr e1)  (string_of_expr e2)
 
 type param_list = (string * int) list
 

@@ -108,7 +108,7 @@ set_expr:
 seq_expr:
   | set_expr {$1}
   | e1 = seq_expr; Semi; e2 = set_expr
-    { Expr_binary (Seq, e1, e2) }
+    { Expr_seq (e1, e2) }
 
 let_expr:
   | seq_expr {$1}
