@@ -1,7 +1,7 @@
 type t
 
 val zero : int -> t
-val len : t -> int
+val length : t -> int
 val concat : t list -> t
 val add : t -> t -> t
 val sub : t -> t -> t
@@ -18,3 +18,5 @@ val of_int : int -> int -> t
 val to_int : t -> int
 val of_bytestring : string -> t
 val pp : Format.formatter -> t -> unit
+val add_c : t -> t -> bool -> t
+val to_bool : t -> bool

@@ -1041,9 +1041,9 @@ let string_of_inst (inst : inst) : string =
     else
       sprintf "%s %s" mne
         begin
-          String.split_on_char ',' fmt |>
-          List.map format_operand |>
-          String.concat ","
+          String.split ~on:',' fmt |>
+          List.map ~f:format_operand |>
+          String.concat ~sep:","
         end
   end
 
@@ -1056,6 +1056,7 @@ let inst_valid (inst : inst) : bool =
   | Some _ -> true
 
 let main () =
+  Elaborate.load_spec ();
   let in_path = Sys.argv.(1) in
   let code = In_channel.read_all in_path in
   let s = Char_stream.of_string code in
@@ -1066,7 +1067,7 @@ let main () =
     then begin
       printf "%s\n" (string_of_inst inst);
       let e = Elaborate.elaborate_inst inst in
-      Format.printf "{%a}@." e pp_expr;
+      Format.printf "{%a}@." Semant.pp_expr e;
       loop ()
     end else begin
       Char_stream.set_pos s saved_pos;
@@ -1078,3 +1079,5 @@ let main () =
   try
     loop ()
   with Char_stream.End -> ()
+
+let () = main ()

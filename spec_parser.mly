@@ -1,4 +1,5 @@
 %{
+open Core_kernel.Std
 open Spec_ast
 %}
 
@@ -57,7 +58,9 @@ name_length_pair:
 
 primary_expr:
   | name = Ident
-    { Expr_sym name }
+    { if Char.is_uppercase name.[0]
+      then Expr_global_sym name
+      else Expr_local_sym name }
   | bv = Bitvec
     { Expr_literal bv }
   | LParen; e = expr; RParen { e }

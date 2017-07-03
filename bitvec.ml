@@ -33,11 +33,11 @@ let notv bv =
 let sub bv1 bv2 =
   add_c bv1 (notv bv2) true
 
-let len bv =
+let length bv =
   List.length bv
 
 let neg bv =
-  sub (zero (len bv)) bv
+  sub (zero (length bv)) bv
 
 let rec bitwise f bv1 bv2 =
   match bv1, bv2 with
@@ -78,3 +78,8 @@ let of_bytestring s =
 
 let pp fmtr bv =
   Format.fprintf fmtr "%s" (to_string bv)
+
+let to_bool bv =
+  match bv with
+  | [b] -> b
+  | _ -> failwith "Bitvec.to_bool: length of bit vector is not 1"

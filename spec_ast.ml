@@ -33,7 +33,8 @@ let string_of_binary_op = function
   | Or -> "|"
 
 type expr =
-  | Expr_sym of string
+  | Expr_local_sym of string
+  | Expr_global_sym of string
   | Expr_literal of Bitvec.t
   | Expr_index of expr * index
   | Expr_apply of string * expr list
@@ -44,7 +45,8 @@ type expr =
   | Expr_seq of expr * expr
 
 let rec string_of_expr = function
-  | Expr_sym s -> s
+  | Expr_local_sym s -> s
+  | Expr_global_sym s -> s
   | Expr_literal bv -> sprintf "'%s'" (Bitvec.to_string bv)
   | Expr_index (e, i) -> (string_of_expr e) ^ (string_of_index i)
   | Expr_apply (func_name, args) ->

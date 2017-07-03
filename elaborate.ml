@@ -1,3 +1,4 @@
+open Core
 open Inst
 open Semant
 
@@ -75,8 +76,14 @@ let elaborate_writeback reg_set g e =
       let e_addr = elaborate_mem_addr m in
       E_prim (P_store (size, e_addr, e))
 
+let predef_table = String.Table.create ()
+
+let predef name =
+  let body, _, _ = Hashtbl.find_exn predef_table name in body
+
 let elaborate_inst (inst : inst) : expr =
   let extopcode = extopcode_of_inst inst in
+  (* TODO: update PC *)
   let inst_len = length_of_inst inst in
   let opcode, r, prefix, mode = decode_extopcode extopcode in
   if opcode < 0x100
@@ -88,7 +95,7 @@ let elaborate_inst (inst : inst) : expr =
         | Op_M g ->
             let e_g = elaborate_g_operand reg_set g in
             let e_r = elaborate_reg_operand reg_set r in
-            let e_result = E_let (e_g, E_let (e_r, e_adc8)) in
+            let e_result = E_let (e_g, E_let (e_r, predef "adc8")) in
             elaborate_writeback reg_set g e_result
         | _ -> assert false
         end
@@ -104,16 +111,25 @@ let fail_with_parsing_error filename lexbuf msg =
   failwith "invalid spec"
 
 let load_spec () =
-  let spec_path = "spec" in
-  let in_chan = In_channel.create spec_path in
+  let filepath = "spec" in
+  let in_chan = In_channel.create filepath in
   let lexbuf = Lexing.from_channel in_chan in
   let spec_ast =
     try
       Spec_parser.top Spec_lexer.read lexbuf
     with
     | Spec_parser.Error ->
-        fail_with_parsing_error spec_path lexbuf "syntax error"
+        fail_with_parsing_error filepath lexbuf "syntax error"
     | Spec_lexer.Error msg ->
         fail_with_parsing_error filepath lexbuf msg
   in
-  ()
+  In_channel.close in_chan;
+  let static_env =
+    try Translate.translate_ast spec_ast with
+    | Translate.Index_out_of_bounds ((e,w),b) ->
+        fprintf stderr "width of expression %s is %d, %d is out of bounds\n"
+          (Spec_ast.string_of_expr e) w b;
+        exit 1
+  in
+  String.Map.iteri (Translate.env_func_map static_env) ~f:(fun ~key ~data ->
+    Hashtbl.set predef_table ~key ~data)

@@ -67,3 +67,12 @@ and eval_prim env prim =
   | P_store (size, e_addr) ->
       env.env_mstore size (Bitvec.to_int (ev e_addr));
       Bitvec.zero 0
+  | P_shiftleft (e1, e2) ->
+      let e1_val = eval env e1 in
+      let e2_val = eval env e2 in
+      Bitvec.concat [e1_val; Bitvec.zero (Bitvec.to_int e2_val)]
+  | P_add_ex (e1, e2, e_carry) ->
+      let e1_val = eval env e1 in
+      let e2_val = eval env e2 in
+      let e_carry_val = eval env e_carry in
+      Bitvec.add_c e1_val e2_val (Bitvec.to_bool e_carry_val)

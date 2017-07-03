@@ -1,4 +1,4 @@
-open Core
+open Core_kernel.Std
 open Printf
 
 type reg =
@@ -10,7 +10,16 @@ type reg =
   | R_BP
   | R_SI
   | R_DI
+  | Flag_C (*  0 *)
+  | Flag_P (*  2 *)
+  | Flag_A (*  4 *)
+  | Flag_Z (*  6 *)
+  | Flag_S (*  7 *)
+  | Flag_D (* 10 *)
+  | Flag_O (* 11 *)
 [@@deriving show]
+
+exception Unindexed_register of reg
 
 let index_of_reg = function
   | R_AX -> 0
@@ -21,6 +30,7 @@ let index_of_reg = function
   | R_BP -> 5
   | R_SI -> 6
   | R_DI -> 7
+  | _ as r -> raise (Unindexed_register r)
 
 type prim =
   | P_not of expr
@@ -34,6 +44,8 @@ type prim =
   | P_load of int * expr (* size, address *)
   | P_store of int * expr * expr (* size, address, value *)
   | P_shiftleft of expr * expr
+  | P_add_ex of expr * expr * expr (* add with carry *)
+
 [@@deriving show]
 
 and expr =
