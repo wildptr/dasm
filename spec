@@ -6,9 +6,9 @@ let adc8(a:8, b:8, cin:1) =
   let cout = sum1[8] in
   let sum = sum1[7:0] in
   CF = cout;
-  OF = cout ^ sum[7] ^ a[7] ^ b[7];
+  PF = parity(sum);
+  AF = add_ex(a[3:0], b[3:0], cin)[4];
   ZF = sum == '00000000';
   SF = sum[7];
-  AF = add_ex(a[3:0], b[3:0], cin)[4];
-  PF = parity(sum);
+  OF = cout ^ sum[7] ^ a[7] ^ b[7];
   sum
