@@ -17,7 +17,6 @@ type reg =
   | Flag_S (*  7 *)
   | Flag_D (* 10 *)
   | Flag_O (* 11 *)
-  | R_PC
 
 let string_of_reg = function
   | R_AX -> "AX"
@@ -35,7 +34,6 @@ let string_of_reg = function
   | Flag_S -> "SF"
   | Flag_D -> "DF"
   | Flag_O -> "OF"
-  | R_PC -> "PC"
 
 exception Unindexed_register of reg
 
@@ -70,10 +68,12 @@ and expr =
   | E_global of reg
   | E_part of expr * (int * int)
   | E_prim of prim
-  | E_let of expr * expr
-  | E_set of reg * expr (* set global *)
-  | E_seq of expr * expr
-  | E_setpart of reg * (int * int) * expr
+
+(* elaborated form of instructions *)
+type stmt =
+  | S_setlocal of int * int (* id, width *) (* SSA *)
+  | S_setglobal of reg * expr
+  | S_setglobal_part of reg * (int * int) * expr
 
 let rec pp_prim f p =
   let pp_prim_es f op_char es =

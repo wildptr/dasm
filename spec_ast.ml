@@ -32,57 +32,68 @@ let string_of_binary_op = function
   | Xor -> "^"
   | Or -> "|"
 
-type expr =
-  | Expr_local_sym of string
-  | Expr_global_sym of string
+type call = string * expr list
+
+and expr =
+  | Expr_sym of string
   | Expr_literal of Bitvec.t
   | Expr_index of expr * index
-  | Expr_apply of string * expr list
+  | Expr_call of call
   | Expr_unary of unary_op * expr
   | Expr_binary of binary_op * expr * expr
-  | Expr_let of string * expr * expr
-  | Expr_set of string * expr
-  | Expr_seq of expr * expr
 
-let rec string_of_expr = function
-  | Expr_local_sym s -> s
-  | Expr_global_sym s -> s
+type stmt =
+  (* Variables created by let statements are immutable. *)
+  | Stmt_let of string * expr
+  | Stmt_set of string * expr
+  | Stmt_call of call
+  | Stmt_return of expr
+
+let rec string_of_call (proc_name, args) =
+  sprintf "%s(%s)" proc_name (String.concat ~sep:"," (List.map ~f:string_of_expr args))
+
+and string_of_expr = function
+  | Expr_sym s -> s
   | Expr_literal bv -> sprintf "'%s'" (Bitvec.to_string bv)
   | Expr_index (e, i) -> (string_of_expr e) ^ (string_of_index i)
-  | Expr_apply (func_name, args) ->
-      sprintf "%s(%s)" func_name (String.concat ~sep:"," (List.map ~f:string_of_expr args))
+  | Expr_call c ->
+      string_of_call c
   | Expr_unary (op, e) ->
       sprintf "(%s%s)" (string_of_unary_op op) (string_of_expr e)
   | Expr_binary (op, e1, e2) ->
       sprintf "(%s%s%s)" (string_of_expr e1) (string_of_binary_op op) (string_of_expr e2)
-  | Expr_let (name, value, body) ->
-      sprintf "(let %s=%s in %s)" name (string_of_expr value) (string_of_expr body)
-  | Expr_set (name, value) ->
-      sprintf "(%s=%s)" name (string_of_expr value)
-  | Expr_seq (e1, e2) ->
-      sprintf "(%s;%s)" (string_of_expr e1)  (string_of_expr e2)
+
+let string_of_stmt = function
+  | Stmt_let (name, value) ->
+      sprintf "let %s = %s;" name (string_of_expr value)
+  | Stmt_set (name, value) ->
+      sprintf "%s = %s;" name (string_of_expr value)
+  | Stmt_call c ->
+      sprintf "%s;" (string_of_call c)
+  | Stmt_return e ->
+      sprintf "return %s;" (string_of_expr e)
 
 type param_list = (string * int) list
 
 let string_of_param_list params =
   (String.concat ~sep:"," (List.map ~f:(fun (name, width) -> sprintf "%s:%d" name width) params))
 
-type func = {
-  func_name : string;
-  func_params : param_list;
-  func_body : expr;
+type proc = {
+  proc_name : string;
+  proc_params : param_list;
+  proc_body : stmt list;
 }
 
-let string_of_func func =
-  sprintf "let %s(%s)=%s" func.func_name
-    (string_of_param_list func.func_params)
-    (string_of_expr func.func_body)
+let string_of_proc proc =
+  sprintf "proc %s(%s) {%s}" proc.proc_name
+    (string_of_param_list proc.proc_params)
+    (String.concat (List.map proc.proc_body ~f: string_of_stmt))
 
 type decl =
-  | Decl_func of func
+  | Decl_proc of proc
 
 let string_of_decl = function
-  | Decl_func func -> string_of_func func
+  | Decl_proc proc -> string_of_proc proc
 
 type ast = decl list
 

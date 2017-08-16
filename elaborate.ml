@@ -89,15 +89,8 @@ let predef_table = String.Table.create ()
 let predef name =
   let body, _, _ = Hashtbl.find_exn predef_table name in body
 
-let elaborate_inst (inst : inst) : expr =
+let elaborate_inst (inst : inst) : stmt list =
   let extopcode = extopcode_of_inst inst in
-  (* TODO: update PC *)
-  let inst_len = length_of_inst inst in
-  let e_inc_pc =
-    E_set (R_PC, E_prim begin
-      P_add [E_global R_PC; E_literal (Bitvec.of_int 32 inst_len)]
-    end)
-  in
   let opcode, r, prefix, mode = decode_extopcode extopcode in
   if opcode < 0x100
   then
@@ -109,7 +102,7 @@ let elaborate_inst (inst : inst) : expr =
             let e_g = elaborate_g_operand reg_set g in
             let e_r = elaborate_reg_operand reg_set r in
             let e_result = E_let (e_g, E_let (e_r, predef "adc8")) in
-            E_seq (e_inc_pc, elaborate_writeback reg_set g e_result)
+            elaborate_writeback reg_set g e_result
         | _ -> assert false
         end
     | _ -> assert false

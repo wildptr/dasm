@@ -21,13 +21,15 @@ open Spec_ast
 %token LBrack
 %token RBrack
 %token Caret
-(* %token LBrace *)
+%token LBrace
 %token Bar
-(* %token RBrace *)
+%token RBrace
 %token Tilde
 
-%token K_in
+%token K_if
 %token K_let
+%token K_proc
+%token K_return
 
 %left Bar
 %left Caret
@@ -45,27 +47,28 @@ top:
   | decl*; EOF { $1 }
 
 decl:
-  | func_def { Decl_func $1 }
+  | proc_def { Decl_proc $1 }
 
-func_def:
-  | K_let; func_name = Ident;
-    LParen; func_params = separated_list(Comma, name_length_pair); RParen;
-    Eq; func_body = expr
-    {{ func_name; func_params; func_body }}
+proc_def:
+  | K_proc; proc_name = Ident;
+    LParen; proc_params = separated_list(Comma, name_length_pair); RParen;
+    LBrace; proc_body = list(stmt); RBrace
+    {{ proc_name; proc_params; proc_body }}
 
 name_length_pair:
   | name = Ident; Colon; len = Int { name, len }
 
 primary_expr:
   | name = Ident
-    { if Char.is_uppercase name.[0]
+    { Expr_sym name }
+    (*{ if Char.is_uppercase name.[0]
       then Expr_global_sym name
-      else Expr_local_sym name }
+      else Expr_local_sym name }*)
   | bv = Bitvec
     { Expr_literal bv }
   | LParen; e = expr; RParen { e }
-  | func_name = Ident; LParen; args = separated_list(Comma, expr); RParen
-    { Expr_apply (func_name, args) }
+  | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen
+    { Expr_call (proc_name, args) }
 
 index:
   | LBrack; i = Int; RBrack
@@ -103,23 +106,18 @@ binary_expr:
   | e1 = binary_expr; Bar; e2 = binary_expr
     { Expr_binary (Or, e1, e2) }
 
-set_expr:
-  | binary_expr {$1}
-  | lhs = Ident; Eq; rhs = binary_expr
-    { Expr_set (lhs, rhs) }
-
-seq_expr:
-  | set_expr {$1}
-  | e1 = seq_expr; Semi; e2 = set_expr
-    { Expr_seq (e1, e2) }
-
-let_expr:
-  | seq_expr {$1}
-  | K_let; name = Ident; Eq; value = expr; K_in; body = expr
-    { Expr_let (name, value, body) }
-
 expr:
-  | let_expr {$1}
+  | binary_expr {$1}
+
+stmt:
+  | name = Ident; Eq; value = expr; Semi
+    { Stmt_set (name, value) }
+  | K_let; name = Ident; Eq; value = expr; Semi
+    { Stmt_let (name, value) }
+  | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen; Semi
+    { Stmt_call (proc_name, args) }
+  | K_return; value = expr; Semi
+    { Stmt_return value }
 
 expr_top:
   | expr EOF {$1}
