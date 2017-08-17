@@ -14,6 +14,7 @@ let next_line lexbuf =
 
 let keyword_map : token String.Map.t =
   [
+    "call", K_call;
     "if", K_if;
     "let", K_let;
     "proc", K_proc;

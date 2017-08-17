@@ -970,7 +970,7 @@ let string_of_inst (inst : inst) : string =
       let extract_size spec =
         let len = String.length spec in
         if len > 1
-        then Some (int_of_string (String.sub spec 1 (len-1)))
+        then Some (int_of_string (String.sub spec ~pos:1 ~len:(len-1)))
         else None
       in
       let format_imm i =
@@ -1006,7 +1006,7 @@ let string_of_inst (inst : inst) : string =
               let size_opt =
                 let len = String.length spec in
                 if len > 1
-                then Some (int_of_string (String.sub spec 1 (len-1)))
+                then Some (int_of_string (String.sub spec ~pos:1 ~len:(len-1)))
                 else None
               in
               format_mem_operand (gpr_set_of_addr_reg mode alt_addr) size_opt m
@@ -1034,7 +1034,7 @@ let string_of_inst (inst : inst) : string =
               let addr_reg_set = gpr_set_of_addr_reg mode alt_addr in
               format_mem_operand addr_reg_set (Some 16) m
           end
-      | '\'' -> String.sub spec 1 (String.length spec - 1)
+      | '\'' -> String.sub spec ~pos:1 ~len:(String.length spec - 1)
       | _ -> assert false
     in
     if fmt = "" then mne
@@ -1056,18 +1056,18 @@ let inst_valid (inst : inst) : bool =
   | Some _ -> true
 
 let main () =
-  Elaborate.load_spec ();
+  Elaborate.load_spec "spec";
   let in_path = Sys.argv.(1) in
   let code = In_channel.read_all in_path in
   let s = Char_stream.of_string code in
+  let elab_env = Elaborate.new_env () in
   let rec loop () =
     let saved_pos = Char_stream.pos s in
     let inst = disassemble Mode32bit s in
     if inst_valid inst
     then begin
       printf "%s\n" (string_of_inst inst);
-      let e = Elaborate.elaborate_inst inst in
-      Format.printf "{%a}@." Semant.pp_expr e;
+      Elaborate.elaborate_inst elab_env inst;
       loop ()
     end else begin
       Char_stream.set_pos s saved_pos;
@@ -1078,6 +1078,8 @@ let main () =
   print_string "[bits 32]\n";
   try
     loop ()
-  with Char_stream.End -> ()
+  with Char_stream.End ->
+    let stmts = Elaborate.get_stmt_list elab_env in
+    List.iter stmts ~f:(fun stmt -> Format.printf "%a@." Semant.pp_stmt stmt)
 
 let () = main ()

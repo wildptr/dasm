@@ -26,6 +26,7 @@ open Spec_ast
 %token RBrace
 %token Tilde
 
+%token K_call
 %token K_if
 %token K_let
 %token K_proc
@@ -39,7 +40,7 @@ open Spec_ast
 %left Dot
 
 %start <Spec_ast.ast> top
-%start <Spec_ast.expr> expr_top
+%start <Spec_ast.astexpr> expr_top
 
 %%
 
@@ -50,10 +51,11 @@ decl:
   | proc_def { Decl_proc $1 }
 
 proc_def:
-  | K_proc; proc_name = Ident;
-    LParen; proc_params = separated_list(Comma, name_length_pair); RParen;
-    LBrace; proc_body = list(stmt); RBrace
-    {{ proc_name; proc_params; proc_body }}
+  | K_proc; ap_name = Ident;
+    LParen; ap_params = separated_list(Comma, name_length_pair); RParen;
+    Colon; ap_result_width = Int;
+    LBrace; ap_body = list(stmt); RBrace
+    {{ ap_name; ap_params; ap_body; ap_result_width }}
 
 name_length_pair:
   | name = Ident; Colon; len = Int { name, len }
@@ -67,8 +69,8 @@ primary_expr:
   | bv = Bitvec
     { Expr_literal bv }
   | LParen; e = expr; RParen { e }
-  | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen
-    { Expr_call (proc_name, args) }
+  | func_name = Ident; LParen; args = separated_list(Comma, expr); RParen
+    { Expr_apply (func_name, args) }
 
 index:
   | LBrack; i = Int; RBrack
@@ -112,10 +114,12 @@ expr:
 stmt:
   | name = Ident; Eq; value = expr; Semi
     { Stmt_set (name, value) }
-  | K_let; name = Ident; Eq; value = expr; Semi
-    { Stmt_let (name, value) }
-  | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen; Semi
-    { Stmt_call (proc_name, args) }
+  | K_call; proc_name = Ident;
+    LParen; args = separated_list(Comma, expr); RParen; Semi
+    { Stmt_call (proc_name, args, None) }
+  | name = Ident; Eq; K_call; proc_name = Ident;
+    LParen; args = separated_list(Comma, expr); RParen; Semi
+    { Stmt_call (proc_name, args, Some name) }
   | K_return; value = expr; Semi
     { Stmt_return value }
 

@@ -21,8 +21,11 @@ let main () =
   let lexbuf' = Lexing.from_string ast_s in
   let ast' = Spec_parser.top Spec_lexer.read lexbuf' in
   if ast = ast'
-  then print_endline "PASS"
-  else begin
+  then begin
+    print_endline "PASS";
+    let env = Translate.translate_ast ast in
+    Format.printf "%a@." pp_env env
+  end else begin
     print_endline "FAIL";
     let ast_s' = Spec_ast.string_of_ast ast' in
     print_endline ast_s;
