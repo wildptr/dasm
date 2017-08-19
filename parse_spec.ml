@@ -23,8 +23,8 @@ let main () =
   if ast = ast'
   then begin
     print_endline "PASS";
-    let env = Translate.translate_ast ast in
-    Format.printf "%a@." pp_env env
+    let symtab = Translate.translate_ast ast in
+    Format.printf "%a@." Translate.pp_symtab symtab
   end else begin
     print_endline "FAIL";
     let ast_s' = Spec_ast.string_of_ast ast' in

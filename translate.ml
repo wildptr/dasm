@@ -6,12 +6,25 @@ open Spec_ast
 (* "%s takes exactly %d arguments" *)
 exception Wrong_arity of string * int
 exception Index_out_of_bounds of (astexpr * int) * int
-exception Width_mismatch
-exception Unbound_local of string
-exception Unbound_global of string
-exception Unbound_proc of string
-exception Set_const of string
+exception Width_mismatch of int * int
+exception Unbound_symbol of string
+exception Invalid_assignment of string
 exception Unknown_primitive of string
+exception Redefinition of string
+
+let check_width w1 w2 =
+  if w1 <> w2 then raise (Width_mismatch (w1, w2)) else ()
+
+type value =
+  | Global of global_value
+  | Local of int * int (* index, width *)
+  | Proc of proc
+  | Templ of proc_templ
+  | IConst of int
+  | BVConst of Bitvec.t
+  | Prim of string
+
+type symtab = value String.Map.t
 
 let prim_of_unary_op (op, e) =
   match op with
@@ -36,130 +49,165 @@ let width_of_binary_op (op, w1, w2) =
   | Concat ->
       w1 + w2
   | Add | Sub | And | Xor | Or ->
-      if w1 <> w2 then raise Width_mismatch; w1
+      check_width w1 w2; w1
   | Eq ->
-      if w1 <> w2 then raise Width_mismatch; 1
+      check_width w1 w2; 1
 
-let global_map : (reg * int) String.Map.t = [
-  "CF", (Flag_C, 1);
-  "PF", (Flag_P, 1);
-  "AF", (Flag_A, 1);
-  "ZF", (Flag_Z, 1);
-  "SF", (Flag_S, 1);
-  "DF", (Flag_D, 1);
-  "OF", (Flag_O, 1);
+let init_symtab = [
+  "AX", Global (R_AX, 32);
+  "CX", Global (R_CX, 32);
+  "DX", Global (R_DX, 32);
+  "BX", Global (R_BX, 32);
+  "SP", Global (R_SP, 32);
+  "BP", Global (R_BP, 32);
+  "SI", Global (R_SI, 32);
+  "DI", Global (R_DI, 32);
+  "CF", Global (Flag_C, 1);
+  "PF", Global (Flag_P, 1);
+  "AF", Global (Flag_A, 1);
+  "ZF", Global (Flag_Z, 1);
+  "SF", Global (Flag_S, 1);
+  "DF", Global (Flag_D, 1);
+  "OF", Global (Flag_O, 1);
 ] |> String.Map.of_alist_exn
 
-let env_proc_map env = env.env_proc_map
+let extend_symtab (name, value) st =
+  if String.Map.mem st name
+  then raise (Redefinition name)
+  else String.Map.add st ~key:name ~data:value
 
-let init_env =
-  { env_local_map = String.Map.empty;
-    env_proc_map = String.Map.empty }
+let try_lookup = String.Map.find
 
-let extend_env (name, width) env =
-  let id = String.Map.length env.env_local_map in
-  let env_local_map =
-    String.Map.add env.env_local_map ~key:name ~data:(id, width)
-  in
-  { env with env_local_map }, id
+let lookup st name =
+  match try_lookup st name with
+  | None -> raise (Unbound_symbol name)
+  | Some value -> value
 
-let extend_env_proc (key, data) env =
-  { env with env_proc_map = String.Map.add env.env_proc_map ~key ~data }
+let rec translate_cexpr st = function
+  | C_int i -> i
+  | C_sym s ->
+      begin match lookup st s with
+      | IConst i -> i
+      | _ -> failwithf "not an IConst value: %s" s ()
+      end
+  | C_binary (op, e1, e2) ->
+      let e1' = translate_cexpr st e1 in
+      let e2' = translate_cexpr st e2 in
+      let f =
+        match op with
+        | CB_add -> (+)
+        | CB_sub -> (-)
+        | CB_mul -> ( * )
+        | CB_div -> (/)
+        | CB_and -> (land)
+        | CB_or  -> (lor)
+        | CB_xor -> (lxor)
+      in
+      f e1' e2'
+  | C_unary (op, e) ->
+      let e' = translate_cexpr st e in
+      let f =
+        match op with
+        | CU_not -> (lnot)
+      in
+      f e'
 
-let lookup_local env name =
-  match String.Map.find env.env_local_map name with
-  | None -> raise (Unbound_local name)
-  | Some (i, width) -> i, width
-
-let try_lookup_global name =
-  String.Map.find global_map name
-
-let lookup_global name =
-  match try_lookup_global name with
-  | None -> raise (Unbound_global name)
-  | Some (reg, width) -> reg, width
-
-let lookup_proc env key =
-  match String.Map.find env.env_proc_map key with
-  | None -> raise (Unbound_proc key)
-  | Some data -> data
-
-let rec translate_expr env = function
+let rec translate_expr st = function
   | Expr_sym s ->
-      begin match try_lookup_global s with
-      | None ->
-          let i, w = lookup_local env s in
-          E_local i, w
-      | Some (r, w) ->
-          E_global r, w
+      begin match lookup st s with
+      | Local (i, w) -> E_local i, w
+      | Global (r, w) -> E_global r, w
+      | BVConst bv -> E_literal bv, Bitvec.length bv
+      | _ -> failwithf "not a Local or Global or BVConst value: %s" s ()
       end
   | Expr_literal bv -> E_literal bv, Bitvec.length bv
+  | Expr_literal2 (c_v, c_w) ->
+      let v = translate_cexpr st c_v in
+      let w = translate_cexpr st c_w in
+      E_literal (Bitvec.of_int w v), w
   | Expr_index (e, i) ->
-      let e', w = translate_expr env e in
+      let e', w = translate_expr st e in
       begin match i with
-      | Index_bit b ->
+      | Index_bit c_b ->
+          let b = translate_cexpr st c_b in
           if b >= w then raise (Index_out_of_bounds ((e,w),b));
           E_part (e', (b, b+1)), 1
-      | Index_part (hi', lo) ->
+      | Index_part (c_hi', c_lo) ->
+          let hi' = translate_cexpr st c_hi' in
+          let lo = translate_cexpr st c_lo in
           let hi = hi'+1 in
           if hi > w then raise (Index_out_of_bounds ((e,w),hi'));
           E_part (e', (lo, hi)), hi-lo
       end
   | Expr_apply (func_name, args) ->
-      (* handle built-in functions *)
-      begin match func_name with
-      | "add_ex" ->
-          let a1, a2, a3 =
-            match args with
-            | [a1;a2;a3] -> a1, a2, a3
-            | _ -> raise (Wrong_arity (func_name, 3))
+      let handle_builtin func_name =
+        let f1 prim =
+          let args', arg_widths =
+            List.unzip (List.map args ~f:(translate_expr st))
           in
-          let a1', w1 = translate_expr env a1 in
-          let a2', w2 = translate_expr env a2 in
-          let a3', w3 = translate_expr env a3 in
-          if w1 <> w2 then raise Width_mismatch;
-          if w3 <> 1 then raise Width_mismatch;
-          E_prim (P_add_ex (a1', a2', a3')), w1+1
+          let w = List.hd_exn arg_widths in
+          List.iter arg_widths ~f:(check_width w);
+          E_prim (prim args'), w
+        in
+        match func_name with
+        | "add_ex" ->
+            let a1, a2, a3 =
+              match args with
+              | [a1;a2;a3] -> a1, a2, a3
+              | _ -> raise (Wrong_arity (func_name, 3))
+            in
+            let a1', w1 = translate_expr st a1 in
+            let a2', w2 = translate_expr st a2 in
+            let a3', w3 = translate_expr st a3 in
+            check_width w1 w2;
+            check_width w3 1;
+            E_prim (P_add_ex (a1', a2', a3')), w1+1
+        | "and" -> f1 (fun args -> P_and args)
+        | "or"  -> f1 (fun args -> P_or  args)
+        | "xor" -> f1 (fun args -> P_xor args)
+        | _ -> raise (Unknown_primitive func_name)
+      in
+      begin match try_lookup st func_name with
+      | None -> handle_builtin func_name
+      | Some (Prim func_name) -> handle_builtin func_name
       | _ -> raise (Unknown_primitive func_name)
       end
   | Expr_unary (op, e) ->
-      let e', w = translate_expr env e in
+      let e', w = translate_expr st e in
       E_prim (prim_of_unary_op (op, e')), width_of_unary_op (op, w)
   | Expr_binary (op, e1, e2) ->
-      let e1', w1 = translate_expr env e1 in
-      let e2', w2 = translate_expr env e2 in
+      let e1', w1 = translate_expr st e1 in
+      let e2', w2 = translate_expr st e2 in
       E_prim (prim_of_binary_op (op, e1', e2')), width_of_binary_op (op, w1, w2)
-  (*| Expr_let (name, value, body) ->
-      let value', value_width = translate_expr env value in
-      let body', body_width = translate_expr (extend_env (name, value_width) env) body in
-      E_let (value', body'), body_width
-  | Expr_set (name, value) ->
-      let r, w = lookup_global env name in
-      let value', value_width = translate_expr env value in
-      if w <> value_width then raise Width_mismatch;
-      E_set (r, value'), 0
-  | Expr_seq (e1, e2) ->
-      let e1', w1 = translate_expr env e1 in
-      if w1 <> 0 then raise Width_mismatch;
-      let e2', w2 = translate_expr env e2 in
-      E_seq (e1', e2'), w2*)
+  | Expr_undef c_width ->
+      let width = translate_cexpr st c_width in
+      E_prim (P_undef width), width
 
-let translate_stmt env = function
+(* TODO: comment *)
+let translate_stmt st_ref env stmt =
+  let st = !st_ref in
+  match stmt with
   | Stmt_set (name, e) ->
-      begin match try_lookup_global name with
+      begin match try_lookup st name with
       | None ->
-          let e', width = translate_expr env e in
-          let env', id = extend_env (name, width) env in
-          env', S_setlocal (id, e')
-      | Some (r, r_width) ->
-          let e', e_width = translate_expr env e in
-          if r_width <> e_width then raise Width_mismatch;
-          env, S_setglobal (r, e')
+          let e', w = translate_expr st e in
+          let id = new_temp env w in
+          st_ref := extend_symtab (name, Local (id, w)) st;
+          append_stmt env (S_setlocal (id, e'))
+      | Some (Global (r, r_width)) ->
+          let e', e_width = translate_expr st e in
+          check_width r_width e_width;
+          append_stmt env (S_setglobal (r, e'))
+      | _ -> raise (Invalid_assignment name)
       end
   | Stmt_call (proc_name, args, result_name_opt) ->
-      let proc = lookup_proc env proc_name in
+      let proc =
+        match lookup st proc_name with
+        | Proc p -> p
+        | _ -> failwithf "not a Proc value: %s" proc_name ()
+      in
       let args, arg_widths =
-        List.unzip (List.map ~f:(translate_expr env) args)
+        List.unzip (List.map ~f:(translate_expr st) args)
       in
       let n_param = List.length proc.p_param_widths in
       let n_arg = List.length args in
@@ -167,45 +215,128 @@ let translate_stmt env = function
       (* check arg width *)
       List.iter (List.zip_exn proc.p_param_widths arg_widths)
         ~f:(fun (param_width, arg_width) ->
-          if param_width <> arg_width then raise Width_mismatch);
+          check_width param_width arg_width);
       (* function that translates arguments *)
       (*let rec f = function
         | [] -> proc_body
         | (arg, _) :: args'_widths' -> E_let (arg, (f args'_widths'))
       in
       f args'_widths, result_width*)
-      let env', result_opt =
-        match result_name_opt with
-        | None -> env, None
-        | Some name ->
-            let env', id = extend_env (name, proc.p_result_width) env in
-            env', Some id
-      in
-      env', S_call (proc_name, args, result_opt)
+      begin match result_name_opt with
+      | None -> ()
+      | Some name ->
+          let rhs_width = proc.p_result_width in
+          begin match try_lookup st name with
+          | None ->
+              let id = new_temp env rhs_width in
+              st_ref := extend_symtab (name, Local (id, rhs_width)) st;
+              append_stmt env (S_call (proc, args, Some id))
+          | Some (Global (r, lhs_width)) ->
+              check_width lhs_width rhs_width;
+              let id = new_temp env rhs_width in
+              append_stmt env (S_call (proc, args, Some id));
+              append_stmt env (S_setglobal (r, E_local id))
+          | _ -> raise (Invalid_assignment name)
+          end
+      end
   | Stmt_return e ->
-      let e', _ = translate_expr env e in
-      env, S_return e'
+      let e', _ = translate_expr st e in
+      append_stmt env (S_return e')
+  | Stmt_load (c_size, addr, name) ->
+      let size = translate_cexpr st c_size in
+      let w = size*8 in
+      let id = new_temp env w in
+      st_ref := extend_symtab (name, Local (id, w)) st;
+      let addr', _ = translate_expr st addr in
+      append_stmt env (S_load (size, addr', id))
+  | Stmt_store (c_size, addr, data) ->
+      let size = translate_cexpr st c_size in
+      let addr', _ = translate_expr st addr in
+      let data', data_width = translate_expr st data in
+      check_width (size*8) data_width;
+      append_stmt env (S_store (size, addr', data'))
 
-let translate_proc env proc =
+let translate_proc st proc =
   (* construct static environment to translate function body in *)
-  let body_env =
-    List.fold proc.ap_params ~init:env
-    ~f:(fun env (param_name, param_width) ->
-      fst (extend_env (param_name, param_width) env))
+  let proc_st = ref st in
+  let proc_env = new_env () in
+  List.iter proc.ap_params
+    ~f:begin fun (param_name, c_param_width) ->
+      let param_width = translate_cexpr !proc_st c_param_width in
+      let arg_id = new_temp proc_env param_width in
+      proc_st :=
+        extend_symtab (param_name, Local (arg_id, param_width)) !proc_st
+    end;
+  let param_widths =
+    List.map proc.ap_params ~f:(fun (_, c_w) -> translate_cexpr st c_w)
   in
-  let param_widths = List.map proc.ap_params ~f:snd in
-  let env', low_stmts_rev =
-    List.fold proc.ap_body ~init:(body_env, []) ~f:(fun (env, low_stmts_rev) stmt ->
-      let env', low_stmt = translate_stmt env stmt in
-      env', low_stmt :: low_stmts_rev)
+  let result_width = translate_cexpr st proc.ap_result_width in
+  List.iter proc.ap_body ~f:(translate_stmt proc_st proc_env);
+  let p_local_widths =
+    Array.create 0 ~len:(Int.Table.length proc_env.local_tab)
   in
-  { p_body = List.rev low_stmts_rev;
+  Int.Table.iteri proc_env.local_tab
+    ~f:(fun ~key ~data -> p_local_widths.(key) <- data);
+  { p_name = proc.ap_name;
+    p_body = get_stmt_list proc_env;
     p_param_widths = param_widths;
-    p_result_width = proc.ap_result_width;
-    p_env = env' }
+    p_result_width = result_width;
+    p_local_widths }
 
 let translate_ast ast =
-  List.fold ast ~init:init_env ~f:begin fun env (Decl_proc proc) ->
-    let proc' = translate_proc env proc in
-    extend_env_proc (proc.ap_name, proc') env
+  List.fold ast ~init:init_symtab ~f:begin fun st decl ->
+    match decl with
+    | Decl_proc proc ->
+        let proc' = translate_proc st proc in
+        extend_symtab (proc.ap_name, Proc proc') st
+    | Decl_proc_templ pt ->
+        extend_symtab (pt.pt_name, Templ pt) st
+    | Decl_proc_inst pi ->
+        let pt =
+          match lookup st pi.pi_templ_name with
+          | Templ pt -> pt
+          | _ -> failwithf "not a Templ value: %s" pi.pi_templ_name ()
+        in
+        let named_args = List.zip_exn pt.pt_templ_params pi.pi_templ_args in
+        let inst_st =
+          List.fold named_args ~init:st ~f:begin fun st (name, arg) ->
+            let value =
+              match arg with
+              | TA_int i -> IConst i
+              | TA_bitvec v -> BVConst v
+              | TA_prim s -> Prim s
+            in
+            extend_symtab (name, value) st
+          end
+        in
+        let proc =
+          { ap_name = pi.pi_inst_name;
+            ap_params = pt.pt_proc_params;
+            ap_body = pt.pt_body;
+            ap_result_width = pt.pt_result_width }
+        in
+        let proc' = translate_proc inst_st proc in
+        extend_symtab (proc.ap_name, Proc proc') st
   end
+
+let pp_value f = function
+  | Global (r, w) ->
+      fprintf f "Global %s:%d" (string_of_reg r) w
+  | Local (i, w) ->
+      fprintf f "Local %d:%d" i w
+  | Proc p ->
+      fprintf f "Proc %a" pp_proc p
+  | Templ _ ->
+      fprintf f "Templ"
+  | IConst i ->
+      fprintf f "Iconst %d" i
+  | BVConst bv ->
+      fprintf f "BVConst %a" Bitvec.pp bv
+  | Prim s ->
+      fprintf f "Prim %s" s
+
+let pp_symtab f st =
+  fprintf f "@[<v>";
+  String.Map.iteri st ~f:(fun ~key ~data ->
+    fprintf f "%s: %a@ " key pp_value data);
+  fprintf f "@]"

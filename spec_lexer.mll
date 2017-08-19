@@ -16,9 +16,12 @@ let keyword_map : token String.Map.t =
   [
     "call", K_call;
     "if", K_if;
-    "let", K_let;
+    "load", K_load;
     "proc", K_proc;
     "return", K_return;
+    "store", K_store;
+    "template", K_template;
+    "undefined", K_undefined;
   ]
   |> String.Map.of_alist_exn
 
@@ -42,16 +45,21 @@ rule read = parse
       | Some k -> k
       | None -> Ident s }
   | "==" { EqEq }
+  | '$' { Dollar }
   | '&' { Amp }
   | '(' { LParen }
   | ')' { RParen }
+  | '*' { Star }
   | '+' { Plus }
   | ',' { Comma }
   | '-' { Minus }
   | '.' { Dot }
+  | '/' { Slash }
   | ':' { Colon }
   | ';' { Semi }
+  | '<' { LAngle }
   | '=' { Eq }
+  | '>' { RAngle }
   | '[' { LBrack }
   | ']' { RBrack }
   | '^' { Caret }

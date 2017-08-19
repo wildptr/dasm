@@ -366,19 +366,6 @@ let fpu_mnem_table2 : fpu_inst_format array =
     FPU_A "";
   |]
 
-type prefix =
-  | Prefix_26
-  | Prefix_2e
-  | Prefix_36
-  | Prefix_3e
-  | Prefix_64
-  | Prefix_65
-  | Prefix_66
-  | Prefix_67
-  | Prefix_f0
-  | Prefix_f2
-  | Prefix_f3
-
 let prefix_of_char = function
   | '\x26' -> Some Prefix_26
   | '\x2e' -> Some Prefix_2e
@@ -392,32 +379,6 @@ let prefix_of_char = function
   | '\xf2' -> Some Prefix_f2
   | '\xf3' -> Some Prefix_f3
   | _ -> None
-
-let prefix_mask = function
-  | Prefix_26
-  | Prefix_2e
-  | Prefix_36
-  | Prefix_3e
-  | Prefix_64
-  | Prefix_65 -> 0x1c
-  | Prefix_66 -> 0x20
-  | Prefix_67 -> 0x40
-  | Prefix_f0
-  | Prefix_f2
-  | Prefix_f3 -> 3
-
-let prefix_value = function
-  | Prefix_26 -> 1 lsl 2
-  | Prefix_2e -> 2 lsl 2
-  | Prefix_36 -> 3 lsl 2
-  | Prefix_3e -> 4 lsl 2
-  | Prefix_64 -> 5 lsl 2
-  | Prefix_65 -> 6 lsl 2
-  | Prefix_66 -> 1 lsl 5
-  | Prefix_67 -> 1 lsl 6
-  | Prefix_f0 -> 1
-  | Prefix_f2 -> 2
-  | Prefix_f3 -> 3
 
 exception MutuallyExclusivePrefixes
 exception NotImplemented
@@ -1060,7 +1021,7 @@ let main () =
   let in_path = Sys.argv.(1) in
   let code = In_channel.read_all in_path in
   let s = Char_stream.of_string code in
-  let elab_env = Elaborate.new_env () in
+  let elab_env = Semant.new_env () in
   let rec loop () =
     let saved_pos = Char_stream.pos s in
     let inst = disassemble Mode32bit s in
@@ -1079,7 +1040,7 @@ let main () =
   try
     loop ()
   with Char_stream.End ->
-    let stmts = Elaborate.get_stmt_list elab_env in
+    let stmts = Semant.get_stmt_list elab_env in
     List.iter stmts ~f:(fun stmt -> Format.printf "%a@." Semant.pp_stmt stmt)
 
 let () = main ()

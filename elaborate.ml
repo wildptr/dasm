@@ -2,26 +2,6 @@ open Core
 open Inst
 open Semant
 
-type elab_env = {
-  local_tab : int Int.Table.t;
-  mutable stmts_rev : stmt list;
-}
-
-let new_env () =
-  { local_tab = Int.Table.create ();
-    stmts_rev = [] }
-
-let new_temp env width =
-  let id = Int.Table.length env.local_tab in
-  Int.Table.add_exn env.local_tab ~key:id ~data:width;
-  id
-
-let append_stmt env stmt =
-  env.stmts_rev <- stmt :: env.stmts_rev
-
-let get_stmt_list env =
-  List.rev env.stmts_rev
-
 let eAX = E_global R_AX
 let eCX = E_global R_CX
 let eDX = E_global R_DX
@@ -48,8 +28,8 @@ let e_arr = [| eAX; eCX; eDX; eBX; eSP; eBP; eSI; eDI |]
 let gpr_set_size = function
   | Reg8bitLegacy | Reg8bitUniform -> 1
   | Reg16bit -> 2
-  | Reg32bit -> 3
-  | Reg64bit -> 4
+  | Reg32bit -> 4
+  | Reg64bit -> 8
 
 let elaborate_mem_addr m =
   let e_base =
@@ -90,7 +70,7 @@ let elaborate_g_operand env reg_set = function
       let size = gpr_set_size reg_set in
       let e_addr = elaborate_mem_addr m in
       let temp = new_temp env (size*8) in
-      append_stmt env (S_load (e_addr, size, temp));
+      append_stmt env (S_load (size, e_addr, temp));
       E_local temp
 
 let elaborate_writeback env reg_set g e_data =
@@ -106,33 +86,234 @@ let elaborate_writeback env reg_set g e_data =
   | G_mem m ->
       let size = gpr_set_size reg_set in
       let e_addr = elaborate_mem_addr m in
-      append_stmt env (S_store (e_addr, size, e_data))
+      append_stmt env (S_store (size, e_addr, e_data))
 
 let predef_table = String.Table.create ()
+
+let predef = String.Table.find_exn predef_table
 
 let elaborate_inst env (inst : inst) : unit =
   let extopcode = extopcode_of_inst inst in
   let opcode, r, prefix, mode = decode_extopcode extopcode in
+  let alt_data = prefix land (prefix_mask Prefix_66) <> 0 in
+  let word_size =
+    match mode with
+    | Mode16bit -> if alt_data then 4 else 2
+    | _ -> if alt_data then 2 else 4
+  in
+  let operand = operand_of_inst inst in
+  let do_binary f size st ld1 ld2 =
+    let src1 = ld1 size in
+    let src2 = ld2 size in
+    let dst_temp = new_temp env (size*8) in
+    f size (src1, src2, dst_temp);
+    st size (E_local dst_temp)
+  in
+  let ld_g size =
+    let reg_set = gpr_set_of_reg_operand mode size in
+    match operand with
+    | Op_M g -> elaborate_g_operand env reg_set g
+    | _ -> assert false
+  in
+  let ld_r r size =
+    let reg_set = gpr_set_of_reg_operand mode size in
+    elaborate_reg_operand reg_set r
+  in
+  let ld_i size =
+    match operand with
+    | Op_I imm -> E_literal (Bitvec.of_int (size*8) imm)
+    | _ -> assert false
+  in
+  let st_g size data =
+    let reg_set = gpr_set_of_reg_operand mode size in
+    match operand with
+    | Op_M g -> elaborate_writeback env reg_set g data
+    | _ -> assert false
+  in
+  let st_r r size data =
+    let reg_set = gpr_set_of_reg_operand mode size in
+    elaborate_writeback env reg_set (G_reg r) data
+  in
+  let st_nop _ _ = () in
+  let f_add size (src1, src2, dst_temp) =
+    append_stmt env begin
+      S_call begin
+        predef (sprintf "adc%d" (size*8)),
+        [src1; src2; E_literal (Bitvec.zero 1)],
+        Some dst_temp
+      end
+    end
+  in
+  let f_or size (src1, src2, dst_temp) =
+    append_stmt env begin
+      S_call begin
+        predef (sprintf "or%d" (size*8)),
+        [src1; src2],
+        Some dst_temp
+      end
+    end
+  in
+  let f_and size (src1, src2, dst_temp) =
+    append_stmt env begin
+      S_call begin
+        predef (sprintf "and%d" (size*8)),
+        [src1; src2],
+        Some dst_temp
+      end
+    end
+  in
+  let f_xor size (src1, src2, dst_temp) =
+    append_stmt env begin
+      S_call begin
+        predef (sprintf "xor%d" (size*8)),
+        [src1; src2],
+        Some dst_temp
+      end
+    end
+  in
+  let f_adc size (src1, src2, dst_temp) =
+    append_stmt env begin
+      S_call begin
+        predef (sprintf "adc%d" (size*8)),
+        [src1; src2; E_global Flag_C],
+        Some dst_temp
+      end
+    end
+  in
+  let f_sbb size (src1, src2, dst_temp) =
+    append_stmt env begin
+      S_call begin
+        predef (sprintf "sbb%d" (size*8)),
+        [src1; src2; E_global Flag_C],
+        Some dst_temp
+      end
+    end
+  in
+  let f_sub size (src1, src2, dst_temp) =
+    append_stmt env begin
+      S_call begin
+        predef (sprintf "sbb%d" (size*8)),
+        [src1; src2; E_literal (Bitvec.zero 1)],
+        Some dst_temp
+      end
+    end
+  in
   if opcode < 0x100
   then
     match opcode with
     | 0x00 -> (* add g1,r1 *)
-        let reg_set = gpr_set_of_reg_operand mode 1 in
-        begin match operand_of_inst inst with
-        | Op_M g ->
-            let e_g = elaborate_g_operand env reg_set g in
-            let e_r = elaborate_reg_operand reg_set r in
-            let result_temp = new_temp env 8 in
-            let e_result = E_local result_temp in
-            append_stmt env (S_call ("adc8", [e_g; e_r; E_literal (Bitvec.zero 1)], Some result_temp));
-            elaborate_writeback env reg_set g e_result
-        | _ ->
-            failwith "not implemented"
-        end
+        do_binary f_add 1 st_g ld_g (ld_r r)
+    | 0x01 -> (* add gw,rw *)
+        do_binary f_add word_size st_g ld_g (ld_r r)
+    | 0x02 -> (* add r1,g1 *)
+        do_binary f_add 1 (st_r r) (ld_r r) ld_g
+    | 0x03 -> (* add rw,gw *)
+        do_binary f_add word_size (st_r r) (ld_r r) ld_g
+    | 0x04 -> (* add a1,i *)
+        do_binary f_add 1 (st_r 0) (ld_r 0) ld_i
+    | 0x05 -> (* add aw,i *)
+        do_binary f_add word_size (st_r 0) (ld_r 0) ld_i
+    | 0x06 -> (* push es *)
+        append_stmt env (S_call (predef "push32_segr", [E_global R_ES], None))
+    | 0x07 -> (* pop es *)
+        let temp = new_temp env 32 in
+        append_stmt env (S_call (predef "pop32", [], Some temp));
+        append_stmt env (S_setglobal (R_ES, E_part (E_local temp, (0, 16))))
+    | 0x08 -> (* or g1,r1 *)
+        do_binary f_or 1 st_g ld_g (ld_r r)
+    | 0x09 -> (* or gw,rw *)
+        do_binary f_or word_size st_g ld_g (ld_r r)
+    | 0x0a -> (* or r1,g1 *)
+        do_binary f_or 1 (st_r r) (ld_r r) ld_g
+    | 0x0b -> (* or rw,gw *)
+        do_binary f_or word_size (st_r r) (ld_r r) ld_g
+    | 0x0c -> (* or a1,i *)
+        do_binary f_or 1 (st_r 0) (ld_r 0) ld_i
+    | 0x0d -> (* or aw,i *)
+        do_binary f_or word_size (st_r 0) (ld_r 0) ld_i
+
+    | 0x10 -> (* adc g1,r1 *)
+        do_binary f_adc 1 st_g ld_g (ld_r r)
+    | 0x11 -> (* adc gw,rw *)
+        do_binary f_adc word_size st_g ld_g (ld_r r)
+    | 0x12 -> (* adc r1,g1 *)
+        do_binary f_adc 1 (st_r r) (ld_r r) ld_g
+    | 0x13 -> (* adc rw,gw *)
+        do_binary f_adc word_size (st_r r) (ld_r r) ld_g
+    | 0x14 -> (* adc a1,i *)
+        do_binary f_adc 1 (st_r 0) (ld_r 0) ld_i
+    | 0x15 -> (* adc aw,i *)
+        do_binary f_adc word_size (st_r 0) (ld_r 0) ld_i
+
+    | 0x18 -> (* sbb g1,r1 *)
+        do_binary f_sbb 1 st_g ld_g (ld_r r)
+    | 0x19 -> (* sbb gw,rw *)
+        do_binary f_sbb word_size st_g ld_g (ld_r r)
+    | 0x1a -> (* sbb r1,g1 *)
+        do_binary f_sbb 1 (st_r r) (ld_r r) ld_g
+    | 0x1b -> (* sbb rw,gw *)
+        do_binary f_sbb word_size (st_r r) (ld_r r) ld_g
+    | 0x1c -> (* sbb a1,i *)
+        do_binary f_sbb 1 (st_r 0) (ld_r 0) ld_i
+    | 0x1d -> (* sbb aw,i *)
+        do_binary f_sbb word_size (st_r 0) (ld_r 0) ld_i
+
+    | 0x20 -> (* and g1,r1 *)
+        do_binary f_and 1 st_g ld_g (ld_r r)
+    | 0x21 -> (* and gw,rw *)
+        do_binary f_and word_size st_g ld_g (ld_r r)
+    | 0x22 -> (* and r1,g1 *)
+        do_binary f_and 1 (st_r r) (ld_r r) ld_g
+    | 0x23 -> (* and rw,gw *)
+        do_binary f_and word_size (st_r r) (ld_r r) ld_g
+    | 0x24 -> (* and a1,i *)
+        do_binary f_and 1 (st_r 0) (ld_r 0) ld_i
+    | 0x25 -> (* and aw,i *)
+        do_binary f_and word_size (st_r 0) (ld_r 0) ld_i
+
+    | 0x28 -> (* sub g1,r1 *)
+        do_binary f_sub 1 st_g ld_g (ld_r r)
+    | 0x29 -> (* sub gw,rw *)
+        do_binary f_sub word_size st_g ld_g (ld_r r)
+    | 0x2a -> (* sub r1,g1 *)
+        do_binary f_sub 1 (st_r r) (ld_r r) ld_g
+    | 0x2b -> (* sub rw,gw *)
+        do_binary f_sub word_size (st_r r) (ld_r r) ld_g
+    | 0x2c -> (* sub a1,i *)
+        do_binary f_sub 1 (st_r 0) (ld_r 0) ld_i
+    | 0x2d -> (* sub aw,i *)
+        do_binary f_sub word_size (st_r 0) (ld_r 0) ld_i
+
+    | 0x30 -> (* xor g1,r1 *)
+        do_binary f_xor 1 st_g ld_g (ld_r r)
+    | 0x31 -> (* xor gw,rw *)
+        do_binary f_xor word_size st_g ld_g (ld_r r)
+    | 0x32 -> (* xor r1,g1 *)
+        do_binary f_xor 1 (st_r r) (ld_r r) ld_g
+    | 0x33 -> (* xor rw,gw *)
+        do_binary f_xor word_size (st_r r) (ld_r r) ld_g
+    | 0x34 -> (* xor a1,i *)
+        do_binary f_xor 1 (st_r 0) (ld_r 0) ld_i
+    | 0x35 -> (* xor aw,i *)
+        do_binary f_xor word_size (st_r 0) (ld_r 0) ld_i
+
+    | 0x38 -> (* cmp g1,r1 *)
+        do_binary f_sub 1 st_nop ld_g (ld_r r)
+    | 0x39 -> (* cmp gw,rw *)
+        do_binary f_sub word_size st_nop ld_g (ld_r r)
+    | 0x3a -> (* cmp r1,g1 *)
+        do_binary f_sub 1 st_nop (ld_r r) ld_g
+    | 0x3b -> (* cmp rw,gw *)
+        do_binary f_sub word_size st_nop (ld_r r) ld_g
+    | 0x3c -> (* cmp a1,i *)
+        do_binary f_sub 1 st_nop (ld_r 0) ld_i
+    | 0x3d -> (* cmp aw,i *)
+        do_binary f_sub word_size st_nop (ld_r 0) ld_i
+
     | _ ->
-        failwith "not implemented"
+        failwithf "not implemented: opcode=%x" opcode ()
   else
-    failwith "not implemented"
+    failwithf "not implemented: opcode=%x" opcode ()
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in
@@ -154,12 +335,14 @@ let load_spec filepath =
         fail_with_parsing_error filepath lexbuf msg
   in
   In_channel.close in_chan;
-  let static_env =
+  let symtab =
     try Translate.translate_ast spec_ast with
     | Translate.Index_out_of_bounds ((e,w),b) ->
         fprintf stderr "width of expression %s is %d, %d is out of bounds\n"
           (Spec_ast.string_of_astexpr e) w b;
         exit 1
   in
-  String.Map.iteri (Translate.env_proc_map static_env) ~f:(fun ~key ~data ->
-    Hashtbl.set predef_table ~key ~data)
+  String.Map.iteri symtab ~f:(fun ~key ~data ->
+    match data with
+    | Proc proc -> Hashtbl.set predef_table ~key ~data:proc
+    | _ -> ())

@@ -17,6 +17,13 @@ type reg =
   | Flag_S (*  7 *)
   | Flag_D (* 10 *)
   | Flag_O (* 11 *)
+  | Flag_0f
+  | R_ES
+  | R_CS
+  | R_SS
+  | R_DS
+  | R_FS
+  | R_GS
 
 let string_of_reg = function
   | R_AX -> "AX"
@@ -34,6 +41,13 @@ let string_of_reg = function
   | Flag_S -> "SF"
   | Flag_D -> "DF"
   | Flag_O -> "OF"
+  | R_ES -> "ES"
+  | R_CS -> "CS"
+  | R_SS -> "SS"
+  | R_DS -> "DS"
+  | R_FS -> "FS"
+  | R_GS -> "GS"
+  | _ -> "??"
 
 exception Unindexed_register of reg
 
@@ -46,6 +60,12 @@ let index_of_reg = function
   | R_BP -> 5
   | R_SI -> 6
   | R_DI -> 7
+  | R_ES -> 0
+  | R_CS -> 1
+  | R_SS -> 2
+  | R_DS -> 3
+  | R_FS -> 4
+  | R_GS -> 5
   | _ as r -> raise (Unindexed_register r)
 
 type prim =
@@ -58,6 +78,7 @@ type prim =
   | P_xor of expr list
   | P_or of expr list
   | P_shiftleft of expr * expr
+  | P_undef of int
   | P_add_ex of expr * expr * expr (* add with carry *)
 
 and expr =
@@ -72,28 +93,27 @@ type stmt =
   | S_setlocal of int * expr (* SSA *)
   | S_setglobal of reg * expr
   | S_setglobal_part of reg * (int * int) * expr
-  | S_load of expr * int * int
-  | S_store of expr * int * expr
+  | S_load of int * expr * int
+  | S_store of int * expr * expr
   | S_label of string
   | S_jump of string
   | S_jump_var of expr
   | S_br of expr * string
   | S_br_var of expr * expr
   (* the following do not occur after elaboration *)
-  | S_call of string * expr list * int option
+  | S_call of proc * expr list * int option
   | S_return of expr
 
-type proc = {
+and proc = {
+  (* for pretty printing *)
+  p_name : string;
   p_body : stmt list;
   p_param_widths : int list;
   p_result_width : int;
-  p_env : env;
+  p_local_widths : int array;
 }
 
-and env = {
-  env_local_map : (int * int) String.Map.t;
-  env_proc_map : proc String.Map.t;
-}
+type global_value = reg * int
 
 let rec pp_prim f p =
   let pp_prim_es f op_char es =
@@ -117,11 +137,14 @@ let rec pp_prim f p =
   | P_or es -> pp_prim_es f '|' es
   | P_shiftleft (e1, e2) ->
       fprintf f "@[(%a <<@ %a)@]" pp_expr e1 pp_expr e2
+  | P_undef width ->
+      fprintf f "undefined(%d)" width
   | P_add_ex (e_a, e_b, e_c) ->
       fprintf f "@[add_ex(%a,@ %a,@ %a)@]" pp_expr e_a pp_expr e_b pp_expr e_c
 
 and pp_expr f = function
-  | E_literal bv -> Bitvec.pp f bv
+  | E_literal bv -> (*fprintf f "'%a'" Bitvec.pp bv*)
+      fprintf f "%d:%d" (Bitvec.to_int bv) (Bitvec.length bv)
   | E_local i -> fprintf f "$%d" i
   | E_global r -> fprintf f "%s" (string_of_reg r)
   | E_part (e, (lo, hi)) -> fprintf f "@[%a[%d:%d]@]" pp_expr e lo hi
@@ -142,10 +165,10 @@ let pp_stmt f = function
       fprintf f "%s @[=@ %a@]" (string_of_reg r) pp_expr e
   | S_setglobal_part (r, (lo, hi), e) ->
       fprintf f "%s[%d:%d] @[=@ %a@]" (string_of_reg r) lo hi pp_expr e
-  | S_load (e_addr, size, dst_id) ->
-      fprintf f "$%d @[=@ load %a,@ %d@]" dst_id pp_expr e_addr size
-  | S_store (e_addr, size, e_data) ->
-      fprintf f "store @[%a,@ %d,@ %a@]" pp_expr e_addr size pp_expr e_data
+  | S_load (size, e_addr, dst_id) ->
+      fprintf f "$%d @[=@ load %d,@ %a@]" dst_id size pp_expr e_addr
+  | S_store (size, e_addr, e_data) ->
+      fprintf f "store @[%d,@ %a,@ %a@]" size pp_expr e_addr pp_expr e_data
   | S_label l ->
       fprintf f "%s:" l
   | S_jump l ->
@@ -156,12 +179,12 @@ let pp_stmt f = function
       fprintf f "br @[%a,@ %s@]" pp_expr e l
   | S_br_var (e, e') ->
       fprintf f "br_var @[%a,@ %a@]" pp_expr e pp_expr e'
-  | S_call (proc_name, args, result_opt) ->
+  | S_call (proc, args, result_opt) ->
       begin match result_opt with
       | None -> ()
       | Some id -> fprintf f "$%d @[=@ " id
       end;
-      fprintf f "%s(" proc_name;
+      fprintf f "%s(" proc.p_name;
       let n = List.length args in
       List.iteri args ~f:(fun i arg ->
         pp_expr f arg;
@@ -170,7 +193,7 @@ let pp_stmt f = function
   | S_return e ->
       fprintf f "return @[%a@]" pp_expr e
 
-let rec pp_proc f proc =
+let pp_proc f proc =
   let n_param = List.length proc.p_param_widths in
   fprintf f "@[<v>";
   (* print header *)
@@ -180,7 +203,7 @@ let rec pp_proc f proc =
     if i < n_param-1 then fprintf f ",@ ");
   fprintf f "):%d@]@ " proc.p_result_width;
   (* print env *)
-  fprintf f "%a@ " pp_env proc.p_env;
+  (*fprintf f "%a@ " pp_env proc.p_env;*)
   (* print body*)
   fprintf f "{@ ";
   fprintf f "  @[<v>";
@@ -191,7 +214,7 @@ let rec pp_proc f proc =
   fprintf f "@]@ ";
   fprintf f "}@]";
 
-and pp_env f env =
+(*and pp_env f env =
   fprintf f "@[<v>";
   String.Map.iteri env.env_local_map ~f:(fun ~key ~data ->
     let id, width = data in
@@ -202,4 +225,24 @@ and pp_env f env =
   String.Map.iteri env.env_proc_map ~f:(fun ~key ~data ->
     let proc = data in
     fprintf f "%s@   @[%a@]@ " key pp_proc proc);
-  fprintf f "@]"
+  fprintf f "@]"*)
+
+type env = {
+  local_tab : int Int.Table.t;
+  mutable stmts_rev : stmt list;
+}
+
+let new_env () =
+  { local_tab = Int.Table.create ();
+    stmts_rev = [] }
+
+let new_temp env width =
+  let id = Int.Table.length env.local_tab in
+  Int.Table.add_exn env.local_tab ~key:id ~data:width;
+  id
+
+let append_stmt env stmt =
+  env.stmts_rev <- stmt :: env.stmts_rev
+
+let get_stmt_list env =
+  List.rev env.stmts_rev

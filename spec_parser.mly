@@ -8,16 +8,21 @@ open Spec_ast
 %token <int> Int
 %token <Bitvec.t> Bitvec
 %token EqEq
+%token Dollar
 %token Amp
 %token LParen
 %token RParen
+%token Star
 %token Plus
 %token Comma
 %token Minus
 %token Dot
+%token Slash
 %token Colon
 %token Semi
+%token LAngle
 %token Eq
+%token RAngle
 %token LBrack
 %token RBrack
 %token Caret
@@ -28,14 +33,18 @@ open Spec_ast
 
 %token K_call
 %token K_if
-%token K_let
+%token K_load
 %token K_proc
 %token K_return
+%token K_store
+%token K_template
+%token K_undefined
 
 %left Bar
 %left Caret
 %left Amp
 %left EqEq
+%left Star Slash
 %left Plus Minus
 %left Dot
 
@@ -49,16 +58,19 @@ top:
 
 decl:
   | proc_def { Decl_proc $1 }
+  | proc_templ { Decl_proc_templ $1 }
+  | proc_inst { Decl_proc_inst $1 }
 
 proc_def:
   | K_proc; ap_name = Ident;
     LParen; ap_params = separated_list(Comma, name_length_pair); RParen;
-    Colon; ap_result_width = Int;
+    result_width_opt = option(preceded(Colon, cexpr));
     LBrace; ap_body = list(stmt); RBrace
-    {{ ap_name; ap_params; ap_body; ap_result_width }}
+    {{ ap_name; ap_params; ap_body;
+       ap_result_width = Option.value result_width_opt ~default:(C_int 0) }}
 
 name_length_pair:
-  | name = Ident; Colon; len = Int { name, len }
+  | name = Ident; Colon; len = cexpr { name, len }
 
 primary_expr:
   | name = Ident
@@ -68,14 +80,18 @@ primary_expr:
       else Expr_local_sym name }*)
   | bv = Bitvec
     { Expr_literal bv }
+  | LBrace; v = cexpr; Colon; w = cexpr; RBrace
+    { Expr_literal2 (v, w) }
   | LParen; e = expr; RParen { e }
   | func_name = Ident; LParen; args = separated_list(Comma, expr); RParen
     { Expr_apply (func_name, args) }
+  | K_undefined; LParen; width = cexpr; RParen
+    { Expr_undef width }
 
 index:
-  | LBrack; i = Int; RBrack
+  | LBrack; i = cexpr; RBrack
     { Index_bit i }
-  | LBrack; hi = Int; Colon; lo = Int; RBrack
+  | LBrack; hi = cexpr; Colon; lo = cexpr; RBrack
     { Index_part (hi, lo) }
 
 postfix_expr:
@@ -108,8 +124,7 @@ binary_expr:
   | e1 = binary_expr; Bar; e2 = binary_expr
     { Expr_binary (Or, e1, e2) }
 
-expr:
-  | binary_expr {$1}
+expr: binary_expr {$1}
 
 stmt:
   | name = Ident; Eq; value = expr; Semi
@@ -122,6 +137,63 @@ stmt:
     { Stmt_call (proc_name, args, Some name) }
   | K_return; value = expr; Semi
     { Stmt_return value }
+  | name = Ident; Eq; K_load; size = cexpr; Comma; addr = expr; Semi
+    { Stmt_load (size, addr, name) }
+  | K_store; size = cexpr; Comma; addr = expr; Comma; data = expr; Semi
+    { Stmt_store (size, addr, data) }
 
 expr_top:
   | expr EOF {$1}
+
+c_unop:
+  | Tilde { CU_not }
+
+primary_cexpr:
+  | i = Int
+    { C_int i }
+  | s = Ident
+    { C_sym s }
+  | LParen; e = cexpr; RParen {e}
+
+prefix_cexpr:
+  | primary_cexpr {$1}
+  | op = c_unop; e = prefix_cexpr
+    { C_unary (op, e) }
+
+binary_cexpr:
+  | prefix_cexpr {$1}
+  | e1 = binary_cexpr; Plus; e2 = binary_cexpr
+    { C_binary (CB_add, e1, e2) }
+  | e1 = binary_cexpr; Minus; e2 = binary_cexpr
+    { C_binary (CB_sub, e1, e2) }
+  | e1 = binary_cexpr; Star; e2 = binary_cexpr
+    { C_binary (CB_mul, e1, e2) }
+  | e1 = binary_cexpr; Slash; e2 = binary_cexpr
+    { C_binary (CB_div, e1, e2) }
+  | e1 = binary_cexpr; Amp; e2 = binary_cexpr
+    { C_binary (CB_and, e1, e2) }
+  | e1 = binary_cexpr; Caret; e2 = binary_cexpr
+    { C_binary (CB_xor, e1, e2) }
+  | e1 = binary_cexpr; Bar; e2 = binary_cexpr
+    { C_binary (CB_or, e1, e2) }
+
+cexpr: binary_cexpr {$1}
+
+proc_templ:
+  | K_template; K_proc; pt_name = Ident;
+    LAngle; pt_templ_params = separated_list(Comma, Ident); RAngle;
+    LParen; pt_proc_params = separated_list(Comma, name_length_pair); RParen;
+    result_width_opt = option(preceded(Colon, cexpr));
+    LBrace; pt_body = list(stmt); RBrace
+    {{ pt_name; pt_templ_params; pt_proc_params; pt_body;
+       pt_result_width = Option.value result_width_opt ~default:(C_int 0) }}
+
+proc_inst:
+  | K_proc; pi_inst_name = Ident; Eq; pi_templ_name = Ident;
+    LAngle; pi_templ_args = separated_nonempty_list(Comma, templ_arg); RAngle; Semi
+    {{ pi_inst_name; pi_templ_name; pi_templ_args }}
+
+templ_arg:
+  | Int { TA_int $1 }
+  | Bitvec { TA_bitvec $1 }
+  | Ident { TA_prim $1 }
