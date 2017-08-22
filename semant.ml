@@ -79,6 +79,7 @@ type prim =
   | P_or of expr list
   | P_shiftleft of expr * expr
   | P_undef of int
+  | P_repeat of expr * int
   | P_add_ex of expr * expr * expr (* add with carry *)
 
 and expr =
@@ -139,8 +140,10 @@ let rec pp_prim f p =
       fprintf f "@[(%a <<@ %a)@]" pp_expr e1 pp_expr e2
   | P_undef width ->
       fprintf f "undefined(%d)" width
+  | P_repeat (data, n) ->
+      fprintf f "repeat(@[%a,@ %d@])" pp_expr data n
   | P_add_ex (e_a, e_b, e_c) ->
-      fprintf f "@[add_ex(%a,@ %a,@ %a)@]" pp_expr e_a pp_expr e_b pp_expr e_c
+      fprintf f "add_ex(@[%a,@ %a,@ %a@])" pp_expr e_a pp_expr e_b pp_expr e_c
 
 and pp_expr f = function
   | E_literal bv -> (*fprintf f "'%a'" Bitvec.pp bv*)

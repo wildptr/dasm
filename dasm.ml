@@ -1021,14 +1021,18 @@ let main () =
   let in_path = Sys.argv.(1) in
   let code = In_channel.read_all in_path in
   let s = Char_stream.of_string code in
-  let elab_env = Semant.new_env () in
+  let env = Semant.new_env () in
+  let pc = ref 0 in
   let rec loop () =
     let saved_pos = Char_stream.pos s in
     let inst = disassemble Mode32bit s in
+    let inst_len = Char_stream.pos s - saved_pos in
+    Semant.append_stmt env (S_label (Elaborate.to_label !pc));
+    pc := !pc + inst_len;
     if inst_valid inst
     then begin
       printf "%s\n" (string_of_inst inst);
-      Elaborate.elaborate_inst elab_env inst;
+      Elaborate.elaborate_inst env inst !pc;
       loop ()
     end else begin
       Char_stream.set_pos s saved_pos;
@@ -1040,7 +1044,7 @@ let main () =
   try
     loop ()
   with Char_stream.End ->
-    let stmts = Semant.get_stmt_list elab_env in
+    let stmts = Semant.get_stmt_list env in
     List.iter stmts ~f:(fun stmt -> Format.printf "%a@." Semant.pp_stmt stmt)
 
 let () = main ()

@@ -182,6 +182,10 @@ let rec translate_expr st = function
   | Expr_undef c_width ->
       let width = translate_cexpr st c_width in
       E_prim (P_undef width), width
+  | Expr_repeat (data, c_n) ->
+      let data', w = translate_expr st data in
+      let n = translate_cexpr st c_n in
+      E_prim (P_repeat (data', n)), w*n
 
 (* TODO: comment *)
 let translate_stmt st_ref env stmt =
@@ -255,6 +259,10 @@ let translate_stmt st_ref env stmt =
       let data', data_width = translate_expr st data in
       check_width (size*8) data_width;
       append_stmt env (S_store (size, addr', data'))
+  | Stmt_jump addr ->
+      let addr', w = translate_expr st addr in
+      check_width w 32;
+      append_stmt env (S_jump_var addr')
 
 let translate_proc st proc =
   (* construct static environment to translate function body in *)

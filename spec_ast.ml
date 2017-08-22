@@ -80,6 +80,7 @@ type astexpr =
   | Expr_binary of binary_op * astexpr * astexpr
   | Expr_apply of string * astexpr list
   | Expr_undef of cexpr
+  | Expr_repeat of astexpr * cexpr
 
 type aststmt =
   (* Variables created by let statements are immutable. *)
@@ -88,6 +89,7 @@ type aststmt =
   | Stmt_return of astexpr
   | Stmt_load of cexpr * astexpr * string
   | Stmt_store of cexpr * astexpr * astexpr
+  | Stmt_jump of astexpr
 
 let rec string_of_astexpr = function
   | Expr_sym s -> s
@@ -103,6 +105,8 @@ let rec string_of_astexpr = function
         (String.concat ~sep:"," (List.map ~f:string_of_astexpr args))
   | Expr_undef width ->
       sprintf "undefined(%s)" (string_of_cexpr width)
+  | Expr_repeat (data, n) ->
+      sprintf "repeat(%s, %s)" (string_of_astexpr data) (string_of_cexpr n)
 
 let string_of_aststmt = function
   | Stmt_set (name, value) ->
@@ -120,6 +124,8 @@ let string_of_aststmt = function
   | Stmt_store (size, addr, data) ->
       sprintf "store %s, %s, %s;" (string_of_cexpr size)
         (string_of_astexpr addr) (string_of_astexpr data)
+  | Stmt_jump addr ->
+      sprintf "jump %s;" (string_of_astexpr addr)
 
 type param_list = (string * cexpr) list
 

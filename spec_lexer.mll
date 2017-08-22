@@ -16,8 +16,10 @@ let keyword_map : token String.Map.t =
   [
     "call", K_call;
     "if", K_if;
+    "jump", K_jump;
     "load", K_load;
     "proc", K_proc;
+    "repeat", K_repeat;
     "return", K_return;
     "store", K_store;
     "template", K_template;

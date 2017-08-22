@@ -33,8 +33,10 @@ open Spec_ast
 
 %token K_call
 %token K_if
+%token K_jump
 %token K_load
 %token K_proc
+%token K_repeat
 %token K_return
 %token K_store
 %token K_template
@@ -87,6 +89,8 @@ primary_expr:
     { Expr_apply (func_name, args) }
   | K_undefined; LParen; width = cexpr; RParen
     { Expr_undef width }
+  | K_repeat; LParen; data = expr; Comma; n = cexpr; RParen
+    { Expr_repeat (data, n) }
 
 index:
   | LBrack; i = cexpr; RBrack
@@ -141,6 +145,8 @@ stmt:
     { Stmt_load (size, addr, name) }
   | K_store; size = cexpr; Comma; addr = expr; Comma; data = expr; Semi
     { Stmt_store (size, addr, data) }
+  | K_jump; addr = expr; Semi
+    { Stmt_jump addr }
 
 expr_top:
   | expr EOF {$1}
