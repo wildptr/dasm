@@ -285,6 +285,7 @@ let translate_proc st proc =
   in
   Int.Table.iteri proc_env.local_tab
     ~f:(fun ~key ~data -> p_local_widths.(key) <- data);
+  (*Printf.printf "%s: %d statements\n" proc.ap_name (List.length proc_env.stmts_rev);*)
   { p_name = proc.ap_name;
     p_body = get_stmt_list proc_env;
     p_param_widths = param_widths;

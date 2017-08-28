@@ -119,6 +119,8 @@ let elaborate_inst env inst pc =
     | _ -> if alt_data then 2 else 4
   in
   let operand = operand_of_inst inst in
+
+  (**)
   let do_binary f size st ld1 ld2 =
     let src1 = ld1 size in
     let src2 = ld2 size in
@@ -135,6 +137,39 @@ let elaborate_inst env inst pc =
   let do_mov size st ld =
     st size (ld size)
   in
+  let do_push size ld =
+    let data = ld size in
+    append_stmt env (S_call (predef (sprintf "push%d" (size*8)), [data], None))
+  in
+  let do_pop size r =
+    let w = size*8 in
+    let temp = new_temp env w in
+    append_stmt env (S_call (predef (sprintf "pop%d" w), [], Some temp));
+    match r with
+    | E_global reg ->
+        append_stmt env (S_setglobal (reg, E_local temp))
+    | E_part (E_global reg, range) ->
+        append_stmt env (S_setglobal_part (reg, range, E_local temp))
+    | _ -> assert false
+  in
+  let do_push_segr segr =
+    append_stmt env (S_call (predef "push32_segr", [E_global segr], None))
+  in
+  let do_pop_segr segr =
+    let temp = new_temp env 32 in
+    append_stmt env (S_call (predef "pop32", [], Some temp));
+    append_stmt env (S_setglobal (segr, E_part (E_local temp, (0, 16))))
+  in
+  let do_xchg size st1 st2 ld1 ld2 =
+    let src1 = ld1 size in
+    let src2 = ld2 size in
+    let temp = new_temp env (size*8) in
+    append_stmt env (S_setlocal (temp, src1));
+    st1 size src2;
+    st2 size (E_local temp)
+  in
+
+  (**)
   let ld_g size =
     let reg_set = gpr_set_of_reg_operand mode size in
     match operand with
@@ -160,7 +195,25 @@ let elaborate_inst env inst pc =
     let reg_set = gpr_set_of_reg_operand mode size in
     elaborate_writeback env reg_set (G_reg r) data
   in
+  let ld_abs size =
+    match operand with
+    | Op_I i ->
+        let w = size*8 in
+        let temp = new_temp env w in
+        append_stmt env (S_load (size, E_literal (Bitvec.of_int w i), temp));
+        E_local temp
+    | _ -> assert false
+  in
+  let st_abs size data =
+    match operand with
+    | Op_I i ->
+        let w = size*8 in
+        append_stmt env (S_store (size, E_literal (Bitvec.of_int w i), data))
+    | _ -> assert false
+  in
   let st_nop _ _ = () in
+
+  (**)
   let f_add size (src1, src2, dst_temp) =
     append_stmt env begin
       S_call begin
@@ -242,55 +295,10 @@ let elaborate_inst env inst pc =
       end
     end
   in
-  let do_push size ld =
-    let data = ld size in
-    append_stmt env (S_call (predef (sprintf "push%d" (size*8)), [data], None))
-  in
-  let do_pop size r =
-    let w = size*8 in
-    let temp = new_temp env w in
-    append_stmt env (S_call (predef (sprintf "pop%d" w), [], Some temp));
-    match r with
-    | E_global reg ->
-        append_stmt env (S_setglobal (reg, E_local temp))
-    | E_part (E_global reg, range) ->
-        append_stmt env (S_setglobal_part (reg, range, E_local temp))
-    | _ -> assert false
-  in
-  let do_push_segr segr =
-    append_stmt env (S_call (predef "push32_segr", [E_global segr], None))
-  in
-  let do_pop_segr segr =
-    let temp = new_temp env 32 in
-    append_stmt env (S_call (predef "pop32", [], Some temp));
-    append_stmt env (S_setglobal (segr, E_part (E_local temp, (0, 16))))
-  in
-  let not_impl s = failwithf "not implemented: %2x %s" opcode s () in
+
   let f_add_group = [|f_add;f_or;f_adc;f_sbb;f_and;f_sub;f_xor;f_sub|] in
-  let do_xchg size st1 st2 ld1 ld2 =
-    let src1 = ld1 size in
-    let src2 = ld2 size in
-    let temp = new_temp env (size*8) in
-    append_stmt env (S_setlocal (temp, src1));
-    st1 size src2;
-    st2 size (E_local temp)
-  in
-  let ld_abs size =
-    match operand with
-    | Op_I i ->
-        let w = size*8 in
-        let temp = new_temp env w in
-        append_stmt env (S_load (size, E_literal (Bitvec.of_int w i), temp));
-        E_local temp
-    | _ -> assert false
-  in
-  let st_abs size data =
-    match operand with
-    | Op_I i ->
-        let w = size*8 in
-        append_stmt env (S_store (size, E_literal (Bitvec.of_int w i), data))
-    | _ -> assert false
-  in
+
+  let not_impl s = failwithf "not implemented: %2x %s" opcode s () in
 
   if opcode < 0x100
   then

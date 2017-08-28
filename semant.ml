@@ -217,19 +217,6 @@ let pp_proc f proc =
   fprintf f "@]@ ";
   fprintf f "}@]";
 
-(*and pp_env f env =
-  fprintf f "@[<v>";
-  String.Map.iteri env.env_local_map ~f:(fun ~key ~data ->
-    let id, width = data in
-    fprintf f "%s($%d):%d@ " key id width);
-  (*String.Map.iteri env.env_global_map ~f:(fun ~key ~data ->
-    let reg, width = data in
-    fprintf f "%s(%s):%d@," key (string_of_reg reg) width);*)
-  String.Map.iteri env.env_proc_map ~f:(fun ~key ~data ->
-    let proc = data in
-    fprintf f "%s@   @[%a@]@ " key pp_proc proc);
-  fprintf f "@]"*)
-
 type env = {
   local_tab : int Int.Table.t;
   mutable stmts_rev : stmt list;
@@ -245,7 +232,8 @@ let new_temp env width =
   id
 
 let append_stmt env stmt =
-  env.stmts_rev <- stmt :: env.stmts_rev
+  env.stmts_rev <- stmt :: env.stmts_rev;
+  Format.printf "%a@." pp_stmt stmt
 
 let get_stmt_list env =
   List.rev env.stmts_rev

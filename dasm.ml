@@ -1044,7 +1044,10 @@ let main () =
   try
     loop ()
   with Char_stream.End ->
-    let stmts = Semant.get_stmt_list env in
-    List.iter stmts ~f:(fun stmt -> Format.printf "%a@." Semant.pp_stmt stmt)
+    (*List.iter (Semant.get_stmt_list env) ~f:(Format.printf "%a@." Semant.pp_stmt);*)
+    let env' = Expand.expand env in
+    let stmts = Semant.get_stmt_list env' in
+    (*List.iter stmts ~f:(fun stmt -> Format.printf "%a@." Semant.pp_stmt stmt)*)
+    ()
 
 let () = main ()
