@@ -16,8 +16,7 @@ let check_width w1 w2 =
   if w1 <> w2 then raise (Width_mismatch (w1, w2)) else ()
 
 type value =
-  | Global of global_value
-  | Local of int * int (* index, width *)
+  | Var of string * int (* name, width *)
   | Proc of proc
   | Templ of proc_templ
   | IConst of int
@@ -54,22 +53,23 @@ let width_of_binary_op (op, w1, w2) =
       check_width w1 w2; 1
 
 let init_symtab = [
-  "AX", Global (R_AX, 32);
-  "CX", Global (R_CX, 32);
-  "DX", Global (R_DX, 32);
-  "BX", Global (R_BX, 32);
-  "SP", Global (R_SP, 32);
-  "BP", Global (R_BP, 32);
-  "SI", Global (R_SI, 32);
-  "DI", Global (R_DI, 32);
-  "CF", Global (Flag_C, 1);
-  "PF", Global (Flag_P, 1);
-  "AF", Global (Flag_A, 1);
-  "ZF", Global (Flag_Z, 1);
-  "SF", Global (Flag_S, 1);
-  "DF", Global (Flag_D, 1);
-  "OF", Global (Flag_O, 1);
-] |> String.Map.of_alist_exn
+  "AX", 32;
+  "CX", 32;
+  "DX", 32;
+  "BX", 32;
+  "SP", 32;
+  "BP", 32;
+  "SI", 32;
+  "DI", 32;
+  "CF",  1;
+  "PF",  1;
+  "AF",  1;
+  "ZF",  1;
+  "SF",  1;
+  "DF",  1;
+  "OF",  1;
+] |> List.map ~f:(fun (name, w) -> name, Var (name, w))
+  |> String.Map.of_alist_exn
 
 let extend_symtab (name, value) st =
   if String.Map.mem st name
@@ -115,10 +115,9 @@ let rec translate_cexpr st = function
 let rec translate_expr st = function
   | Expr_sym s ->
       begin match lookup st s with
-      | Local (i, w) -> E_local i, w
-      | Global (r, w) -> E_global r, w
+      | Var (name, w) -> E_var name, w
       | BVConst bv -> E_literal bv, Bitvec.length bv
-      | _ -> failwithf "not a Local or Global or BVConst value: %s" s ()
+      | _ -> failwithf "not a Var or BVConst value: %s" s ()
       end
   | Expr_literal bv -> E_literal bv, Bitvec.length bv
   | Expr_literal2 (c_v, c_w) ->
@@ -195,13 +194,12 @@ let translate_stmt st_ref env stmt =
       begin match try_lookup st name with
       | None ->
           let e', w = translate_expr st e in
-          let id = new_temp env w in
-          st_ref := extend_symtab (name, Local (id, w)) st;
-          append_stmt env (S_setlocal (id, e'))
-      | Some (Global (r, r_width)) ->
+          st_ref := extend_symtab (name, Var (name, w)) st;
+          append_stmt env (S_set (name, e'))
+      | Some (Var (r, r_width)) ->
           let e', e_width = translate_expr st e in
           check_width r_width e_width;
-          append_stmt env (S_setglobal (r, e'))
+          append_stmt env (S_set (r, e'))
       | _ -> raise (Invalid_assignment name)
       end
   | Stmt_call (proc_name, args, result_name_opt) ->
@@ -213,12 +211,13 @@ let translate_stmt st_ref env stmt =
       let args, arg_widths =
         List.unzip (List.map ~f:(translate_expr st) args)
       in
-      let n_param = List.length proc.p_param_widths in
+      let n_param = List.length proc.p_param_names in
       let n_arg = List.length args in
       if n_param <> n_arg then raise (Wrong_arity (proc_name, n_param));
       (* check arg width *)
-      List.iter (List.zip_exn proc.p_param_widths arg_widths)
-        ~f:(fun (param_width, arg_width) ->
+      List.iter (List.zip_exn proc.p_param_names arg_widths)
+        ~f:(fun (param_name, arg_width) ->
+          let param_width = String.Table.find_exn proc.p_var_tab param_name in
           check_width param_width arg_width);
       (* function that translates arguments *)
       (*let rec f = function
@@ -232,14 +231,11 @@ let translate_stmt st_ref env stmt =
           let rhs_width = proc.p_result_width in
           begin match try_lookup st name with
           | None ->
-              let id = new_temp env rhs_width in
-              st_ref := extend_symtab (name, Local (id, rhs_width)) st;
-              append_stmt env (S_call (proc, args, Some id))
-          | Some (Global (r, lhs_width)) ->
+              st_ref := extend_symtab (name, Var (name, rhs_width)) st;
+              append_stmt env (S_call (proc, args, Some name))
+          | Some (Var (_, lhs_width)) ->
               check_width lhs_width rhs_width;
-              let id = new_temp env rhs_width in
-              append_stmt env (S_call (proc, args, Some id));
-              append_stmt env (S_setglobal (r, E_local id))
+              append_stmt env (S_call (proc, args, Some name))
           | _ -> raise (Invalid_assignment name)
           end
       end
@@ -249,10 +245,9 @@ let translate_stmt st_ref env stmt =
   | Stmt_load (c_size, addr, name) ->
       let size = translate_cexpr st c_size in
       let w = size*8 in
-      let id = new_temp env w in
-      st_ref := extend_symtab (name, Local (id, w)) st;
+      st_ref := extend_symtab (name, Var (name, w)) st;
       let addr', _ = translate_expr st addr in
-      append_stmt env (S_load (size, addr', id))
+      append_stmt env (S_load (size, addr', name))
   | Stmt_store (c_size, addr, data) ->
       let size = translate_cexpr st c_size in
       let addr', _ = translate_expr st addr in
@@ -271,26 +266,19 @@ let translate_proc st proc =
   List.iter proc.ap_params
     ~f:begin fun (param_name, c_param_width) ->
       let param_width = translate_cexpr !proc_st c_param_width in
-      let arg_id = new_temp proc_env param_width in
       proc_st :=
-        extend_symtab (param_name, Local (arg_id, param_width)) !proc_st
+        extend_symtab (param_name, Var (param_name, param_width)) !proc_st;
+      String.Table.add_exn proc_env.var_tab ~key:param_name ~data:param_width
     end;
-  let param_widths =
-    List.map proc.ap_params ~f:(fun (_, c_w) -> translate_cexpr st c_w)
-  in
+  let param_names = List.map proc.ap_params ~f:fst in
   let result_width = translate_cexpr st proc.ap_result_width in
   List.iter proc.ap_body ~f:(translate_stmt proc_st proc_env);
-  let p_local_widths =
-    Array.create 0 ~len:(Int.Table.length proc_env.local_tab)
-  in
-  Int.Table.iteri proc_env.local_tab
-    ~f:(fun ~key ~data -> p_local_widths.(key) <- data);
   (*Printf.printf "%s: %d statements\n" proc.ap_name (List.length proc_env.stmts_rev);*)
   { p_name = proc.ap_name;
     p_body = get_stmt_list proc_env;
-    p_param_widths = param_widths;
+    p_param_names = param_names;
     p_result_width = result_width;
-    p_local_widths }
+    p_var_tab = proc_env.var_tab }
 
 let translate_ast ast =
   List.fold ast ~init:init_symtab ~f:begin fun st decl ->
@@ -329,10 +317,8 @@ let translate_ast ast =
   end
 
 let pp_value f = function
-  | Global (r, w) ->
-      fprintf f "Global %s:%d" (string_of_reg r) w
-  | Local (i, w) ->
-      fprintf f "Local %d:%d" i w
+  | Var (name, w) ->
+      fprintf f "Var %s:%d" name w
   | Proc p ->
       fprintf f "Proc %a" pp_proc p
   | Templ _ ->

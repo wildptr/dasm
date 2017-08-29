@@ -84,17 +84,15 @@ type prim =
 
 and expr =
   | E_literal of Bitvec.t
-  | E_local of int
-  | E_global of reg
+  | E_var of string
   | E_part of expr * (int * int)
   | E_prim of prim
 
 (* elaborated form of instructions *)
 type stmt =
-  | S_setlocal of int * expr (* SSA *)
-  | S_setglobal of reg * expr
-  | S_setglobal_part of reg * (int * int) * expr
-  | S_load of int * expr * int
+  | S_set of string * expr
+  | S_set_part of string * (int * int) * expr
+  | S_load of int * expr * string
   | S_store of int * expr * expr
   | S_label of string
   | S_jump of string
@@ -102,19 +100,17 @@ type stmt =
   | S_br of expr * string
   | S_br_var of expr * expr
   (* the following do not occur after elaboration *)
-  | S_call of proc * expr list * int option
+  | S_call of proc * expr list * string option
   | S_return of expr
 
 and proc = {
   (* for pretty printing *)
   p_name : string;
   p_body : stmt list;
-  p_param_widths : int list;
+  p_param_names : string list;
   p_result_width : int;
-  p_local_widths : int array;
+  p_var_tab : int String.Table.t;
 }
-
-type global_value = reg * int
 
 let rec pp_prim f p =
   let pp_prim_es f op_char es =
@@ -148,8 +144,7 @@ let rec pp_prim f p =
 and pp_expr f = function
   | E_literal bv -> (*fprintf f "'%a'" Bitvec.pp bv*)
       fprintf f "%d:%d" (Bitvec.to_int bv) (Bitvec.length bv)
-  | E_local i -> fprintf f "$%d" i
-  | E_global r -> fprintf f "%s" (string_of_reg r)
+  | E_var s -> fprintf f "%s" s
   | E_part (e, (lo, hi)) -> fprintf f "@[%a[%d:%d]@]" pp_expr e lo hi
   | E_prim p -> pp_prim f p
   (*| E_let (e_bind, e_body) ->
@@ -162,14 +157,12 @@ and pp_expr f = function
       fprintf f "@[%s[%d:%d] =@ %a@]" (string_of_reg reg) lo hi pp_expr e_value*)
 
 let pp_stmt f = function
-  | S_setlocal (id, e) ->
-      fprintf f "$%d @[=@ %a@]" id pp_expr e
-  | S_setglobal (r, e) ->
-      fprintf f "%s @[=@ %a@]" (string_of_reg r) pp_expr e
-  | S_setglobal_part (r, (lo, hi), e) ->
-      fprintf f "%s[%d:%d] @[=@ %a@]" (string_of_reg r) lo hi pp_expr e
-  | S_load (size, e_addr, dst_id) ->
-      fprintf f "$%d @[=@ load %d,@ %a@]" dst_id size pp_expr e_addr
+  | S_set (name, e) ->
+      fprintf f "%s @[=@ %a@]" name pp_expr e
+  | S_set_part (name, (lo, hi), e) ->
+      fprintf f "%s[%d:%d] @[=@ %a@]" name lo hi pp_expr e
+  | S_load (size, e_addr, dst) ->
+      fprintf f "%s @[=@ load %d,@ %a@]" dst size pp_expr e_addr
   | S_store (size, e_addr, e_data) ->
       fprintf f "store @[%d,@ %a,@ %a@]" size pp_expr e_addr pp_expr e_data
   | S_label l ->
@@ -185,7 +178,7 @@ let pp_stmt f = function
   | S_call (proc, args, result_opt) ->
       begin match result_opt with
       | None -> ()
-      | Some id -> fprintf f "$%d @[=@ " id
+      | Some name -> fprintf f "%s @[=@ " name
       end;
       fprintf f "%s(" proc.p_name;
       let n = List.length args in
@@ -197,12 +190,12 @@ let pp_stmt f = function
       fprintf f "return @[%a@]" pp_expr e
 
 let pp_proc f proc =
-  let n_param = List.length proc.p_param_widths in
+  let n_param = List.length proc.p_param_names in
   fprintf f "@[<v>";
   (* print header *)
   fprintf f "@[(";
-  List.iteri proc.p_param_widths ~f: (fun i width ->
-    fprintf f "%d" width;
+  List.iteri proc.p_param_names ~f: (fun i name ->
+    fprintf f "%s" name;
     if i < n_param-1 then fprintf f ",@ ");
   fprintf f "):%d@]@ " proc.p_result_width;
   (* print env *)
@@ -218,17 +211,18 @@ let pp_proc f proc =
   fprintf f "}@]";
 
 type env = {
-  local_tab : int Int.Table.t;
+  var_tab : int String.Table.t;
   mutable stmts_rev : stmt list;
 }
 
 let new_env () =
-  { local_tab = Int.Table.create ();
+  { var_tab = String.Table.create ();
     stmts_rev = [] }
 
 let new_temp env width =
-  let id = Int.Table.length env.local_tab in
-  Int.Table.add_exn env.local_tab ~key:id ~data:width;
+  let n = String.Table.length env.var_tab in
+  let id = sprintf "$%d" n in
+  String.Table.add_exn env.var_tab ~key:id ~data:width;
   id
 
 let append_stmt env stmt =

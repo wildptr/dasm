@@ -2,14 +2,14 @@ open Core
 open Inst
 open Semant
 
-let eAX = E_global R_AX
-let eCX = E_global R_CX
-let eDX = E_global R_DX
-let eBX = E_global R_BX
-let eSP = E_global R_SP
-let eBP = E_global R_BP
-let eSI = E_global R_SI
-let eDI = E_global R_DI
+let eAX = E_var "AX"
+let eCX = E_var "CX"
+let eDX = E_var "DX"
+let eBX = E_var "BX"
+let eSP = E_var "SP"
+let eBP = E_var "BP"
+let eSI = E_var "SI"
+let eDI = E_var "DI"
 
 let e8legacy = [|
   E_part (eAX, (0,  8)); (* AL *)
@@ -71,16 +71,16 @@ let elaborate_g_operand env reg_set = function
       let e_addr = elaborate_mem_addr m in
       let temp = new_temp env (size*8) in
       append_stmt env (S_load (size, e_addr, temp));
-      E_local temp
+      E_var temp
 
 let elaborate_writeback env reg_set g e_data =
   match g with
   | G_reg r ->
       begin match elaborate_reg_operand reg_set r with
-      | E_global reg ->
-          append_stmt env (S_setglobal (reg, e_data))
-      | E_part (E_global reg, range) ->
-          append_stmt env (S_setglobal_part (reg, range, e_data))
+      | E_var reg ->
+          append_stmt env (S_set (reg, e_data))
+      | E_part (E_var reg, range) ->
+          append_stmt env (S_set_part (reg, range, e_data))
       | _ -> assert false
       end
   | G_mem m ->
@@ -95,14 +95,14 @@ let predef = String.Table.find_exn predef_table
 let to_label addr = sprintf "L%x" addr
 
 let cond_expr1 = function
-  | 0x0 -> E_global Flag_O
-  | 0x1 -> E_global Flag_C
-  | 0x2 -> E_global Flag_Z
-  | 0x3 -> E_prim (P_or [E_global Flag_C; E_global Flag_Z]) (* CF|XF *)
-  | 0x4 -> E_global Flag_S
-  | 0x5 -> E_global Flag_P
-  | 0x6 -> E_prim (P_xor [E_global Flag_S; E_global Flag_O]) (* SF^OF *)
-  | 0x7 -> E_prim (P_or [E_global Flag_Z; E_prim (P_xor [E_global Flag_S; E_global Flag_O])]) (* ZF|(SF^OF) *)
+  | 0x0 -> E_var "OF"
+  | 0x1 -> E_var "CF"
+  | 0x2 -> E_var "ZF"
+  | 0x3 -> E_prim (P_or [E_var "CF"; E_var "ZF"]) (* CF|XF *)
+  | 0x4 -> E_var "SF"
+  | 0x5 -> E_var "PF"
+  | 0x6 -> E_prim (P_xor [E_var "SF"; E_var "OF"]) (* SF^OF *)
+  | 0x7 -> E_prim (P_or [E_var "ZF"; E_prim (P_xor [E_var "SF"; E_var "OF"])]) (* ZF|(SF^OF) *)
   | _ -> assert false
 
 let cond_expr code =
@@ -120,19 +120,19 @@ let elaborate_inst env inst pc =
   in
   let operand = operand_of_inst inst in
 
-  (**)
+  (* *)
   let do_binary f size st ld1 ld2 =
     let src1 = ld1 size in
     let src2 = ld2 size in
     let dst_temp = new_temp env (size*8) in
     f size (src1, src2, dst_temp);
-    st size (E_local dst_temp)
+    st size (E_var dst_temp)
   in
   let do_unary f size st ld =
     let src = ld size in
     let dst_temp = new_temp env (size*8) in
     f size (src, dst_temp);
-    st size (E_local dst_temp)
+    st size (E_var dst_temp)
   in
   let do_mov size st ld =
     st size (ld size)
@@ -146,30 +146,30 @@ let elaborate_inst env inst pc =
     let temp = new_temp env w in
     append_stmt env (S_call (predef (sprintf "pop%d" w), [], Some temp));
     match r with
-    | E_global reg ->
-        append_stmt env (S_setglobal (reg, E_local temp))
-    | E_part (E_global reg, range) ->
-        append_stmt env (S_setglobal_part (reg, range, E_local temp))
+    | E_var reg ->
+        append_stmt env (S_set (reg, E_var temp))
+    | E_part (E_var reg, range) ->
+        append_stmt env (S_set_part (reg, range, E_var temp))
     | _ -> assert false
   in
   let do_push_segr segr =
-    append_stmt env (S_call (predef "push32_segr", [E_global segr], None))
+    append_stmt env (S_call (predef "push32_segr", [E_var segr], None))
   in
   let do_pop_segr segr =
     let temp = new_temp env 32 in
     append_stmt env (S_call (predef "pop32", [], Some temp));
-    append_stmt env (S_setglobal (segr, E_part (E_local temp, (0, 16))))
+    append_stmt env (S_set (segr, E_part (E_var temp, (0, 16))))
   in
   let do_xchg size st1 st2 ld1 ld2 =
     let src1 = ld1 size in
     let src2 = ld2 size in
     let temp = new_temp env (size*8) in
-    append_stmt env (S_setlocal (temp, src1));
+    append_stmt env (S_set (temp, src1));
     st1 size src2;
-    st2 size (E_local temp)
+    st2 size (E_var temp)
   in
 
-  (**)
+  (* *)
   let ld_g size =
     let reg_set = gpr_set_of_reg_operand mode size in
     match operand with
@@ -201,7 +201,7 @@ let elaborate_inst env inst pc =
         let w = size*8 in
         let temp = new_temp env w in
         append_stmt env (S_load (size, E_literal (Bitvec.of_int w i), temp));
-        E_local temp
+        E_var temp
     | _ -> assert false
   in
   let st_abs size data =
@@ -213,7 +213,7 @@ let elaborate_inst env inst pc =
   in
   let st_nop _ _ = () in
 
-  (**)
+  (* *)
   let f_add size (src1, src2, dst_temp) =
     append_stmt env begin
       S_call begin
@@ -254,7 +254,7 @@ let elaborate_inst env inst pc =
     append_stmt env begin
       S_call begin
         predef (sprintf "adc%d" (size*8)),
-        [src1; src2; E_global Flag_C],
+        [src1; src2; E_var "CF"],
         Some dst_temp
       end
     end
@@ -263,7 +263,7 @@ let elaborate_inst env inst pc =
     append_stmt env begin
       S_call begin
         predef (sprintf "sbb%d" (size*8)),
-        [src1; src2; E_global Flag_C],
+        [src1; src2; E_var "CF"],
         Some dst_temp
       end
     end
@@ -316,9 +316,9 @@ let elaborate_inst env inst pc =
     | 0x05 -> (* add aw,i *)
         do_binary f_add word_size (st_r 0) (ld_r 0) ld_i
     | 0x06 -> (* push es *)
-        do_push_segr R_ES
+        do_push_segr "ES"
     | 0x07 -> (* pop es *)
-        do_pop_segr R_ES
+        do_pop_segr "ES"
     | 0x08 -> (* or g1,r1 *)
         do_binary f_or 1 st_g ld_g (ld_r r)
     | 0x09 -> (* or gw,rw *)
@@ -332,7 +332,7 @@ let elaborate_inst env inst pc =
     | 0x0d -> (* or aw,i *)
         do_binary f_or word_size (st_r 0) (ld_r 0) ld_i
     | 0x0e -> (* push cs *)
-        do_push_segr R_CS
+        do_push_segr "CS"
     | 0x0f ->
         assert false
     | 0x10 -> (* adc g1,r1 *)
@@ -348,9 +348,9 @@ let elaborate_inst env inst pc =
     | 0x15 -> (* adc aw,i *)
         do_binary f_adc word_size (st_r 0) (ld_r 0) ld_i
     | 0x16 ->
-        do_push_segr R_SS
+        do_push_segr "SS"
     | 0x17 ->
-        do_pop_segr R_SS
+        do_pop_segr "SS"
     | 0x18 -> (* sbb g1,r1 *)
         do_binary f_sbb 1 st_g ld_g (ld_r r)
     | 0x19 -> (* sbb gw,rw *)
@@ -364,9 +364,9 @@ let elaborate_inst env inst pc =
     | 0x1d -> (* sbb aw,i *)
         do_binary f_sbb word_size (st_r 0) (ld_r 0) ld_i
     | 0x1e -> (* push ds *)
-        do_push_segr R_DS
+        do_push_segr "DS"
     | 0x1f -> (* pop ds *)
-        do_pop_segr R_DS
+        do_pop_segr "DS"
     | 0x20 -> (* and g1,r1 *)
         do_binary f_and 1 st_g ld_g (ld_r r)
     | 0x21 -> (* and gw,rw *)
@@ -382,7 +382,7 @@ let elaborate_inst env inst pc =
     | 0x26 -> (* prefix *)
         assert false
     | 0x27 -> (* daa *)
-        do_pop_segr R_FS
+        do_pop_segr "FS"
     | 0x28 -> (* sub g1,r1 *)
         do_binary f_sub 1 st_g ld_g (ld_r r)
     | 0x29 -> (* sub gw,rw *)
