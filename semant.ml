@@ -226,8 +226,7 @@ let new_temp env width =
   id
 
 let append_stmt env stmt =
-  env.stmts_rev <- stmt :: env.stmts_rev;
-  Format.printf "%a@." pp_stmt stmt
+  env.stmts_rev <- stmt :: env.stmts_rev
 
 let get_stmt_list env =
   List.rev env.stmts_rev

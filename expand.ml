@@ -25,7 +25,7 @@ let rec map_expr f = function
       E_prim p'
 
 let rec expand_stmt env call_id f retval stmt =
-  Format.printf "Expanding: %a@." pp_stmt stmt;
+  (*Format.printf "Expanding: %a@." pp_stmt stmt;*)
   match stmt with
   | S_set (id, e) ->
       let e' = map_expr f e in
