@@ -14,8 +14,16 @@ let next_line lexbuf =
 
 let keyword_map : token String.Map.t =
   [
-    "in", K_in;
-    "let", K_let;
+    "call", K_call;
+    "if", K_if;
+    "jump", K_jump;
+    "load", K_load;
+    "proc", K_proc;
+    "repeat", K_repeat;
+    "return", K_return;
+    "store", K_store;
+    "template", K_template;
+    "undefined", K_undefined;
   ]
   |> String.Map.of_alist_exn
 
@@ -39,22 +47,27 @@ rule read = parse
       | Some k -> k
       | None -> Ident s }
   | "==" { EqEq }
+  | '$' { Dollar }
   | '&' { Amp }
   | '(' { LParen }
   | ')' { RParen }
+  | '*' { Star }
   | '+' { Plus }
   | ',' { Comma }
   | '-' { Minus }
   | '.' { Dot }
+  | '/' { Slash }
   | ':' { Colon }
   | ';' { Semi }
+  | '<' { LAngle }
   | '=' { Eq }
+  | '>' { RAngle }
   | '[' { LBrack }
   | ']' { RBrack }
   | '^' { Caret }
-  (* | '{' { LBrace } *)
+  | '{' { LBrace }
   | '|' { Bar }
-  (* | '}' { RBrace } *)
+  | '}' { RBrace }
   | '~' { Tilde }
   | eof { EOF }
   | _ { raise (Error ("Unexpected character: " ^ Lexing.lexeme lexbuf)) }
