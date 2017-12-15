@@ -3,6 +3,7 @@ open Inst
 
 exception Not_implemented
 exception Invalid_instruction
+exception Invalid_operand
 
 type regset =
   | Reg8bitLegacy
@@ -10,6 +11,8 @@ type regset =
   | Reg16bit
   | Reg32bit
   | Reg64bit
+
+let seg_reg_table = [|R_ES;R_CS;R_SS;R_DS;R_FS;R_GS|]
 
 let int_to_reg regset i =
   let table8 =
@@ -31,24 +34,6 @@ type cpu_mode =
   | Mode16bit
   | Mode32bit
   | Mode64bit
-
-let gpr_set_of_addr_reg mode alt_addr_size =
-  match mode, alt_addr_size with
-  | Mode16bit, false -> Reg16bit
-  | Mode16bit,  true -> Reg32bit
-  | Mode32bit, false -> Reg32bit
-  | Mode32bit,  true -> Reg16bit
-  | Mode64bit, false -> Reg64bit
-  | Mode64bit,  true -> Reg32bit
-
-let format_size = function
-  | 1 -> "byte"
-  | 2 -> "word"
-  | 4 -> "dword"
-  | 8 -> "qword"
-  | 10 -> "tword"
-  | 16 -> "oword"
-  | _ -> assert false
 
 let read_sib buf s : int * ((int * int) option) =
   let c = Stream.next s in
@@ -189,162 +174,162 @@ type operand_format =
   | FPU_R
   | XMM_R
   | XMM_RM
-  | Lit of string
+  | Lit of operand
 
 let fpu_mnem_table1 =
   [|
     (* d8 *)
-    Some ("fadd" , [M_size 4]);
-    Some ("fmul" , [M_size 4]);
-    Some ("fcom" , [M_size 4]);
-    Some ("fcomp", [M_size 4]);
-    Some ("fsub" , [M_size 4]);
-    Some ("fsubr", [M_size 4]);
-    Some ("fdiv" , [M_size 4]);
-    Some ("fdivr", [M_size 4]);
+    Some (I_fadd , [M_size 4]);
+    Some (I_fmul , [M_size 4]);
+    Some (I_fcom , [M_size 4]);
+    Some (I_fcomp, [M_size 4]);
+    Some (I_fsub , [M_size 4]);
+    Some (I_fsubr, [M_size 4]);
+    Some (I_fdiv , [M_size 4]);
+    Some (I_fdivr, [M_size 4]);
     (* d9 *)
-    Some ("fld", [M_size 4]);
+    Some (I_fld, [M_size 4]);
     None;
-    Some ("fst"    , [M_size 4]);
-    Some ("fstp"   , [M_size 4]);
-    Some ("fldenv" , [M]);
-    Some ("fldcw"  , [M]);
-    Some ("fnstenv", [M]);
-    Some ("fnstcw" , [M]);
+    Some (I_fst    , [M_size 4]);
+    Some (I_fstp   , [M_size 4]);
+    Some (I_fldenv , [M]);
+    Some (I_fldcw  , [M]);
+    Some (I_fnstenv, [M]);
+    Some (I_fnstcw , [M]);
     (* da *)
-    Some ("fiadd" , [M_size 4]);
-    Some ("fimul" , [M_size 4]);
-    Some ("ficom" , [M_size 4]);
-    Some ("ficomp", [M_size 4]);
-    Some ("fisub" , [M_size 4]);
-    Some ("fisubr", [M_size 4]);
-    Some ("fidiv" , [M_size 4]);
-    Some ("fidivr", [M_size 4]);
+    Some (I_fiadd , [M_size 4]);
+    Some (I_fimul , [M_size 4]);
+    Some (I_ficom , [M_size 4]);
+    Some (I_ficomp, [M_size 4]);
+    Some (I_fisub , [M_size 4]);
+    Some (I_fisubr, [M_size 4]);
+    Some (I_fidiv , [M_size 4]);
+    Some (I_fidivr, [M_size 4]);
     (* db *)
-    Some ("fild"  , [M_size 4]);
-    Some ("fisttp", [M_size 4]);
-    Some ("fist"  , [M_size 4]);
-    Some ("fistp" , [M_size 4]);
+    Some (I_fild  , [M_size 4]);
+    Some (I_fisttp, [M_size 4]);
+    Some (I_fist  , [M_size 4]);
+    Some (I_fistp , [M_size 4]);
     None;
-    Some ("fld"   , [M_size 10]);
+    Some (I_fld   , [M_size 10]);
     None;
-    Some ("fstp"  , [M_size 10]);
+    Some (I_fstp  , [M_size 10]);
     (* dc *)
-    Some ("fadd" , [M_size 8]);
-    Some ("fmul" , [M_size 8]);
-    Some ("fcom" , [M_size 8]);
-    Some ("fcomp", [M_size 8]);
-    Some ("fsub" , [M_size 8]);
-    Some ("fsubr", [M_size 8]);
-    Some ("fdiv" , [M_size 8]);
-    Some ("fdivr", [M_size 8]);
+    Some (I_fadd , [M_size 8]);
+    Some (I_fmul , [M_size 8]);
+    Some (I_fcom , [M_size 8]);
+    Some (I_fcomp, [M_size 8]);
+    Some (I_fsub , [M_size 8]);
+    Some (I_fsubr, [M_size 8]);
+    Some (I_fdiv , [M_size 8]);
+    Some (I_fdivr, [M_size 8]);
     (* dd *)
-    Some ("fld"   , [M_size 8]);
-    Some ("fisttp", [M_size 8]);
-    Some ("fst"   , [M_size 8]);
-    Some ("fstp"  , [M_size 8]);
-    Some ("frstor", [M]);
+    Some (I_fld   , [M_size 8]);
+    Some (I_fisttp, [M_size 8]);
+    Some (I_fst   , [M_size 8]);
+    Some (I_fstp  , [M_size 8]);
+    Some (I_frstor, [M]);
     None;
-    Some ("fnsave", [M]);
-    Some ("fnstsw", [M]);
+    Some (I_fnsave, [M]);
+    Some (I_fnstsw, [M]);
     (* de *)
-    Some ("fiadd" , [M_size 2]);
-    Some ("fimul" , [M_size 2]);
-    Some ("ficom" , [M_size 2]);
-    Some ("ficomp", [M_size 2]);
-    Some ("fisub" , [M_size 2]);
-    Some ("fisubr", [M_size 2]);
-    Some ("fidiv" , [M_size 2]);
-    Some ("fidivr", [M_size 2]);
+    Some (I_fiadd , [M_size 2]);
+    Some (I_fimul , [M_size 2]);
+    Some (I_ficom , [M_size 2]);
+    Some (I_ficomp, [M_size 2]);
+    Some (I_fisub , [M_size 2]);
+    Some (I_fisubr, [M_size 2]);
+    Some (I_fidiv , [M_size 2]);
+    Some (I_fidivr, [M_size 2]);
     (* df *)
-    Some ("fild"  , [M_size 2]);
-    Some ("fisttp", [M_size 2]);
-    Some ("fist"  , [M_size 2]);
-    Some ("fistp" , [M_size 2]);
-    Some ("fbld"  , [M]);
-    Some ("fild"  , [M_size 8]);
-    Some ("fbstp" , [M]);
-    Some ("fistp" , [M_size 8]);
+    Some (I_fild  , [M_size 2]);
+    Some (I_fisttp, [M_size 2]);
+    Some (I_fist  , [M_size 2]);
+    Some (I_fistp , [M_size 2]);
+    Some (I_fbld  , [M]);
+    Some (I_fild  , [M_size 8]);
+    Some (I_fbstp , [M]);
+    Some (I_fistp , [M_size 8]);
   |]
 
 type fpu_inst_format =
-  | FPU_A of string
-  | FPU_B of string array
+  | FPU_A of op
+  | FPU_B of op array
 
 let fpu_mnem_table2 : fpu_inst_format array =
   [|
     (* d8 *)
-    FPU_A "fadd"  ;
-    FPU_A "fmul"  ;
-    FPU_A "fcom"  ;
-    FPU_A "fcomp" ;
-    FPU_A "fsub"  ;
-    FPU_A "fsubr" ;
-    FPU_A "fdiv"  ;
-    FPU_A "fdivr" ;
+    FPU_A I_fadd  ;
+    FPU_A I_fmul  ;
+    FPU_A I_fcom  ;
+    FPU_A I_fcomp ;
+    FPU_A I_fsub  ;
+    FPU_A I_fsubr ;
+    FPU_A I_fdiv  ;
+    FPU_A I_fdivr ;
     (* d9 *)
-    FPU_A "fld" ;
-    FPU_A "fxch";
-    FPU_B [|"fnop"   ; ""       ; ""       ; ""       ; ""       ; ""       ; ""       ; ""       |];
-    FPU_A "";
-    FPU_B [|"fchs"   ; "fabs"   ; ""       ; ""       ; "ftst"   ; "fxam"   ; ""       ; ""       |];
-    FPU_B [|"fld1"   ; "fldl2t" ; "fldl2e" ; "fldpi"  ; "fldlg2" ; "fldln2" ; "fldz"   ; ""       |];
-    FPU_B [|"f2xm1"  ; "fyl2x"  ; "fptan"  ; "fpatan" ; "fxtract"; "fprem1" ; "fdecstp"; "fincstp"|];
-    FPU_B [|"fprem"  ; "fyl2xp1"; "fsqrt"  ; "fsincos"; "frndint"; "fscale" ; "fsin"   ; "fcos"   |];
+    FPU_A I_fld ;
+    FPU_A I_fxch;
+    FPU_B [|I_fnop   ; I_       ; I_       ; I_       ; I_       ; I_       ; I_       ; I_       |];
+    FPU_A I_;
+    FPU_B [|I_fchs   ; I_fabs   ; I_       ; I_       ; I_ftst   ; I_fxam   ; I_       ; I_       |];
+    FPU_B [|I_fld1   ; I_fldl2t ; I_fldl2e ; I_fldpi  ; I_fldlg2 ; I_fldln2 ; I_fldz   ; I_       |];
+    FPU_B [|I_f2xm1  ; I_fyl2x  ; I_fptan  ; I_fpatan ; I_fxtract; I_fprem1 ; I_fdecstp; I_fincstp|];
+    FPU_B [|I_fprem  ; I_fyl2xp1; I_fsqrt  ; I_fsincos; I_frndint; I_fscale ; I_fsin   ; I_fcos   |];
     (* da *)
-    FPU_A "fcmovb" ;
-    FPU_A "fcmove" ;
-    FPU_A "fcmovbe";
-    FPU_A "fcmovu" ;
-    FPU_A "";
-    FPU_B [|""       ; "fucompp"; ""       ; ""       ; ""       ; ""       ; ""       ; ""       |];
-    FPU_A "";
-    FPU_A "";
+    FPU_A I_fcmovb ;
+    FPU_A I_fcmove ;
+    FPU_A I_fcmovbe;
+    FPU_A I_fcmovu ;
+    FPU_A I_;
+    FPU_B [|I_       ; I_fucompp; I_       ; I_       ; I_       ; I_       ; I_       ; I_       |];
+    FPU_A I_;
+    FPU_A I_;
     (* db *)
-    FPU_A "fcmovnb";
-    FPU_A "fcmovne";
-    FPU_A "fcmovnbe";
-    FPU_A "fcmovnu";
-    FPU_B [|""       ; ""       ; "fnclex" ; "fninit" ; ""       ; ""       ; ""       ; ""       |];
-    FPU_A "fucomi" ;
-    FPU_A "fcomi"  ;
-    FPU_A "";
+    FPU_A I_fcmovnb;
+    FPU_A I_fcmovne;
+    FPU_A I_fcmovnbe;
+    FPU_A I_fcmovnu;
+    FPU_B [|I_       ; I_       ; I_fnclex ; I_fninit ; I_       ; I_       ; I_       ; I_       |];
+    FPU_A I_fucomi ;
+    FPU_A I_fcomi  ;
+    FPU_A I_;
     (* dc *)
-    FPU_A "fadd to"  ;
-    FPU_A "fmul to"  ;
-    FPU_A "";
-    FPU_A "";
-    FPU_A "fsubr to"  ;
-    FPU_A "fsub to" ;
-    FPU_A "fdivr to"  ;
-    FPU_A "fdiv to" ;
+    FPU_A I_fadd_to;
+    FPU_A I_fmul_to;
+    FPU_A I_;
+    FPU_A I_;
+    FPU_A I_fsubr_to;
+    FPU_A I_fsub_to;
+    FPU_A I_fdivr_to;
+    FPU_A I_fdiv_to;
     (* dd *)
-    FPU_A "ffree";
-    FPU_A "";
-    FPU_A "fst";
-    FPU_A "fstp";
-    FPU_A "fucom";
-    FPU_A "fucomp";
-    FPU_A "";
-    FPU_A "";
+    FPU_A I_ffree;
+    FPU_A I_;
+    FPU_A I_fst;
+    FPU_A I_fstp;
+    FPU_A I_fucom;
+    FPU_A I_fucomp;
+    FPU_A I_;
+    FPU_A I_;
     (* de *)
-    FPU_A "faddp";
-    FPU_A "fmulp";
-    FPU_A "";
-    FPU_B [|""       ; "fcompp" ; ""       ; ""       ; ""       ; ""       ; ""       ; ""       |];
-    FPU_A "fsubrp";
-    FPU_A "fsubp";
-    FPU_A "fdivrp";
-    FPU_A "fdivp";
+    FPU_A I_faddp;
+    FPU_A I_fmulp;
+    FPU_A I_;
+    FPU_B [|I_       ; I_fcompp ; I_       ; I_       ; I_       ; I_       ; I_       ; I_       |];
+    FPU_A I_fsubrp;
+    FPU_A I_fsubp;
+    FPU_A I_fdivrp;
+    FPU_A I_fdivp;
     (* df *)
-    FPU_A "";
-    FPU_A "";
-    FPU_A "";
-    FPU_A "";
-    FPU_B [|"fnstsw ax" ; ""       ; ""       ; ""       ; ""       ; ""       ; ""       ; ""       |];
-    FPU_A "fucomip";
-    FPU_A "fcomip";
-    FPU_A "";
+    FPU_A I_;
+    FPU_A I_;
+    FPU_A I_;
+    FPU_A I_;
+    FPU_B [|I_fnstsw (*ax*) ; I_       ; I_       ; I_       ; I_       ; I_       ; I_       ; I_       |];
+    FPU_A I_fucomip;
+    FPU_A I_fcomip;
+    FPU_A I_;
   |]
 
 let prefix_of_char = function
@@ -390,6 +375,415 @@ let read_prefix_and_opcode buf s : int * int (* prefix, opcode *) =
 
 let extend_opcode opcode r = opcode lsl 3 lor r
 
+type operand_pack =
+  (* here 'I' stands for immediate operand and 'M' for r/m operand *)
+  | Op_N
+  | Op_I   of int
+  | Op_II  of int * int
+  | Op_M   of regmem
+  | Op_MI  of regmem * int
+  | Op_MII of regmem * int * int
+
+let optable_add = [| I_add; I_or ; I_adc; I_sbb; I_and; I_sub; I_xor; I_cmp |]
+let optable_rol = [| I_rol; I_ror; I_rcl; I_rcr; I_shl; I_shr; I_shl; I_sar |]
+
+let operand_size_prefix (mode : cpu_mode) (prefix : int) : string option =
+  if prefix land (prefix_mask Prefix_66) <> 0
+  then
+    match mode with
+    | Mode16bit -> Some "o32"
+    | Mode32bit
+    | Mode64bit -> Some "o16"
+  else None
+
+let with_operand_size_prefix (mode : cpu_mode) (prefix : int) (m : string) : string =
+  match operand_size_prefix mode prefix with
+  | Some o -> o^" "^m
+  | None -> m
+
+let word_size mode prefix =
+  let has_prefix_66 = prefix land (prefix_mask Prefix_66) <> 0 in
+  match mode, has_prefix_66 with
+  | Mode16bit, false
+  | Mode32bit, true
+  | Mode64bit, true -> 2
+  | Mode16bit, true
+  | Mode32bit, false
+  | Mode64bit, false -> 4
+
+(* r is ModRM[5:3] *)
+(* returns None if (opcode, r) does not denote a valid instruction *)
+let format_of_inst_single_byte mode prefix opcode r =
+  let w = word_size mode prefix in
+  let lw =
+    match w with
+    | 1 -> 0
+    | 2 -> 1
+    | 4 -> 2
+    | 8 -> 3
+    | _ -> assert false
+  in
+  let s = if opcode land 1 = 0 then 0 else lw in
+  match opcode with
+  | 0x00 | 0x01 | 0x02 | 0x03 | 0x04 | 0x05
+  | 0x08 | 0x09 | 0x0a | 0x0b | 0x0c | 0x0d
+  | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x15
+  | 0x18 | 0x19 | 0x1a | 0x1b | 0x1c | 0x1d
+  | 0x20 | 0x21 | 0x22 | 0x23 | 0x24 | 0x25
+  | 0x28 | 0x29 | 0x2a | 0x2b | 0x2c | 0x2d
+  | 0x30 | 0x31 | 0x32 | 0x33 | 0x34 | 0x35
+  | 0x38 | 0x39 | 0x3a | 0x3b | 0x3c | 0x3d ->
+    let fmt =
+      match opcode land 7 with
+      | 0 -> [RM 1; R 1]
+      | 1 -> [RM w; R w]
+      | 2 -> [R 1; RM 1]
+      | 3 -> [R w; RM w]
+      | 4 -> [R0 1; I]
+      | 5 -> [R0 w; I]
+      | _ -> assert false
+    in
+    optable_add.(opcode lsr 3), s, fmt
+  | 0x06 | 0x07 | 0x0e | 0x16 | 0x17 | 0x1e | 0x1f ->
+    let op = if opcode land 1 = 0 then I_push else I_pop in
+    op, lw, [Lit (O_reg seg_reg_table.(opcode lsr 3))]
+  | 0x0f -> assert false (* escape *)
+  | 0x26 -> assert false (* prefix *)
+  | 0x27 -> I_daa, 0, []
+  | 0x2e -> assert false (* prefix *)
+  | 0x2f -> I_das, 0, []
+  | 0x36 -> assert false (* prefix *)
+  | 0x37 -> I_aaa, 0, []
+  | 0x3e -> assert false (* prefix *)
+  | 0x3f -> I_aas, 0, []
+  | 0x40 | 0x41 | 0x42 | 0x43 | 0x44 | 0x45 | 0x46 | 0x47
+  | 0x48 | 0x49 | 0x4a | 0x4b | 0x4c | 0x4d | 0x4e | 0x4f ->
+    let op = if opcode land 8 = 0 then I_inc else I_dec in
+    op, lw, [R_opcode w]
+  | 0x50 | 0x51 | 0x52 | 0x53 | 0x54 | 0x55 | 0x56 | 0x57
+  | 0x58 | 0x59 | 0x5a | 0x5b | 0x5c | 0x5d | 0x5e | 0x5f ->
+    let op = if opcode land 8 = 0 then I_push else I_pop in
+    op, lw, [R_opcode w]
+  | 0x60 -> I_pusha, lw, []
+  | 0x61 -> I_popa, lw, []
+  | 0x62 -> I_bound, lw, [R w; M]
+  | 0x63 -> I_arpl, 0, [RM 2; R 2]
+  | 0x64 | 0x65 | 0x66 | 0x67 -> assert false (* prefix *)
+  | 0x68 | 0x6a -> I_push, lw, [I_size w]
+  | 0x69 -> I_imul, lw, [R w; RM w; I_size w]
+  | 0x6b -> I_imul, lw, [R w; RM w; I_size 1]
+  | 0x6c -> I_ins, 0, []
+  | 0x6d -> I_ins, lw, []
+  | 0x6e -> I_outs, 0, []
+  | 0x6f -> I_outs, lw, []
+  | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77
+  | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e | 0x7f ->
+    I_cjmp, (opcode land 15) lsl 2, [Offset]
+  | 0x80 | 0x81 | 0x83 ->
+    let op = optable_add.(r) in
+    let s, fmt =
+      if opcode land 1 = 0
+      then 0, [RM 1; I]
+      else lw, [RM w; I]
+    in
+    op, s, fmt
+  | 0x82 -> raise Invalid_instruction (* canonical opcode is 0x80 *)
+  | 0x84 -> I_test,  0, [RM 1; R 1]
+  | 0x85 -> I_test, lw, [RM w; R w]
+  | 0x86 -> I_xchg,  0, [RM 1; R 1]
+  | 0x87 -> I_xchg, lw, [RM w; R w]
+  | 0x88 | 0x89 | 0x8a | 0x8b ->
+    let fmt =
+      match opcode land 3 with
+      | 0 -> [RM 1; R 1]
+      | 1 -> [RM w; R w]
+      | 2 -> [R 1; RM 1]
+      | 3 -> [R w; RM w]
+      | _ -> assert false
+    in
+    I_mov, s, fmt
+  | 0x8c ->
+    if r >= 6 then raise Invalid_instruction;
+    let sr = seg_reg_table.(r) in
+    I_movfromseg, lw, [RM w; Lit (O_reg sr)]
+  | 0x8d -> I_lea, lw, [RM w; M]
+  | 0x8e ->
+    if r >= 6 then raise Invalid_instruction;
+    let sr = seg_reg_table.(r) in
+    I_movtoseg, lw, [Lit (O_reg sr); RM w]
+  | 0x8f ->
+    if r = 0
+    then I_pop, lw, [M_size w]
+    else raise Invalid_instruction
+  | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 ->
+    I_xchg, lw, [R0 w; R_opcode w]
+  | 0x98 -> I_cbw, 0, []
+  | 0x99 -> I_cwd, lw, []
+  | 0x9a -> I_callfar, lw, [Far_ptr]
+  | 0x9b -> I_wait, 0, []
+  | 0x9c -> I_pushf, lw, []
+  | 0x9d -> I_popf, lw, []
+  | 0x9e -> I_sahf, 0, []
+  | 0x9f -> I_lahf, 0, []
+  | 0xa0 | 0xa1 | 0xa2 | 0xa3 ->
+    let fmt =
+      match opcode with
+      | 0xa0 -> [R0 1; M]
+      | 0xa1 -> [R0 w; M]
+      | 0xa2 -> [M; R0 1]
+      | 0xa3 -> [M; R0 w]
+      | _ -> assert false
+    in
+    I_mov, s, fmt
+  | 0xa4 | 0xa5 -> I_movs, s, []
+  | 0xa6 | 0xa7 -> I_cmps, s, []
+  | 0xa8 -> I_test, 0, [R0 1; I]
+  | 0xa9 -> I_test, lw, [R0 w; I]
+  | 0xaa | 0xab -> I_stos, s, []
+  | 0xac | 0xad -> I_lods, s, []
+  | 0xae | 0xaf -> I_scas, s, []
+  | 0xb0 | 0xb1 | 0xb2 | 0xb3 | 0xb4 | 0xb5 | 0xb6 | 0xb7
+  | 0xb8 | 0xb9 | 0xba | 0xbb | 0xbc | 0xbd | 0xbe | 0xbf ->
+    let s' = if opcode land 8 = 0 then  0 else lw in
+    I_mov, s', [R_opcode (1 lsl s'); I]
+  | 0xc0 | 0xc1 ->
+    let op = optable_rol.(r) in
+    op, s, [RM (1 lsl s); I]
+  | 0xc2 -> I_retn, lw, [I]
+  | 0xc3 -> I_ret, lw, []
+  | 0xc4 | 0xc5 ->
+    let op = if opcode land 1 = 0 then I_les else I_lds in
+    op, lw, [R w; M]
+  | 0xc6 | 0xc7 ->
+    if r = 0
+    then I_mov, s, [RM (1 lsl s); I]
+    else raise Invalid_instruction
+  | 0xc8 -> I_enter, lw, [I; I2]
+  | 0xc9 -> I_leave, 0, []
+  | 0xca -> I_retnfar, lw, [I]
+  | 0xcb -> I_retfar, lw, []
+  | 0xcc -> I_int3, 0, []
+  | 0xcd -> I_int, 0, [I]
+  | 0xce -> I_into, 0, []
+  | 0xcf -> I_iret, lw, []
+  | 0xd0 | 0xd1 | 0xd2 | 0xd3 ->
+    let op = optable_rol.(r) in
+    let shift_amount =
+      match opcode land 2 with
+      | 0 -> O_imm (1, 0)
+      | 2 -> O_reg R_CL
+      | _ -> assert false
+    in
+    op, s, [RM (1 lsl s); Lit shift_amount]
+  | 0xd4 -> I_aam, 0, [I]
+  | 0xd5 -> I_aad, 0, [I]
+  | 0xd6 -> raise Invalid_instruction
+  | 0xd7 -> I_xlat, 0, []
+  | 0xd8 | 0xd9 | 0xda | 0xdb | 0xdc | 0xdd | 0xde | 0xdf ->
+    (match fpu_mnem_table1.((opcode land 7) lsl 3 lor r) with
+       Some (op, fmt) -> op, 0, fmt | None -> raise Invalid_instruction)
+  | 0xe0 | 0xe1 | 0xe2 | 0xe3 ->
+    let op = [|I_loopnz;I_loopz;I_loop;I_jcxz|].(opcode land 3) in
+    op, lw, [Offset]
+  | 0xe4 | 0xe5 | 0xe6 | 0xe7 ->
+    let op = if opcode land 2 = 0 then I_in else I_out in
+    op, s, [R0 (1 lsl s); I]
+  | 0xe8 -> I_call, lw, [Offset]
+  | 0xe9 | 0xeb -> I_jmp, 0, [Offset]
+  | 0xea -> I_jmpfar, 0, [Far_ptr]
+  | 0xec | 0xed | 0xee | 0xef ->
+    let op = if opcode land 2 = 0 then I_in else I_out in
+    op, s, [R0 (1 lsl s); Lit (O_reg R_DX)]
+  | 0xf0 -> assert false (* prefix *)
+  | 0xf1 -> I_int1, 0, []
+  | 0xf2 | 0xf3 -> assert false (* prefix *)
+  | 0xf4 -> I_hlt, 0, []
+  | 0xf5 -> I_cmc, 0, []
+  | 0xf6 | 0xf7 ->
+    let op =
+      match r with
+      | 0 -> I_test
+      | 1 -> raise Invalid_instruction
+      | 2 -> I_not
+      | 3 -> I_neg
+      | 4 -> I_mul
+      | 5 -> I_imul
+      | 6 -> I_div
+      | 7 -> I_idiv
+      | _ -> assert false
+    in
+    let fmt =
+      let dst = RM (1 lsl s) in
+      if r = 0 then [dst; I] else [dst]
+    in
+    op, s, fmt
+  | 0xf8 -> I_clc, 0, []
+  | 0xf9 -> I_stc, 0, []
+  | 0xfa -> I_cli, 0, []
+  | 0xfb -> I_sti, 0, []
+  | 0xfc -> I_cld, 0, []
+  | 0xfd -> I_std, 0, []
+  | 0xfe ->
+    let op =
+      match r with
+      | 0 -> I_inc
+      | 1 -> I_dec
+      | _ -> raise Invalid_instruction
+    in
+    op, 0, [RM 1]
+  | 0xff ->
+    let op =
+      match r with
+      | 0 -> I_inc
+      | 1 -> I_dec
+      | 2 -> I_call
+      | 3 -> I_callfar
+      | 4 -> I_jmp
+      | 5 -> I_jmpfar
+      | 6 -> I_push
+      | _ -> raise Invalid_instruction
+    in
+    let fmt =
+      match r with
+      (* call/jmp far *)
+      | 3 | 5 -> [M]
+      | _ -> [RM w]
+    in
+    op, lw, fmt
+  | _ -> assert false
+
+let format_of_inst_0f mode prefix opcode _r =
+  let w = word_size mode prefix in
+  let lw =
+    match w with
+    | 1 -> 0
+    | 2 -> 1
+    | 4 -> 2
+    | 8 -> 3
+    | _ -> assert false
+  in
+  match opcode with
+  | 0x10 | 0x11 ->
+    let fmt = if opcode land 1 = 0 then [XMM_R; XMM_RM] else [XMM_RM; XMM_R] in
+    I_movups, 0, fmt
+  | 0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87
+  | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f ->
+    I_cjmp, (opcode land 15) lsl 2, [Offset]
+  | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97
+  | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f ->
+    I_set, (opcode land 15) lsl 2, [RM 1]
+  | 0xa0 -> I_push, lw, [Lit (O_reg R_FS)]
+  | 0xa1 -> I_pop , lw, [Lit (O_reg R_FS)]
+  | 0xa8 -> I_push, lw, [Lit (O_reg R_GS)]
+  | 0xa9 -> I_pop , lw, [Lit (O_reg R_GS)]
+  | 0xaf -> I_imul, lw, [R w; RM w]
+  | 0xb6 | 0xb7 | 0xbe | 0xbf ->
+    let op = if opcode land 8 = 0 then I_movzx else I_movsx in
+    if opcode land 1 = 0
+    then op, lw, [R w; RM 1]
+    else
+      begin match prefix land (prefix_mask Prefix_66) <> 0, mode with
+        | true , Mode16bit
+        | false, Mode32bit
+        | false, Mode64bit ->
+          op, 2, [R 4; RM 2]
+        | _ -> raise Invalid_instruction
+      end
+  | _ ->
+    let err = Printf.sprintf "unknown opcode: 0f %02x" opcode in
+    failwith err
+
+let format_of_inst_fpu opcode1 _mode _prefix opcode2 _r =
+  (* topmost 2 bits of opcode2 are both 1; r = 0 *)
+  let index1 = (opcode1 land 7) lsl 3 lor (opcode2 lsr 3 land 7) in
+  match fpu_mnem_table2.(index1) with
+  | FPU_A op ->
+    if op = I_ then raise Invalid_instruction else op, 0, [FPU_R]
+  | FPU_B a ->
+    let index2 = opcode2 land 7 in
+    let op = a.(index2) in
+    match op with
+    | I_ -> raise Invalid_instruction
+    | I_fnstsw -> I_fnstsw, 0, [Lit (O_reg R_AX)]
+    | _ -> op, 0, []
+
+let format_of_inst mode prefix opcode r =
+  let opcode1 = opcode lsr 8 in
+  let opcode2 = opcode land 0xff in
+  let f =
+    match opcode1 with
+    | 0 -> format_of_inst_single_byte
+    | 0x0f -> format_of_inst_0f
+    | 0xd8 | 0xd9 | 0xda | 0xdb | 0xdc | 0xdd | 0xde | 0xdf ->
+      format_of_inst_fpu opcode1
+    | _ -> assert false
+  in
+  f mode prefix opcode2 r
+
+let gpr_set_of_size = function
+  | 1 -> Reg8bitLegacy
+  | 2 -> Reg16bit
+  | 4 -> Reg32bit
+  | 8 -> Reg64bit
+  | _ -> assert false
+
+let convert_reg size r =
+  let regset = gpr_set_of_size size in
+  O_reg (int_to_reg regset r)
+
+let convert_inst mode ext_opcode prefix bytes operand_pack =
+  let opcode = ext_opcode lsr 3 in
+  let r = ext_opcode land 7 in
+  let g, imm1, imm2 =
+    match operand_pack with
+    | Op_N -> Reg 0, 0, 0
+    | Op_I i -> Reg 0, i, 0
+    | Op_II (i1, i2) -> Reg 0, i1, i2
+    | Op_M g -> g, 0, 0
+    | Op_MI (g, i) -> g, i, 0
+    | Op_MII (g, i1, i2) -> g, i1, i2
+  in
+  let op, var, fmt = format_of_inst mode prefix opcode r in
+  let convert_operand = function
+    | R size -> convert_reg size r
+    | R0 size -> convert_reg size 0
+    | R_opcode size -> convert_reg size (opcode land 7)
+    | RM size ->
+      begin match g with
+        | Reg r -> convert_reg size r
+        | Mem m -> O_mem (m, size)
+      end
+    | M ->
+      begin match g with
+        | Reg r -> raise Invalid_operand
+        | Mem m -> O_mem (m, 0)
+      end
+    | M_size size ->
+      begin match g with
+        | Reg r -> raise Invalid_operand
+        | Mem m -> O_mem (m, size)
+      end
+    | I -> O_imm (imm1, 0)
+    | I2 -> O_imm (imm2, 0)
+    | I_size size -> O_imm (imm1, size)
+    | Offset -> O_offset (imm1 + String.length bytes)
+    | Far_ptr -> O_farptr (imm1, imm2)
+    | FPU_R ->
+      begin match g with
+        | Reg r -> O_reg (R_fpu r)
+        | Mem _ -> assert false
+      end
+    | XMM_R -> O_reg (R_xmm r)
+    | XMM_RM ->
+      begin match g with
+        | Reg r -> O_reg (R_xmm r)
+        | Mem m -> O_mem (m, 16)
+      end
+    | Lit o -> o
+  in
+  let operands = List.map convert_operand fmt in
+  Inst.make ext_opcode prefix bytes op var operands
+
 let disassemble mode s : Inst.t =
   let buf = Buffer.create 8 in
   let prefix, opcode = read_prefix_and_opcode buf s in
@@ -407,7 +801,7 @@ let disassemble mode s : Inst.t =
   let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in
   let data_size = if alt_data then 2 else 4 in
   let addr_size = if alt_addr then 2 else 4 in
-  let ext_opcode, operand =
+  let ext_opcode, operand_pack =
     if inst_format land 0x10 <> 0
     then (* has regmem operand *)
       let r, g = read_regmem32 buf s in
@@ -420,26 +814,26 @@ let disassemble mode s : Inst.t =
             let opcode2 = (3 lsl 3 lor r) lsl 3 lor r' in
             let opcode' = opcode lsl 8 lor opcode2 in
             let ext_opcode' = extend_opcode opcode' 0 in
-            let operand =
+            let operand_pack =
               match fpu_mnem_table2.(index) with
               | FPU_A _ -> Op_M g
               | FPU_B _ -> Op_N
             in
-            ext_opcode', operand
+            ext_opcode', operand_pack
           | Mem _ ->
             ext_opcode, Op_M g
         end
       | 0xf6 | 0xf7 ->
-        let operand =
+        let operand_pack =
           if r = 0
           then
             let imm_size = if opcode land 1 = 0 then 1 else data_size in
             Op_MI (g, read_imm imm_size buf s)
           else Op_M g
         in
-        ext_opcode, operand
+        ext_opcode, operand_pack
       | _ ->
-        let operand =
+        let operand_pack =
           match inst_format land 7 with
           | 0 -> Op_M g
           | 1 -> Op_MI (g, read_imm 1 buf s)
@@ -455,11 +849,11 @@ let disassemble mode s : Inst.t =
             Op_MII (g, imm1, imm2)
           | _ -> assert false
         in
-        ext_opcode, operand
+        ext_opcode, operand_pack
       end
     else (* no regmem operand *)
       let ext_opcode = extend_opcode opcode 0 in
-      let operand =
+      let operand_pack =
         match inst_format land 7 with
         | 0 -> Op_N
         | 1 -> Op_I (read_imm 1 buf s)
@@ -480,474 +874,9 @@ let disassemble mode s : Inst.t =
           Op_M g
         | _ -> assert false
       in
-      ext_opcode, operand
+      ext_opcode, operand_pack
   in
-  Inst.make ext_opcode prefix (Buffer.contents buf) operand
-
-let mnemonics_add = [|"add";"or" ;"adc";"sbb";"and";"sub";"xor";"cmp"|]
-let mnemonics_rol = [|"rol";"ror";"rcl";"rcr";"shl";"shr";""   ;"sar"|]
-
-let operand_size_prefix (mode : cpu_mode) (prefix : int) : string option =
-  if prefix land (prefix_mask Prefix_66) <> 0
-  then
-    match mode with
-    | Mode16bit -> Some "o32"
-    | Mode32bit
-    | Mode64bit -> Some "o16"
-  else None
-
-let with_operand_size_prefix (mode : cpu_mode) (prefix : int) (m : string) : string =
-  match operand_size_prefix mode prefix with
-  | Some o -> o^" "^m
-  | None -> m
-
-let cond_code =
-  [|"o";"no";"b";"ae";"z";"nz";"be";"a";
-    "s";"ns";"p";"np";"l";"ge";"le";"g"|]
-
-let seg_reg_name =
-  [|"es";"cs";"ss";"ds";"fs";"gs";"segr6";"segr7"|]
-
-let word_size mode prefix =
-  let has_prefix_66 = prefix land (prefix_mask Prefix_66) <> 0 in
-  match mode, has_prefix_66 with
-  | Mode16bit, false
-  | Mode32bit, true
-  | Mode64bit, true -> 2
-  | Mode16bit, true
-  | Mode32bit, false
-  | Mode64bit, false -> 4
-
-(* r is ModRM[5:3] *)
-(* returns None if (opcode, r) does not denote a valid instruction *)
-let format_of_inst_0 mode prefix opcode r =
-  let w = word_size mode prefix in
-  match opcode with
-  | 0x00 | 0x01 | 0x02 | 0x03 | 0x04 | 0x05
-  | 0x08 | 0x09 | 0x0a | 0x0b | 0x0c | 0x0d
-  | 0x10 | 0x11 | 0x12 | 0x13 | 0x14 | 0x15
-  | 0x18 | 0x19 | 0x1a | 0x1b | 0x1c | 0x1d
-  | 0x20 | 0x21 | 0x22 | 0x23 | 0x24 | 0x25
-  | 0x28 | 0x29 | 0x2a | 0x2b | 0x2c | 0x2d
-  | 0x30 | 0x31 | 0x32 | 0x33 | 0x34 | 0x35
-  | 0x38 | 0x39 | 0x3a | 0x3b | 0x3c | 0x3d ->
-    let fmt =
-      match opcode land 7 with
-      | 0 -> [RM 1; R 1]
-      | 1 -> [RM w; R w]
-      | 2 -> [R 1; RM 1]
-      | 3 -> [R w; RM w]
-      | 4 -> [R0 1; I]
-      | 5 -> [R0 w; I]
-      | _ -> assert false
-    in
-    (mnemonics_add.(opcode lsr 3), fmt)
-  | 0x06 | 0x07 | 0x0e | 0x16 | 0x17 | 0x1e | 0x1f ->
-    let m = if opcode land 1 = 0 then "push" else "pop" in
-    (with_operand_size_prefix mode prefix m,
-     [|"es";"cs";"ss";"ds"|].(opcode lsr 3) |> (fun s -> [Lit s]))
-  | 0x0f -> assert false (* escape *)
-  | 0x26 -> assert false (* prefix *)
-  | 0x27 -> ("daa", [])
-  | 0x2e -> assert false (* prefix *)
-  | 0x2f -> ("das", [])
-  | 0x36 -> assert false (* prefix *)
-  | 0x37 -> ("aaa", [])
-  | 0x3e -> assert false (* prefix *)
-  | 0x3f -> ("aas", [])
-  | 0x40 | 0x41 | 0x42 | 0x43 | 0x44 | 0x45 | 0x46 | 0x47
-  | 0x48 | 0x49 | 0x4a | 0x4b | 0x4c | 0x4d | 0x4e | 0x4f
-  | 0x50 | 0x51 | 0x52 | 0x53 | 0x54 | 0x55 | 0x56 | 0x57
-  | 0x58 | 0x59 | 0x5a | 0x5b | 0x5c | 0x5d | 0x5e | 0x5f ->
-    ([|"inc";"dec";"push";"pop"|].(opcode lsr 3 land 3), [R_opcode w])
-  | 0x60 | 0x61 ->
-    let m = if opcode land 1 = 0 then "pusha" else "popa" in
-    (with_operand_size_prefix mode prefix m, [])
-  | 0x62 -> ("bound", [R w; M])
-  | 0x63 -> ("arpl", [RM 2; R 2])
-  | 0x64 | 0x65 | 0x66 | 0x67 -> assert false (* prefix *)
-  | 0x68 | 0x6a ->
-    ("push", [I_size w])
-  | 0x69 -> ("imul", [R w; RM w; I_size w])
-  | 0x6b -> ("imul", [R w; RM w; I_size 1])
-  | 0x6c -> ("insb", [])
-  | 0x6d ->
-    let m =
-      match w with
-      | 2 -> "insw"
-      | 4 -> "insd"
-      | _ -> assert false
-    in
-    (m, [])
-  | 0x6e -> ("outsb", [])
-  | 0x6f ->
-    let m =
-      match w with
-      | 2 -> "outsw"
-      | 4 -> "outsd"
-      | _ -> assert false
-    in
-    (m, [])
-  | 0x70 | 0x71 | 0x72 | 0x73 | 0x74 | 0x75 | 0x76 | 0x77
-  | 0x78 | 0x79 | 0x7a | 0x7b | 0x7c | 0x7d | 0x7e | 0x7f ->
-    ("j"^cond_code.(opcode land 15), [Offset])
-  | 0x80 | 0x81 | 0x83 ->
-    (mnemonics_add.(r), if opcode land 1 = 0 then [RM 1; I] else [RM w; I])
-  | 0x82 -> raise Invalid_instruction (* canonical opcode is 0x80 *)
-  | 0x84 | 0x85 | 0x86 | 0x87 ->
-    let m = if opcode land 2 = 0 then "test" else "xchg" in
-    let s = if opcode land 1 = 0 then [RM 1; R 1] else [RM w; R w] in
-    (m, s)
-  | 0x88 | 0x89 | 0x8a | 0x8b ->
-    let s =
-      match opcode land 3 with
-      | 0 -> [RM 1; R 1]
-      | 1 -> [RM w; R w]
-      | 2 -> [R 1; RM 1]
-      | 3 -> [R w; RM w]
-      | _ -> assert false
-    in
-    ("mov", s)
-  | 0x8c ->
-    let s = seg_reg_name.(r) in
-    ("mov", [RM w; Lit s])
-  | 0x8d ->
-    ("lea", [RM w; M])
-  | 0x8e ->
-    let s = seg_reg_name.(r) in
-    (with_operand_size_prefix mode prefix "mov", [Lit s; RM w])
-  | 0x8f ->
-    if r = 0
-    then ("pop", [M_size w])
-    else raise Invalid_instruction
-  | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 ->
-    ("xchg", [R0 w; R_opcode w])
-  | 0x98 -> ("cbw", [])
-  | 0x99 ->
-    let m =
-      match w with
-      | 2 -> "cwd"
-      | 4 -> "cdq"
-      | _ -> assert false
-    in
-    (m, [])
-  | 0x9a -> ("call", [Far_ptr])
-  | 0x9b -> ("wait", [])
-  | 0x9c -> ("pushf", [])
-  | 0x9d -> ("popf", [])
-  | 0x9e -> ("sahf", [])
-  | 0x9f -> ("lahf", [])
-  | 0xa0 | 0xa1 | 0xa2 | 0xa3 ->
-    let s =
-      match opcode with
-      | 0xa0 -> [R0 1; M]
-      | 0xa1 -> [R0 w; M]
-      | 0xa2 -> [M; R0 1]
-      | 0xa3 -> [M; R0 w]
-      | _ -> assert false
-    in
-    ("mov", s)
-  | 0xa4 -> ("movsb", [])
-  | 0xa5 ->
-    let m =
-      match w with
-      | 2 -> "movsw"
-      | 4 -> "movsd"
-      | _ -> assert false
-    in
-    (m, [])
-  | 0xa6 -> ("cmpsb", [])
-  | 0xa7 ->
-    let m =
-      match w with
-      | 2 -> "cmpsw"
-      | 4 -> "cmpsd"
-      | _ -> assert false
-    in
-    (m, [])
-  | 0xa8 | 0xa9 ->
-    ("test", if opcode land 1 = 0 then [R0 1; I] else [R0 w; I])
-  | 0xaa -> ("stosb", [])
-  | 0xab ->
-    let m =
-      match w with
-      | 2 -> "stosw"
-      | 4 -> "stosd"
-      | _ -> assert false
-    in
-    (m, [])
-  | 0xac -> ("lodsb", [])
-  | 0xad ->
-    let m =
-      match w with
-      | 2 -> "lodsw"
-      | 4 -> "lodsd"
-      | _ -> assert false
-    in
-    (m, [])
-  | 0xae -> ("scasb", [])
-  | 0xaf ->
-    let m =
-      match w with
-      | 2 -> "scasw"
-      | 4 -> "scasd"
-      | _ -> assert false
-    in
-    (m, [])
-  | 0xb0 | 0xb1 | 0xb2 | 0xb3 | 0xb4 | 0xb5 | 0xb6 | 0xb7
-  | 0xb8 | 0xb9 | 0xba | 0xbb | 0xbc | 0xbd | 0xbe | 0xbf ->
-    ("mov", if opcode land 8 = 0 then [R_opcode 1; I] else [R_opcode w; I])
-  | 0xc0 | 0xc1 ->
-    let m = mnemonics_rol.(r) in
-    if m = ""
-    then raise Invalid_instruction
-    else (m, if opcode land 1 = 0 then [RM 1; I] else [RM w; I])
-  | 0xc2 -> ("ret", [I])
-  | 0xc3 -> ("ret", [])
-  | 0xc4 | 0xc5 ->
-    ((if opcode land 1 = 0 then "les" else "lds"), [R w; M])
-  | 0xc6 | 0xc7 ->
-    if r = 0
-    then
-      let s = if opcode land 1 = 0 then [RM 1; I] else [RM w; I] in
-      ("mov", s)
-    else raise Invalid_instruction
-  | 0xc8 -> ("enter", [I; I2])
-  | 0xc9 -> ("leave", [])
-  | 0xca -> ("retf", [I])
-  | 0xcb -> ("retf", [])
-  | 0xcc -> ("int3", [])
-  | 0xcd -> ("int", [I])
-  | 0xce -> ("into", [])
-  | 0xcf -> ("iret", [])
-  | 0xd0 | 0xd1 | 0xd2 | 0xd3 ->
-    let m = mnemonics_rol.(r) in
-    if m = ""
-    then raise Invalid_instruction
-    else
-      let s =
-        match opcode land 3 with
-        | 0 -> [RM 1; Lit "1"]
-        | 1 -> [RM w; Lit "1"]
-        | 2 -> [RM 1; Lit "cl"]
-        | 3 -> [RM w; Lit "cl"]
-        | _ -> assert false
-      in
-      (m, s)
-  | 0xd4 | 0xd5 ->
-    let m = if opcode land 1 = 0 then "aam" else "aad" in
-    (m, [I])
-  | 0xd6 -> raise Invalid_instruction
-  | 0xd7 -> ("xlat", [])
-  | 0xd8 | 0xd9 | 0xda | 0xdb | 0xdc | 0xdd | 0xde | 0xdf ->
-    (match fpu_mnem_table1.((opcode land 7) lsl 3 lor r) with
-       Some t -> t | None -> raise Invalid_instruction)
-  | 0xe0 | 0xe1 | 0xe2 | 0xe3 ->
-    ([|"loopnz";"loopz";"loop";"jcxz"|].(opcode land 3), [Offset])
-  | 0xe4 | 0xe5 | 0xe6 | 0xe7 ->
-    let m = if opcode land 2 = 0 then "in" else "out" in
-    let s = if opcode land 1 = 0 then [R0 1; I] else [R0 w; I] in
-    (m, s)
-  | 0xe8 | 0xe9 | 0xeb ->
-    let m = if opcode land 1 = 0 then "call" else "jmp" in
-    (m, [Offset])
-  | 0xea -> ("jmp", [Far_ptr])
-  | 0xec | 0xed | 0xee | 0xef ->
-    let m = if opcode land 2 = 0 then "in" else "out" in
-    let s = if opcode land 1 = 0 then [R0 1; Lit "dx"] else [R0 w; Lit "dx"] in
-    (m, s)
-  | 0xf0 -> assert false (* prefix *)
-  | 0xf1 -> ("int1", [])
-  | 0xf2 | 0xf3 -> assert false (* prefix *)
-  | 0xf4 -> ("hlt", [])
-  | 0xf5 -> ("cmc", [])
-  | 0xf6 | 0xf7 ->
-    if r = 1 then raise Invalid_instruction
-    else
-      let m =
-        match r with
-        | 0 -> "test"
-        | 2 -> "not"
-        | 3 -> "neg"
-        | 4 -> "mul"
-        | 5 -> "imul"
-        | 6 -> "div"
-        | 7 -> "idiv"
-        | _ -> assert false
-      in
-      let s =
-        if opcode land 1 = 0
-        then (if r = 0 then [RM 1; I] else [RM 1])
-        else (if r = 0 then [RM w; I] else [RM w])
-      in
-      (m, s)
-  | 0xf8 -> ("clc", [])
-  | 0xf9 -> ("stc", [])
-  | 0xfa -> ("cli", [])
-  | 0xfb -> ("sti", [])
-  | 0xfc -> ("cld", [])
-  | 0xfd -> ("std", [])
-  | 0xfe ->
-    if r >= 2 then raise Invalid_instruction
-    else
-      let m =
-        match r with
-        | 0 -> "inc"
-        | 1 -> "dec"
-        | _ -> assert false
-      in
-      (m, [RM 1])
-  | 0xff ->
-    let m = [|"inc";"dec";"call";"callf";"jmp";"jmpf";"push";""|].(r) in
-    if m = "" then raise Invalid_instruction;
-    let s =
-      match r with
-      (* call/jmp far *)
-      | 3 | 5 -> [M]
-      | _ -> [RM w]
-    in
-    (m, s)
-  | _ -> assert false
-
-let format_of_inst_0f mode prefix opcode _r =
-  let w = word_size mode prefix in
-  match opcode with
-  | 0x10 | 0x11 ->
-    let s = if opcode land 1 = 0 then [XMM_R; XMM_RM] else [XMM_RM; XMM_R] in
-    ("movups", s)
-  | 0x80 | 0x81 | 0x82 | 0x83 | 0x84 | 0x85 | 0x86 | 0x87
-  | 0x88 | 0x89 | 0x8a | 0x8b | 0x8c | 0x8d | 0x8e | 0x8f ->
-    ("j"^cond_code.(opcode land 15), [Offset])
-  | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97
-  | 0x98 | 0x99 | 0x9a | 0x9b | 0x9c | 0x9d | 0x9e | 0x9f ->
-    ("set"^cond_code.(opcode land 15), [RM 1])
-  | 0xa0 | 0xa1 | 0xa8 | 0xa9 ->
-    let m = if opcode land 1 = 0 then "push" else "pop" in
-    let s = [|"fs";"gs"|].(opcode lsr 3 land 1) in
-    (with_operand_size_prefix mode prefix m, [Lit s])
-  | 0xaf -> ("imul", [R w; RM w])
-  | 0xb6 | 0xb7 | 0xbe | 0xbf ->
-    let m = if opcode lsr 3 land 1 = 0 then "movzx" else "movsx" in
-    if opcode land 1 = 0
-    then (m, [R w; RM 1])
-    else
-      begin match prefix land (prefix_mask Prefix_66) <> 0, mode with
-        | true , Mode16bit
-        | false, Mode32bit
-        | false, Mode64bit ->
-          (m, [R 4; RM 2])
-        | _ -> raise Invalid_instruction
-      end
-  | _ ->
-    let err = Printf.sprintf "unknown opcode: 0f %02x" opcode in
-    failwith err
-
-let format_of_inst_fpu opcode1 _mode _prefix opcode2 _r =
-  (* topmost 2 bits of opcode2 are both 1; r = 0 *)
-  let index1 = (opcode1 land 7) lsl 3 lor (opcode2 lsr 3 land 7) in
-  match fpu_mnem_table2.(index1) with
-  | FPU_A m ->
-    if m = "" then raise Invalid_instruction else (m, [FPU_R])
-  | FPU_B a ->
-    let index2 = opcode2 land 7 in
-    let m = a.(index2) in
-    if m = "" then raise Invalid_instruction else (m, [])
-
-let format_of_inst mode prefix opcode r =
-  let opcode1 = opcode lsr 8 in
-  let opcode2 = opcode land 0xff in
-  let f =
-    match opcode1 with
-    | 0 -> format_of_inst_0
-    | 0x0f -> format_of_inst_0f
-    | 0xd8 | 0xd9 | 0xda | 0xdb | 0xdc | 0xdd | 0xde | 0xdf ->
-      format_of_inst_fpu opcode1
-    | _ -> assert false
-  in
-  f mode prefix opcode2 r
-
-let pp_r size f r =
-  let regset =
-    match size with
-    | 1 -> Reg8bitLegacy
-    | 2 -> Reg16bit
-    | 4 -> Reg32bit
-    | 8 -> Reg64bit
-    | _ -> assert false
-  in
-  pp_print_string f (string_of_reg (int_to_reg regset r))
-
-let pp_mem_sized size f m =
-  fprintf f "%s " (format_size size);
-  pp_mem f m
-
-let pp_inst mode f inst =
-  let ext_opcode = ext_opcode_of inst in
-  let opcode = ext_opcode lsr 3 in
-  let r = ext_opcode land 7 in
-  let prefix = prefix_of inst in
-  let operand = operand_of inst in
-  let g, imm1, imm2 =
-    match operand with
-    | Op_N -> Reg 0, 0, 0
-    | Op_I i -> Reg 0, i, 0
-    | Op_II (i1, i2) -> Reg 0, i1, i2
-    | Op_M g -> g, 0, 0
-    | Op_MI (g, i) -> g, i, 0
-    | Op_MII (g, i1, i2) -> g, i1, i2
-  in
-  let mne, fmt = format_of_inst mode prefix opcode r in
-  let pp_operand = function
-    | R size -> pp_r size f r
-    | R0 size -> pp_r size f 0
-    | R_opcode size -> pp_r size f (opcode land 7)
-    | RM size ->
-      begin match g with
-        | Reg r -> pp_r size f r
-        | Mem m -> pp_mem_sized size f m
-      end
-    | M ->
-      begin match g with
-        | Reg r ->
-          (* a reg operand found where a mem operand is expected *)
-          fprintf f "R%d" r
-        | Mem m -> pp_mem f m
-      end
-    | M_size size ->
-      begin match g with
-        | Reg r ->
-          (* a reg operand found where a mem operand is expected *)
-          fprintf f "R%d" r
-        | Mem m -> pp_mem_sized size f m
-      end
-    | I -> pp_print_int f imm1
-    | I2 -> pp_print_int f imm2
-    | I_size size -> fprintf f "%s %d" (format_size size) imm1
-    | Offset ->
-      let disp = imm1 + length_of inst in
-      if disp = 0 then pp_print_string f "$" else fprintf f "$%+d" disp
-    | Far_ptr ->
-      fprintf f "0x%x:0x%x" imm1 imm2
-    | FPU_R ->
-      begin match g with
-        | Reg r -> fprintf f "st%d" r
-        | Mem _ -> assert false
-      end
-    | XMM_R -> fprintf f "xmm%d" r
-    | XMM_RM ->
-      begin match g with
-        | Reg r -> fprintf f "xmm%d" r
-        | Mem m -> pp_mem_sized size f m
-      end
-    | Lit s -> pp_print_string f s
-  in
-  pp_print_string f mne;
-  match fmt with
-  | [] -> ()
-  | fmt_hd::fmt_tl ->
-    pp_print_string f " ";
-    pp_operand fmt_hd;
-    List.iter (fun fmt -> pp_print_string f ","; pp_operand fmt) fmt_tl
+  convert_inst mode ext_opcode prefix (Buffer.contents buf) operand_pack
 
 let main () =
   (* Elaborate.load_spec (); *)
@@ -957,7 +886,7 @@ let main () =
   let s = Stream.of_channel in_chan in
   let rec loop () =
     let inst = disassemble mode s in
-    fprintf std_formatter "%a@." (pp_inst mode) inst;
+    printf "%a@." Inst.pp inst;
     (* let e = Elaborate.elaborate_inst inst in
        printf "{%a}@." Semant.pp_expr e; *)
     loop ()
