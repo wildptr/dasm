@@ -1,5 +1,4 @@
 {
-open Core
 open Lexing
 open Spec_parser
 
@@ -12,7 +11,9 @@ let next_line lexbuf =
       pos_bol = lexbuf.lex_curr_pos;
       pos_lnum = pos.pos_lnum + 1 }
 
-let keyword_map : token String.Map.t =
+module StringMap = Map.Make(String)
+
+let keyword_map : token StringMap.t =
   [
     "call", K_call;
     "if", K_if;
@@ -24,8 +25,7 @@ let keyword_map : token String.Map.t =
     "store", K_store;
     "template", K_template;
     "undefined", K_undefined;
-  ]
-  |> String.Map.of_alist_exn
+  ] |> List.fold_left (fun map (k, v) -> StringMap.add k v map) StringMap.empty
 
 }
 
@@ -43,7 +43,7 @@ rule read = parse
   | '\'' (['0' '1']* as s) '\'' { Bitvec (Bitvec.of_string s) }
   | id
     { let s = Lexing.lexeme lexbuf in
-      match String.Map.find keyword_map s with
+      match StringMap.find_opt s keyword_map with
       | Some k -> k
       | None -> Ident s }
   | "==" { EqEq }

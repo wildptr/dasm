@@ -2,8 +2,8 @@ open Format
 
 type reg =
   | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH
-  | R_AX | R_CX | R_DX | R_BX | R_SI | R_DI | R_SP | R_BP
-  | R_EAX | R_ECX | R_EDX | R_EBX | R_ESI | R_EDI | R_ESP | R_EBP
+  | R_AX | R_CX | R_DX | R_BX | R_SP | R_BP | R_SI | R_DI
+  | R_EAX | R_ECX | R_EDX | R_EBX | R_ESP | R_EBP | R_ESI | R_EDI
   | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS
   | R_fpu of int | R_xmm of int
 
@@ -151,7 +151,7 @@ let format_size = function
 
 type operand =
   | O_reg of reg
-  | O_mem of mem * int (* size; 0 means unspecified *)
+  | O_mem of mem * int (* size in bytes; 0 means unspecified *)
   | O_imm of int * int
   | O_offset of int
   | O_farptr of (int * int)
@@ -165,10 +165,11 @@ let pp_operand f = function
     if size > 0 then fprintf f "%s " (format_size size);
     pp_print_int f i
   | O_offset disp ->
-    if disp = 0 then pp_print_string f "$" else fprintf f "$%+d" disp
+    pp_print_string f "$";
+    if disp <> 0 then fprintf f "%+d" disp
   | O_farptr (seg, off) -> fprintf f "0x%x:0x%x" seg off
 
-type op =
+type operation =
   | I_
   | I_aaa
   | I_aad
@@ -359,13 +360,13 @@ type t = {
   ext_opcode : int; (* opcode << 3 | opcode_extension *)
   prefix : int;
   bytes : string;
-  op : op;
+  operation : operation;
   variant : int;
   operands : operand list;
 }
 
-let make ext_opcode prefix bytes op variant operands =
-  { ext_opcode; prefix; bytes; op; variant; operands }
+let make ext_opcode prefix bytes operation variant operands =
+  { ext_opcode; prefix; bytes; operation; variant; operands }
 
 let ext_opcode_of inst = inst.ext_opcode
 
@@ -376,6 +377,8 @@ let bytes_of inst = inst.bytes
 let length_of inst = String.length inst.bytes
 
 let operands_of inst = inst.operands
+
+let operation_of inst = inst.operation
 
 let cond_code =
   [|"o";"no";"b";"ae";"z";"nz";"be";"a";
@@ -396,7 +399,7 @@ let prefix_of_size = function
   | _ -> assert false
 
 let mnemonic_of inst =
-  match inst.op with
+  match inst.operation with
   | I_ -> "<invalid instruction>"
   | I_aaa -> "aaa"
   | I_aad -> "aad"
@@ -592,5 +595,5 @@ let pp f inst =
     pp_operand f o_hd;
     List.iter (fun o -> pp_print_string f ","; pp_operand f o) o_tl
 
-let hax_prefix inst prefix =
+let has_prefix inst prefix =
   inst.prefix land (prefix_mask prefix) = prefix_value prefix

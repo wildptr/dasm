@@ -166,9 +166,8 @@ type operand_format =
   | RM of int
   | M
   | M_size of int
-  | I
-  | I2
-  | I_size of int
+  | I of int
+  | I2 of int
   | Offset
   | Far_ptr
   | FPU_R
@@ -253,8 +252,8 @@ let fpu_mnem_table1 =
   |]
 
 type fpu_inst_format =
-  | FPU_A of op
-  | FPU_B of op array
+  | FPU_A of operation
+  | FPU_B of operation array
 
 let fpu_mnem_table2 : fpu_inst_format array =
   [|
@@ -439,8 +438,8 @@ let format_of_inst_single_byte mode prefix opcode r =
       | 1 -> [RM w; R w]
       | 2 -> [R 1; RM 1]
       | 3 -> [R w; RM w]
-      | 4 -> [R0 1; I]
-      | 5 -> [R0 w; I]
+      | 4 -> [R0 1; I 1]
+      | 5 -> [R0 w; I w]
       | _ -> assert false
     in
     optable_add.(opcode lsr 3), s, fmt
@@ -469,9 +468,9 @@ let format_of_inst_single_byte mode prefix opcode r =
   | 0x62 -> I_bound, lw, [R w; M]
   | 0x63 -> I_arpl, 0, [RM 2; R 2]
   | 0x64 | 0x65 | 0x66 | 0x67 -> assert false (* prefix *)
-  | 0x68 | 0x6a -> I_push, lw, [I_size w]
-  | 0x69 -> I_imul, lw, [R w; RM w; I_size w]
-  | 0x6b -> I_imul, lw, [R w; RM w; I_size 1]
+  | 0x68 | 0x6a -> I_push, lw, [I w]
+  | 0x69 -> I_imul, lw, [R w; RM w; I w]
+  | 0x6b -> I_imul, lw, [R w; RM w; I 1]
   | 0x6c -> I_ins, 0, []
   | 0x6d -> I_ins, lw, []
   | 0x6e -> I_outs, 0, []
@@ -483,8 +482,8 @@ let format_of_inst_single_byte mode prefix opcode r =
     let op = optable_add.(r) in
     let s, fmt =
       if opcode land 1 = 0
-      then 0, [RM 1; I]
-      else lw, [RM w; I]
+      then 0, [RM 1; I 1]
+      else lw, [RM w; I w]
     in
     op, s, fmt
   | 0x82 -> raise Invalid_instruction (* canonical opcode is 0x80 *)
@@ -537,33 +536,33 @@ let format_of_inst_single_byte mode prefix opcode r =
     I_mov, s, fmt
   | 0xa4 | 0xa5 -> I_movs, s, []
   | 0xa6 | 0xa7 -> I_cmps, s, []
-  | 0xa8 -> I_test, 0, [R0 1; I]
-  | 0xa9 -> I_test, lw, [R0 w; I]
+  | 0xa8 -> I_test, 0, [R0 1; I 1]
+  | 0xa9 -> I_test, lw, [R0 w; I w]
   | 0xaa | 0xab -> I_stos, s, []
   | 0xac | 0xad -> I_lods, s, []
   | 0xae | 0xaf -> I_scas, s, []
   | 0xb0 | 0xb1 | 0xb2 | 0xb3 | 0xb4 | 0xb5 | 0xb6 | 0xb7
   | 0xb8 | 0xb9 | 0xba | 0xbb | 0xbc | 0xbd | 0xbe | 0xbf ->
     let s' = if opcode land 8 = 0 then  0 else lw in
-    I_mov, s', [R_opcode (1 lsl s'); I]
+    I_mov, s', [R_opcode (1 lsl s'); I (1 lsl s')]
   | 0xc0 | 0xc1 ->
     let op = optable_rol.(r) in
-    op, s, [RM (1 lsl s); I]
-  | 0xc2 -> I_retn, lw, [I]
+    op, s, [RM (1 lsl s); I (1 lsl s)]
+  | 0xc2 -> I_retn, lw, [I (1 lsl lw)]
   | 0xc3 -> I_ret, lw, []
   | 0xc4 | 0xc5 ->
     let op = if opcode land 1 = 0 then I_les else I_lds in
     op, lw, [R w; M]
   | 0xc6 | 0xc7 ->
     if r = 0
-    then I_mov, s, [RM (1 lsl s); I]
+    then I_mov, s, [RM (1 lsl s); I (1 lsl s)]
     else raise Invalid_instruction
-  | 0xc8 -> I_enter, lw, [I; I2]
+  | 0xc8 -> I_enter, lw, [I (1 lsl lw); I2 (1 lsl lw)]
   | 0xc9 -> I_leave, 0, []
-  | 0xca -> I_retnfar, lw, [I]
+  | 0xca -> I_retnfar, lw, [I (1 lsl lw)]
   | 0xcb -> I_retfar, lw, []
   | 0xcc -> I_int3, 0, []
-  | 0xcd -> I_int, 0, [I]
+  | 0xcd -> I_int, 0, [I 1]
   | 0xce -> I_into, 0, []
   | 0xcf -> I_iret, lw, []
   | 0xd0 | 0xd1 | 0xd2 | 0xd3 ->
@@ -575,8 +574,8 @@ let format_of_inst_single_byte mode prefix opcode r =
       | _ -> assert false
     in
     op, s, [RM (1 lsl s); Lit shift_amount]
-  | 0xd4 -> I_aam, 0, [I]
-  | 0xd5 -> I_aad, 0, [I]
+  | 0xd4 -> I_aam, 0, [I 1]
+  | 0xd5 -> I_aad, 0, [I 1]
   | 0xd6 -> raise Invalid_instruction
   | 0xd7 -> I_xlat, 0, []
   | 0xd8 | 0xd9 | 0xda | 0xdb | 0xdc | 0xdd | 0xde | 0xdf ->
@@ -587,7 +586,7 @@ let format_of_inst_single_byte mode prefix opcode r =
     op, lw, [Offset]
   | 0xe4 | 0xe5 | 0xe6 | 0xe7 ->
     let op = if opcode land 2 = 0 then I_in else I_out in
-    op, s, [R0 (1 lsl s); I]
+    op, s, [R0 (1 lsl s); I (1 lsl s)]
   | 0xe8 -> I_call, lw, [Offset]
   | 0xe9 | 0xeb -> I_jmp, 0, [Offset]
   | 0xea -> I_jmpfar, 0, [Far_ptr]
@@ -614,7 +613,7 @@ let format_of_inst_single_byte mode prefix opcode r =
     in
     let fmt =
       let dst = RM (1 lsl s) in
-      if r = 0 then [dst; I] else [dst]
+      if r = 0 then [dst; I (1 lsl s)] else [dst]
     in
     op, s, fmt
   | 0xf8 -> I_clc, 0, []
@@ -763,9 +762,8 @@ let convert_inst mode ext_opcode prefix bytes operand_pack =
         | Reg r -> raise Invalid_operand
         | Mem m -> O_mem (m, size)
       end
-    | I -> O_imm (imm1, 0)
-    | I2 -> O_imm (imm2, 0)
-    | I_size size -> O_imm (imm1, size)
+    | I size -> O_imm (imm1, size)
+    | I2 size -> O_imm (imm2, size)
     | Offset -> O_offset (imm1 + String.length bytes)
     | Far_ptr -> O_farptr (imm1, imm2)
     | FPU_R ->
@@ -879,19 +877,29 @@ let disassemble mode s : Inst.t =
   convert_inst mode ext_opcode prefix (Buffer.contents buf) operand_pack
 
 let main () =
-  (* Elaborate.load_spec (); *)
+  let elab_flag = ref false in
+  let in_path = ref "" in
+  let env = Semant.new_env () in
+  Arg.(parse [("-e", Set elab_flag, "")] (fun s -> in_path := s) "usage?");
+  if !elab_flag then Elaborate.load_spec "spec";
   let mode = Mode32bit in
-  let in_path = Sys.argv.(1) in
-  let in_chan = open_in in_path in
+  let in_chan = open_in !in_path in
   let s = Stream.of_channel in_chan in
-  let rec loop () =
+  let rec loop pc =
     let inst = disassemble mode s in
     printf "%a@." Inst.pp inst;
+    if !elab_flag then
+      Elaborate.elaborate_inst env (pc + length_of inst) inst;
     (* let e = Elaborate.elaborate_inst inst in
        printf "{%a}@." Semant.pp_expr e; *)
-    loop ()
+    loop (pc + length_of inst)
   in
   print_string "[bits 32]\n";
-  try loop () with _ -> close_in in_chan
+  try loop 0 with Stream.Failure ->
+    close_in in_chan;
+    if !elab_flag then
+      let stmts = Semant.get_stmts env in
+      let open Format in
+      List.iter (fprintf std_formatter "%a@." Semant.pp_stmt) stmts
 
 let () = main ()

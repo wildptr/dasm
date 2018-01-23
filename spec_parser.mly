@@ -1,5 +1,4 @@
 %{
-open Core_kernel.Std
 open Spec_ast
 %}
 
@@ -69,7 +68,8 @@ proc_def:
     result_width_opt = option(preceded(Colon, cexpr));
     LBrace; ap_body = list(stmt); RBrace
     {{ ap_name; ap_params; ap_body;
-       ap_result_width = Option.value result_width_opt ~default:(C_int 0) }}
+       ap_result_width =
+         match result_width_opt with None -> C_int 0 | Some width -> width }}
 
 name_length_pair:
   | name = Ident; Colon; len = cexpr { name, len }
@@ -133,6 +133,8 @@ expr: binary_expr {$1}
 stmt:
   | name = Ident; Eq; value = expr; Semi
     { Stmt_set (name, value) }
+  (*| name = Ident; LBrack; hi = cexpr; Colon; lo = cexpr; RBrack; Eq; value = expr; Semi
+    { Stmt_set_part (name, hi, lo, value) }*)
   | K_call; proc_name = Ident;
     LParen; args = separated_list(Comma, expr); RParen; Semi
     { Stmt_call (proc_name, args, None) }
@@ -192,7 +194,8 @@ proc_templ:
     result_width_opt = option(preceded(Colon, cexpr));
     LBrace; pt_body = list(stmt); RBrace
     {{ pt_name; pt_templ_params; pt_proc_params; pt_body;
-       pt_result_width = Option.value result_width_opt ~default:(C_int 0) }}
+       pt_result_width =
+         match result_width_opt with Some width -> width | None -> C_int 0 }}
 
 proc_inst:
   | K_proc; pi_inst_name = Ident; Eq; pi_templ_name = Ident;
@@ -202,4 +205,4 @@ proc_inst:
 templ_arg:
   | Int { TA_int $1 }
   | Bitvec { TA_bitvec $1 }
-  | Ident { TA_prim $1 }
+  | s = Ident { match s.[0] with 'A'..'Z' -> TA_var s | _ -> TA_prim s }

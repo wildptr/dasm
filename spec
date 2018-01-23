@@ -3,9 +3,9 @@ proc parity(x:8):1
 	return ~(x[7]^x[6]^x[5]^x[4]^x[3]^x[2]^x[1]^x[0]);
 }
 
-template proc adc<N, S>(a:N, b:N, cin:1):N
+template proc adc<N, S, C>(a:N, b:N):N
 {
-	sum1 = add_ex(a, b, cin^S);
+	sum1 = add_ex(a, b, C^S);
 	cout = sum1[N];
 	out = sum1[N-1:0];
 	CF = cout^S;
@@ -29,13 +29,21 @@ template proc log_op<N, OP>(a:N, b:N):N
 	return out;
 }
 
-proc adc8  = adc< 8, '0'>;
-proc adc16 = adc<16, '0'>;
-proc adc32 = adc<32, '0'>;
+proc add8  = adc< 8, '0', '0'>;
+proc add16 = adc<16, '0', '0'>;
+proc add32 = adc<32, '0', '0'>;
 
-proc sbb8  = adc< 8, '1'>;
-proc sbb16 = adc<16, '1'>;
-proc sbb32 = adc<32, '1'>;
+proc adc8  = adc< 8, '0', CF>;
+proc adc16 = adc<16, '0', CF>;
+proc adc32 = adc<32, '0', CF>;
+
+proc sub8  = adc< 8, '1', '0'>;
+proc sub16 = adc<16, '1', '0'>;
+proc sub32 = adc<32, '1', '0'>;
+
+proc sbb8  = adc< 8, '1', CF>;
+proc sbb16 = adc<16, '1', CF>;
+proc sbb32 = adc<32, '1', CF>;
 
 proc or8  = log_op< 8, or>;
 proc or16 = log_op<16, or>;
@@ -62,7 +70,7 @@ proc pop32():32
 	return data;
 }
 
-proc push32_segr(data:16)
+proc push_segr32(data:16)
 {
 	// NOTE: For some CPU models, upper 16 bits may be unchanged.
 	call push32({0:16}.data);

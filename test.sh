@@ -1,5 +1,5 @@
-if [ -d ~/tmp ]; then
-	tmpdir=~/tmp
+if [ -d /Volumes/ramdisk ]; then
+	tmpdir=/Volumes/ramdisk
 else
 	tmpdir="/tmp/$USER"
 fi
@@ -14,7 +14,7 @@ for f; do
 	rt_ndisasm_file="$tmpdir/$stem.rt.ndisasm"
 	nasm "$f" -o "$binfile"
 	ndisasm -u "$binfile" > "$ndisasm_file"
-	./dasm.byte "$binfile" > "$disasm_file"
+	./dasm.native "$binfile" > "$disasm_file"
 	nasm "$disasm_file" -o "$rt_binfile"
 	ndisasm -u "$rt_binfile" > "$rt_ndisasm_file"
 	cmp "$binfile" "$rt_binfile"
