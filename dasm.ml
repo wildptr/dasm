@@ -36,7 +36,7 @@ type cpu_mode =
   | Mode64bit
 
 let read_sib buf s : int * ((int * int) option) =
-  let c = Stream.next s in
+  let c = s () in
   Buffer.add_char buf c;
   let sib = int_of_char c in
   let sib_s = sib lsr 6 in
@@ -58,7 +58,7 @@ let read_imm n buf s =
       then acc
       else acc - (1 lsl (n*8)) (* sign-extend immediate *)
     else
-      let c = Stream.next s in
+      let c = s () in
       Buffer.add_char buf c;
       let b = int_of_char c in
       f (n'+1) (acc lor (b lsl (n'*8)))
@@ -74,7 +74,7 @@ let read_regmem32 buf s : int * regmem =
     | None -> None
   in
 
-  let c = Stream.next s in
+  let c = s () in
   Buffer.add_char buf c;
   let modrm = int_of_char c in
   let r = modrm land 7 in
@@ -349,7 +349,7 @@ let prefix_of_char = function
 let read_prefix_and_opcode buf s : int * int (* prefix, opcode *) =
   let prefix = ref 0 in
   let rec loop () =
-    let c = Stream.next s in
+    let c = s () in
     Buffer.add_char buf c;
     match prefix_of_char c with
     | Some p ->
@@ -361,7 +361,7 @@ let read_prefix_and_opcode buf s : int * int (* prefix, opcode *) =
       let opcode =
         match opcode1 with
         | 0x0f ->
-          let c' = Stream.next s in
+          let c' = s () in
           Buffer.add_char buf c';
           let opcode2 = int_of_char c' in
           opcode1 lsl 8 lor opcode2
@@ -875,31 +875,3 @@ let disassemble mode s : Inst.t =
       ext_opcode, operand_pack
   in
   convert_inst mode ext_opcode prefix (Buffer.contents buf) operand_pack
-
-let main () =
-  let elab_flag = ref false in
-  let in_path = ref "" in
-  let env = Semant.new_env () in
-  Arg.(parse [("-e", Set elab_flag, "")] (fun s -> in_path := s) "usage?");
-  if !elab_flag then Elaborate.load_spec "spec";
-  let mode = Mode32bit in
-  let in_chan = open_in !in_path in
-  let s = Stream.of_channel in_chan in
-  let rec loop pc =
-    let inst = disassemble mode s in
-    printf "%a@." Inst.pp inst;
-    if !elab_flag then
-      Elaborate.elaborate_inst env (pc + length_of inst) inst;
-    (* let e = Elaborate.elaborate_inst inst in
-       printf "{%a}@." Semant.pp_expr e; *)
-    loop (pc + length_of inst)
-  in
-  print_string "[bits 32]\n";
-  try loop 0 with Stream.Failure ->
-    close_in in_chan;
-    if !elab_flag then
-      let stmts = Semant.get_stmts env in
-      let open Format in
-      List.iter (fprintf std_formatter "%a@." Semant.pp_stmt) stmts
-
-let () = main ()
