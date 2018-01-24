@@ -164,8 +164,7 @@ type operand_format =
   | R0 of int
   | R_opcode of int (* GPR[opcode&7] *)
   | RM of int
-  | M
-  | M_size of int
+  | M of int
   | I of int
   | I2 of int
   | Offset
@@ -178,77 +177,77 @@ type operand_format =
 let fpu_mnem_table1 =
   [|
     (* d8 *)
-    Some (I_fadd , [M_size 4]);
-    Some (I_fmul , [M_size 4]);
-    Some (I_fcom , [M_size 4]);
-    Some (I_fcomp, [M_size 4]);
-    Some (I_fsub , [M_size 4]);
-    Some (I_fsubr, [M_size 4]);
-    Some (I_fdiv , [M_size 4]);
-    Some (I_fdivr, [M_size 4]);
+    Some (I_fadd , [M 4]);
+    Some (I_fmul , [M 4]);
+    Some (I_fcom , [M 4]);
+    Some (I_fcomp, [M 4]);
+    Some (I_fsub , [M 4]);
+    Some (I_fsubr, [M 4]);
+    Some (I_fdiv , [M 4]);
+    Some (I_fdivr, [M 4]);
     (* d9 *)
-    Some (I_fld, [M_size 4]);
+    Some (I_fld, [M 4]);
     None;
-    Some (I_fst    , [M_size 4]);
-    Some (I_fstp   , [M_size 4]);
-    Some (I_fldenv , [M]);
-    Some (I_fldcw  , [M]);
-    Some (I_fnstenv, [M]);
-    Some (I_fnstcw , [M]);
+    Some (I_fst    , [M 4]);
+    Some (I_fstp   , [M 4]);
+    Some (I_fldenv , [M 0]);
+    Some (I_fldcw  , [M 0]);
+    Some (I_fnstenv, [M 0]);
+    Some (I_fnstcw , [M 0]);
     (* da *)
-    Some (I_fiadd , [M_size 4]);
-    Some (I_fimul , [M_size 4]);
-    Some (I_ficom , [M_size 4]);
-    Some (I_ficomp, [M_size 4]);
-    Some (I_fisub , [M_size 4]);
-    Some (I_fisubr, [M_size 4]);
-    Some (I_fidiv , [M_size 4]);
-    Some (I_fidivr, [M_size 4]);
+    Some (I_fiadd , [M 4]);
+    Some (I_fimul , [M 4]);
+    Some (I_ficom , [M 4]);
+    Some (I_ficomp, [M 4]);
+    Some (I_fisub , [M 4]);
+    Some (I_fisubr, [M 4]);
+    Some (I_fidiv , [M 4]);
+    Some (I_fidivr, [M 4]);
     (* db *)
-    Some (I_fild  , [M_size 4]);
-    Some (I_fisttp, [M_size 4]);
-    Some (I_fist  , [M_size 4]);
-    Some (I_fistp , [M_size 4]);
+    Some (I_fild  , [M 4]);
+    Some (I_fisttp, [M 4]);
+    Some (I_fist  , [M 4]);
+    Some (I_fistp , [M 4]);
     None;
-    Some (I_fld   , [M_size 10]);
+    Some (I_fld   , [M 10]);
     None;
-    Some (I_fstp  , [M_size 10]);
+    Some (I_fstp  , [M 10]);
     (* dc *)
-    Some (I_fadd , [M_size 8]);
-    Some (I_fmul , [M_size 8]);
-    Some (I_fcom , [M_size 8]);
-    Some (I_fcomp, [M_size 8]);
-    Some (I_fsub , [M_size 8]);
-    Some (I_fsubr, [M_size 8]);
-    Some (I_fdiv , [M_size 8]);
-    Some (I_fdivr, [M_size 8]);
+    Some (I_fadd , [M 8]);
+    Some (I_fmul , [M 8]);
+    Some (I_fcom , [M 8]);
+    Some (I_fcomp, [M 8]);
+    Some (I_fsub , [M 8]);
+    Some (I_fsubr, [M 8]);
+    Some (I_fdiv , [M 8]);
+    Some (I_fdivr, [M 8]);
     (* dd *)
-    Some (I_fld   , [M_size 8]);
-    Some (I_fisttp, [M_size 8]);
-    Some (I_fst   , [M_size 8]);
-    Some (I_fstp  , [M_size 8]);
-    Some (I_frstor, [M]);
+    Some (I_fld   , [M 8]);
+    Some (I_fisttp, [M 8]);
+    Some (I_fst   , [M 8]);
+    Some (I_fstp  , [M 8]);
+    Some (I_frstor, [M 0]);
     None;
-    Some (I_fnsave, [M]);
-    Some (I_fnstsw, [M]);
+    Some (I_fnsave, [M 0]);
+    Some (I_fnstsw, [M 0]);
     (* de *)
-    Some (I_fiadd , [M_size 2]);
-    Some (I_fimul , [M_size 2]);
-    Some (I_ficom , [M_size 2]);
-    Some (I_ficomp, [M_size 2]);
-    Some (I_fisub , [M_size 2]);
-    Some (I_fisubr, [M_size 2]);
-    Some (I_fidiv , [M_size 2]);
-    Some (I_fidivr, [M_size 2]);
+    Some (I_fiadd , [M 2]);
+    Some (I_fimul , [M 2]);
+    Some (I_ficom , [M 2]);
+    Some (I_ficomp, [M 2]);
+    Some (I_fisub , [M 2]);
+    Some (I_fisubr, [M 2]);
+    Some (I_fidiv , [M 2]);
+    Some (I_fidivr, [M 2]);
     (* df *)
-    Some (I_fild  , [M_size 2]);
-    Some (I_fisttp, [M_size 2]);
-    Some (I_fist  , [M_size 2]);
-    Some (I_fistp , [M_size 2]);
-    Some (I_fbld  , [M]);
-    Some (I_fild  , [M_size 8]);
-    Some (I_fbstp , [M]);
-    Some (I_fistp , [M_size 8]);
+    Some (I_fild  , [M 2]);
+    Some (I_fisttp, [M 2]);
+    Some (I_fist  , [M 2]);
+    Some (I_fistp , [M 2]);
+    Some (I_fbld  , [M 0]);
+    Some (I_fild  , [M 8]);
+    Some (I_fbstp , [M 0]);
+    Some (I_fistp , [M 8]);
   |]
 
 type fpu_inst_format =
@@ -465,7 +464,7 @@ let format_of_inst_single_byte mode prefix opcode r =
     op, lw, [R_opcode w]
   | 0x60 -> I_pusha, lw, []
   | 0x61 -> I_popa, lw, []
-  | 0x62 -> I_bound, lw, [R w; M]
+  | 0x62 -> I_bound, lw, [R w; M 0]
   | 0x63 -> I_arpl, 0, [RM 2; R 2]
   | 0x64 | 0x65 | 0x66 | 0x67 -> assert false (* prefix *)
   | 0x68 | 0x6a -> I_push, lw, [I w]
@@ -505,14 +504,14 @@ let format_of_inst_single_byte mode prefix opcode r =
     if r >= 6 then raise Invalid_instruction;
     let sr = seg_reg_table.(r) in
     I_movfromseg, lw, [RM w; Lit (O_reg sr)]
-  | 0x8d -> I_lea, lw, [RM w; M]
+  | 0x8d -> I_lea, lw, [RM w; M 0]
   | 0x8e ->
     if r >= 6 then raise Invalid_instruction;
     let sr = seg_reg_table.(r) in
     I_movtoseg, lw, [Lit (O_reg sr); RM w]
   | 0x8f ->
     if r = 0
-    then I_pop, lw, [M_size w]
+    then I_pop, lw, [M w]
     else raise Invalid_instruction
   | 0x90 | 0x91 | 0x92 | 0x93 | 0x94 | 0x95 | 0x96 | 0x97 ->
     I_xchg, lw, [R0 w; R_opcode w]
@@ -527,10 +526,10 @@ let format_of_inst_single_byte mode prefix opcode r =
   | 0xa0 | 0xa1 | 0xa2 | 0xa3 ->
     let fmt =
       match opcode with
-      | 0xa0 -> [R0 1; M]
-      | 0xa1 -> [R0 w; M]
-      | 0xa2 -> [M; R0 1]
-      | 0xa3 -> [M; R0 w]
+      | 0xa0 -> [R0 1; M 1]
+      | 0xa1 -> [R0 w; M w]
+      | 0xa2 -> [M 1; R0 1]
+      | 0xa3 -> [M w; R0 w]
       | _ -> assert false
     in
     I_mov, s, fmt
@@ -552,7 +551,7 @@ let format_of_inst_single_byte mode prefix opcode r =
   | 0xc3 -> I_ret, lw, []
   | 0xc4 | 0xc5 ->
     let op = if opcode land 1 = 0 then I_les else I_lds in
-    op, lw, [R w; M]
+    op, lw, [R w; M w]
   | 0xc6 | 0xc7 ->
     if r = 0
     then I_mov, s, [RM (1 lsl s); I (1 lsl s)]
@@ -569,7 +568,7 @@ let format_of_inst_single_byte mode prefix opcode r =
     let op = optable_rol.(r) in
     let shift_amount =
       match opcode land 2 with
-      | 0 -> O_imm (1, 0)
+      | 0 -> O_imm (1, 1)
       | 2 -> O_reg R_CL
       | _ -> assert false
     in
@@ -645,7 +644,7 @@ let format_of_inst_single_byte mode prefix opcode r =
     let fmt =
       match r with
       (* call/jmp far *)
-      | 3 | 5 -> [M]
+      | 3 | 5 -> [M 0]
       | _ -> [RM w]
     in
     op, lw, fmt
@@ -677,6 +676,7 @@ let format_of_inst_0f mode prefix opcode _r =
   | 0xa9 -> I_pop , lw, [Lit (O_reg R_GS)]
   | 0xaf -> I_imul, lw, [R w; RM w]
   | 0xb6 | 0xb7 | 0xbe | 0xbf ->
+    (* variant[3:2] denotes size of src operand *)
     let op = if opcode land 8 = 0 then I_movzx else I_movsx in
     if opcode land 1 = 0
     then op, lw, [R w; RM 1]
@@ -685,7 +685,7 @@ let format_of_inst_0f mode prefix opcode _r =
         | true , Mode16bit
         | false, Mode32bit
         | false, Mode64bit ->
-          op, 2, [R 4; RM 2]
+          op, 0b110, [R 4; RM 2]
         | _ -> raise Invalid_instruction
       end
   | _ ->
@@ -752,12 +752,7 @@ let convert_inst mode ext_opcode prefix bytes operand_pack =
         | Reg r -> convert_reg size r
         | Mem m -> O_mem (m, size)
       end
-    | M ->
-      begin match g with
-        | Reg r -> raise Invalid_operand
-        | Mem m -> O_mem (m, 0)
-      end
-    | M_size size ->
+    | M size ->
       begin match g with
         | Reg r -> raise Invalid_operand
         | Mem m -> O_mem (m, size)

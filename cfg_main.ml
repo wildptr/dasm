@@ -43,7 +43,13 @@ type string_stream = {
   mutable pos : int;
 }
 
-let build_cfg code init_pc =
+type basic_block = {
+  start : int;
+  stop : int;
+  stmts : Semant.stmt list;
+}
+
+let build_cfg code init_pc init_offset =
   let start_end = ref Leaf in
   let edges = ref [] in (* from end of basic block to start of basic block *)
   let q = Queue.create () in
@@ -54,6 +60,7 @@ let build_cfg code init_pc =
     s.pos <- s.pos + 1;
     c
   in
+  let inst_table = Hashtbl.create 0 in
   while not (Queue.is_empty q) do
     let pc = Queue.pop q in
     begin match itree_find pc !start_end with
@@ -62,9 +69,10 @@ let build_cfg code init_pc =
         start_end := itree_split pc !start_end;
         edges := (pc, pc) :: !edges
       | Nowhere ->
-        s.pos <- pc - init_pc;
+        s.pos <- init_offset + (pc - init_pc);
         let rec loop pc =
           let inst = Dasm.(disassemble Mode32bit next) in
+          Hashtbl.add inst_table pc inst;
           let l = length_of inst in
           let pc' = pc+l in
           match inst.operation with
@@ -79,13 +87,12 @@ let build_cfg code init_pc =
               | O_offset ofs -> pc', [pc'; pc+ofs]
               | _ -> pc', [pc']
             end
-          | I_ret | I_retfar -> pc', []
+          | I_ret | I_retfar | I_retn -> pc', []
           | _ ->
             if itree_find pc' !start_end = Start then pc', [pc'] else
               loop pc'
         in
         let pc', dests = loop pc in
-        (*Printf.printf "(%x,%x)\n" pc pc';*)
         start_end := itree_add (pc,pc') !start_end;
         dests |> List.iter (fun dest ->
             edges := (pc', dest) :: !edges;
@@ -96,25 +103,43 @@ let build_cfg code init_pc =
     end
   done;
   let start_end_list = itree_to_list !start_end in
-  start_end_list, !edges
+  let basic_blocks =
+    start_end_list |> List.map (fun (start, stop) ->
+        let env = Semant.new_env () in
+        let rec loop pc =
+          let inst = Hashtbl.find inst_table pc in
+          Elaborate.elaborate_inst env pc inst;
+          let pc' = pc + length_of inst in
+          if pc' = stop then Semant.get_stmts env else loop pc'
+        in
+        let stmts = loop start in
+        { start; stop; stmts })
+  in
+  basic_blocks, !edges
 
-let write_cfg (start_end, edges) =
+let write_cfg (basic_blocks, edges) =
   let end_start = Hashtbl.create 0 in
-  List.iter (fun (start, stop) -> Hashtbl.add end_start stop start) start_end;
+  List.iter (fun bb -> Hashtbl.add end_start bb.stop bb.start) basic_blocks;
   let open Format in
   print_string "digraph {\n";
+  print_string "  node [shape=box fontname=Monospace]\n";
   (*let insts = ref [] in
   let insts = List.rev !insts in*)
-  List.iter (fun (start, _) -> printf "  loc_%x;\n" start) start_end;
+  basic_blocks |> List.iter (fun bb ->
+      printf "  loc_%x [label=\"" bb.start;
+      List.iter (fun stmt -> printf "%a\\l" Semant.pp_stmt stmt) bb.stmts;
+      print_string "\"];\n");
   List.iter (fun (f, t) -> printf "  loc_%x -> loc_%x;\n" (Hashtbl.find end_start f) t) edges;
   print_string "}\n"
 
 let () =
   let init_pc = int_of_string Sys.argv.(1) in
   let in_path = Sys.argv.(2) in
+  let init_offset = int_of_string Sys.argv.(3) in
+  Elaborate.load_spec "spec";
   let in_chan = open_in in_path in
   let in_chan_len = in_channel_length in_chan in
   let code = really_input_string in_chan in_chan_len in
   close_in in_chan;
-  let cfg = build_cfg code init_pc in
+  let cfg = build_cfg code init_pc init_offset in
   write_cfg cfg

@@ -16,7 +16,8 @@ module StringMap = Map.Make(String)
 let keyword_map : token StringMap.t =
   [
     "call", K_call;
-    "if", K_if;
+    (*"if", K_if;*)
+    "let", K_let;
     "jump", K_jump;
     "load", K_load;
     "proc", K_proc;
@@ -47,7 +48,7 @@ rule read = parse
       | Some k -> k
       | None -> Ident s }
   | "==" { EqEq }
-  | '$' { Dollar }
+  (*| '$' { Dollar }*)
   | '&' { Amp }
   | '(' { LParen }
   | ')' { RParen }

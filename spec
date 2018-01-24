@@ -1,15 +1,10 @@
-proc parity(x:8):1
-{
-	return ~(x[7]^x[6]^x[5]^x[4]^x[3]^x[2]^x[1]^x[0]);
-}
-
 template proc adc<N, S, C>(a:N, b:N):N
 {
-	sum1 = add_ex(a, b, C^S);
-	cout = sum1[N];
-	out = sum1[N-1:0];
+	let sum1 = add_ex(a, b, C^S);
+	let cout = sum1[N];
+	let out = sum1[N-1:0];
 	CF = cout^S;
-	PF = call parity(out[7:0]);
+	PF = ~^out[7:0];
 	AF = a[4] ^ b[4] ^ out[4] ^ S;
 	ZF = out == {0:N};
 	SF = out[N-1];
@@ -19,13 +14,53 @@ template proc adc<N, S, C>(a:N, b:N):N
 
 template proc log_op<N, OP>(a:N, b:N):N
 {
-	out = OP(a, b);
+	let out = OP(a, b);
 	CF = '0';
-	PF = call parity(out[7:0]);
+	PF = ~^out[7:0];
 	AF = undefined(1);
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = '0';
+	return out;
+}
+
+template proc shl<N, M>(x:N, n:M):N
+{
+	let out1 = shift_left(CF.x, n);
+	let out = out1[N-1:0];
+	CF = out1[N];
+	// TODO: the following is incorrect; see 325383.pdf p.1236
+	PF = ~^out[7:0];
+	AF = undefined(1);
+	ZF = out == {0:N};
+	SF = out[N-1];
+	OF = undefined(1);
+	return out;
+}
+
+template proc shr<N, M>(x:N, n:M):N
+{
+	let out1 = log_shift_right(x.CF, n);
+	let out = out1[N:1];
+	CF = out[0];
+	PF = ~^out[7:0];
+	AF = undefined(1);
+	ZF = out == {0:N};
+	SF = out[N-1];
+	OF = undefined(1);
+	return out;
+}
+
+template proc sar<N, M>(x:N, n:M):N
+{
+	let out1 = ari_shift_right(x.CF, n);
+	let out = out1[N:1];
+	CF = out[0];
+	PF = ~^out[7:0];
+	AF = undefined(1);
+	ZF = out == {0:N};
+	SF = out[N-1];
+	OF = undefined(1);
 	return out;
 }
 
@@ -57,6 +92,18 @@ proc xor8  = log_op< 8, xor>;
 proc xor16 = log_op<16, xor>;
 proc xor32 = log_op<32, xor>;
 
+proc shl8  = shl< 8, 5>;
+proc shl16 = shl<16, 5>;
+proc shl32 = shl<32, 5>;
+
+proc shr8  = shr< 8, 5>;
+proc shr16 = shr<16, 5>;
+proc shr32 = shr<32, 5>;
+
+proc sar8  = sar< 8, 5>;
+proc sar16 = sar<16, 5>;
+proc sar32 = sar<32, 5>;
+
 proc push32(data:32)
 {
 	SP = SP - {4:32};
@@ -65,7 +112,7 @@ proc push32(data:32)
 
 proc pop32():32
 {
-	data = load 4, SP;
+	let data = load(4, SP);
 	SP = SP + {4:32};
 	return data;
 }
@@ -78,9 +125,9 @@ proc push_segr32(data:16)
 
 template proc inc_dec<N, S>(in:N)
 {
-	sum1 = add_ex(in, repeat(S, N), ~S);
-	out = sum1[N-1:0];
-	PF = call parity(out[7:0]);
+	let sum1 = add_ex(in, repeat(S, N), ~S);
+	let out = sum1[N-1:0];
+	PF = ~^out[7:0];
 	AF = in[4] ^ out[4];
 	ZF = out == {0:N};
 	SF = out[N-1];
@@ -103,6 +150,13 @@ proc call32(pc:32, offset:32)
 
 proc ret32()
 {
-	addr = call pop32();
+	let addr = call pop32();
+	jump addr;
+}
+
+proc retn32(n:32)
+{
+	let addr = call pop32();
+	SP = SP + n;
 	jump addr;
 }

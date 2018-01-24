@@ -7,7 +7,7 @@ open Spec_ast
 %token <int> Int
 %token <Bitvec.t> Bitvec
 %token EqEq
-%token Dollar
+(*%token Dollar*)
 %token Amp
 %token LParen
 %token RParen
@@ -31,8 +31,9 @@ open Spec_ast
 %token Tilde
 
 %token K_call
-%token K_if
+(*%token K_if*)
 %token K_jump
+%token K_let
 %token K_load
 %token K_proc
 %token K_repeat
@@ -91,6 +92,8 @@ primary_expr:
     { Expr_undef width }
   | K_repeat; LParen; data = expr; Comma; n = cexpr; RParen
     { Expr_repeat (data, n) }
+  | K_load; LParen; size = cexpr; Comma; addr = expr; RParen
+    { Expr_load (size, addr) }
 
 index:
   | LBrack; i = cexpr; RBrack
@@ -105,6 +108,9 @@ postfix_expr:
 
 unary_op:
   | Tilde { Not }
+  | Amp { Reduce_and }
+  | Caret { Reduce_xor }
+  | Bar { Reduce_or }
 
 prefix_expr:
   | postfix_expr {$1}
@@ -130,21 +136,29 @@ binary_expr:
 
 expr: binary_expr {$1}
 
+loc:
+  | name = Ident
+    { Loc_var name }
+  | name = Ident; LBrack; hi = cexpr; Colon; lo = cexpr; RBrack
+    { Loc_part (name, hi, lo) }
+  | K_let; name = Ident
+    { Loc_newvar name }
+
 stmt:
-  | name = Ident; Eq; value = expr; Semi
-    { Stmt_set (name, value) }
+  | loc = loc; Eq; value = expr; Semi
+    { Stmt_set (loc, value) }
   (*| name = Ident; LBrack; hi = cexpr; Colon; lo = cexpr; RBrack; Eq; value = expr; Semi
     { Stmt_set_part (name, hi, lo, value) }*)
   | K_call; proc_name = Ident;
     LParen; args = separated_list(Comma, expr); RParen; Semi
     { Stmt_call (proc_name, args, None) }
-  | name = Ident; Eq; K_call; proc_name = Ident;
+  | loc = loc; Eq; K_call; proc_name = Ident;
     LParen; args = separated_list(Comma, expr); RParen; Semi
-    { Stmt_call (proc_name, args, Some name) }
+    { Stmt_call (proc_name, args, Some loc) }
   | K_return; value = expr; Semi
     { Stmt_return value }
-  | name = Ident; Eq; K_load; size = cexpr; Comma; addr = expr; Semi
-    { Stmt_load (size, addr, name) }
+  (*| name = Ident; Eq; K_load; size = cexpr; Comma; addr = expr; Semi
+    { Stmt_load (size, addr, name) }*)
   | K_store; size = cexpr; Comma; addr = expr; Comma; data = expr; Semi
     { Stmt_store (size, addr, data) }
   | K_jump; addr = expr; Semi

@@ -28,10 +28,14 @@ type symtab = value StringMap.t
 let prim_of_unary_op (op, e) =
   match op with
   | Not -> P_not e
+  | Reduce_and -> P_reduce_and e
+  | Reduce_xor -> P_reduce_xor e
+  | Reduce_or -> P_reduce_or e
 
 let width_of_unary_op (op, w) =
   match op with
   | Not -> w
+  | Reduce_and | Reduce_xor | Reduce_or -> 1
 
 let prim_of_binary_op (op, e1, e2) =
   match op with
@@ -149,6 +153,16 @@ let rec translate_expr st = function
         arg_widths |> List.iter (check_width w);
         E_prim (prim args'), w
       in
+      let f_shift prim =
+        let a1, a2 =
+          match args with
+          | [a1;a2] -> a1, a2
+          | _ -> raise (Wrong_arity (func_name, 2))
+        in
+        let a1', w1 = translate_expr st a1 in
+        let a2', _ = translate_expr st a2 in
+        E_prim (prim a1' a2'), w1
+      in
       match func_name with
       | "add_ex" ->
         let a1, a2, a3 =
@@ -165,6 +179,9 @@ let rec translate_expr st = function
       | "and" -> f1 (fun args -> P_and args)
       | "or"  -> f1 (fun args -> P_or  args)
       | "xor" -> f1 (fun args -> P_xor args)
+      | "shift_left" -> f_shift (fun a1' a2' -> P_shiftleft (a1', a2'))
+      | "log_shift_right" -> f_shift (fun a1' a2' -> P_logshiftright (a1', a2'))
+      | "ari_shift_right" -> f_shift (fun a1' a2' -> P_arishiftright (a1', a2'))
       | _ -> raise (Unknown_primitive func_name)
     in
     begin match try_lookup st func_name with
@@ -186,24 +203,48 @@ let rec translate_expr st = function
     let data', w = translate_expr st data in
     let n = translate_cexpr st c_n in
     E_prim (P_repeat (data', n)), w*n
+  | Expr_load (size, addr) ->
+    let size' = translate_cexpr st size in
+    let addr', w = translate_expr st addr in
+    E_load (size', addr'), w
 
 (* TODO: comment *)
 let translate_stmt st_ref env stmt =
   let st = !st_ref in
-  match stmt with
-  | Stmt_set (name, e) ->
-    begin match try_lookup st name with
-      | None ->
-        let e', w = translate_expr st e in
-        st_ref := extend_symtab (name, Var (name, w)) st;
-        append_stmt env (S_set (name, e'))
-      | Some (Var (r, r_width)) ->
-        let e', e_width = translate_expr st e in
-        check_width r_width e_width;
-        append_stmt env (S_set (r, e'))
-      | _ -> raise (Invalid_assignment name)
+  let do_assign loc f w =
+    begin match loc with
+      | Loc_var name ->
+        begin match try_lookup st name with
+          | None -> raise (Unbound_symbol name)
+          | Some (Var (r, r_width)) ->
+            append_stmt env (f (L_var r))
+          | _ -> raise (Invalid_assignment name)
+        end
+      | Loc_part (name, hi, lo) ->
+        begin match try_lookup st name with
+          | None -> raise (Unbound_symbol name)
+          | Some (Var (r, r_width)) ->
+            let hi' = translate_cexpr st hi + 1 in
+            let lo' = translate_cexpr st lo in
+            assert (lo' >= 0);
+            assert (hi' <= r_width);
+            append_stmt env (f (L_part (r, lo', hi')))
+          | _ -> raise (Invalid_assignment name)
+        end
+      | Loc_newvar name ->
+        begin match try_lookup st name with
+          | None ->
+            st_ref := extend_symtab (name, Var (name, w)) st;
+            append_stmt env (f (L_var name))
+          | Some _ -> raise (Redefinition name)
+        end
     end
-  | Stmt_call (proc_name, args, result_name_opt) ->
+  in
+  match stmt with
+  | Stmt_set (loc, e) ->
+    let e', e_width = translate_expr st e in
+    do_assign loc (fun loc' -> S_set (loc', e')) e_width
+  | Stmt_call (proc_name, args, result_loc_opt) ->
     let proc =
       match lookup st proc_name with
       | Proc p -> p
@@ -226,29 +267,21 @@ let translate_stmt st_ref env stmt =
       | (arg, _) :: args'_widths' -> E_let (arg, (f args'_widths'))
       in
       f args'_widths, result_width*)
-    begin match result_name_opt with
-      | None -> ()
-      | Some name ->
+    begin match result_loc_opt with
+      | None -> append_stmt env (S_call (proc, args, None))
+      | Some loc ->
         let rhs_width = proc.p_result_width in
-        begin match try_lookup st name with
-          | None ->
-            st_ref := extend_symtab (name, Var (name, rhs_width)) st;
-            append_stmt env (S_call (proc, args, Some name))
-          | Some (Var (_, lhs_width)) ->
-            check_width lhs_width rhs_width;
-            append_stmt env (S_call (proc, args, Some name))
-          | _ -> raise (Invalid_assignment name)
-        end
+        do_assign loc (fun loc' -> S_call (proc, args, Some loc')) rhs_width
     end
   | Stmt_return e ->
     let e', _ = translate_expr st e in
     append_stmt env (S_return e')
-  | Stmt_load (c_size, addr, name) ->
+  (*| Stmt_load (c_size, addr, name) ->
     let size = translate_cexpr st c_size in
     let w = size*8 in
     st_ref := extend_symtab (name, Var (name, w)) st;
     let addr', _ = translate_expr st addr in
-    append_stmt env (S_load (size, addr', name))
+    append_stmt env (S_load (size, addr', name))*)
   | Stmt_store (c_size, addr, data) ->
     let size = translate_cexpr st c_size in
     let addr', _ = translate_expr st addr in

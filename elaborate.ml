@@ -65,14 +65,14 @@ let elaborate_reg = function
   | R_BP -> E_part (eR5, (0, 16))
   | R_SI -> E_part (eR6, (0, 16))
   | R_DI -> E_part (eR7, (0, 16))
-  | R_EAX -> E_part (eR0, (0, 32))
-  | R_ECX -> E_part (eR1, (0, 32))
-  | R_EDX -> E_part (eR2, (0, 32))
-  | R_EBX -> E_part (eR3, (0, 32))
-  | R_ESP -> E_part (eR4, (0, 32))
-  | R_EBP -> E_part (eR5, (0, 32))
-  | R_ESI -> E_part (eR6, (0, 32))
-  | R_EDI -> E_part (eR7, (0, 32))
+  | R_EAX -> eR0
+  | R_ECX -> eR1
+  | R_EDX -> eR2
+  | R_EBX -> eR3
+  | R_ESP -> eR4
+  | R_EBP -> eR5
+  | R_ESI -> eR6
+  | R_EDI -> eR7
   | R_ES -> eES
   | R_CS -> eCS
   | R_SS -> eSS
@@ -117,25 +117,26 @@ let elaborate_mem_addr m =
   | None, None ->
     elaborate_disp m.disp
 
-let elaborate_operand env = function
+let elaborate_operand pc' env = function
   | O_reg reg -> elaborate_reg reg
   | O_mem (mem, size) ->
-    assert (size > 0);
-    let temp = new_temp env (size*8) in
+    if size <= 0 then failwith "size of operand invalid";
     let e_addr = elaborate_mem_addr mem in
-    append_stmt env (S_load (size, e_addr, temp));
-    E_var temp
-  | O_imm (imm, size) -> E_literal (Bitvec.of_int (size*8) imm)
-  | _ -> failwith "elaborate_operand: not implemented"
+    E_load (size, e_addr)
+  | O_imm (imm, size) ->
+    if size <= 0 then failwith "size of operand invalid";
+    E_literal (Bitvec.of_int (size*8) imm)
+  | O_offset ofs -> E_literal (Bitvec.of_int 32 (pc' + ofs))
+  | _ -> failwith "invalid operand type"
 
 let elaborate_writeback env o_dst e_data =
   match o_dst with
   | O_reg r ->
     begin match elaborate_reg r with
       | E_var regname ->
-        append_stmt env (S_set (regname, e_data))
-      | E_part (E_var regname, range) ->
-        append_stmt env (S_set_part (regname, range, e_data))
+        append_stmt env (S_set (L_var regname, e_data))
+      | E_part (E_var regname, (lo, hi)) ->
+        append_stmt env (S_set (L_part (regname, lo, hi), e_data))
       | _ -> assert false
     end
   | O_mem (m, size) ->
@@ -148,37 +149,109 @@ let fnname_of_op = function
   | I_adc -> "adc"
   | I_add -> "add"
   | I_and -> "and"
+  | I_call -> "call"
   | I_cmp -> "sub"
   | I_or -> "or"
   | I_pop -> "pop"
   | I_push -> "push"
+  | I_ret -> "ret"
+  | I_retn -> "retn"
+  | I_sar -> "sar"
   | I_sbb -> "sbb"
+  | I_shl -> "shl"
+  | I_shr -> "shr"
   | I_sub -> "sub"
+  | I_test -> "and"
   | I_xor -> "xor"
   | _ -> failwith "fnname_of_op: not implemented"
 
 let elaborate_inst env pc inst =
   let op = operation_of inst in
-  let fnname_base = fnname_of_op op in
-  let fnname = Printf.sprintf "%s%d" fnname_base (1 lsl (lsize+3)) in
-  let fn = lookup_predef fnname in
   let lsize = inst.variant land 3 in (* log size in bytes *)
   let operands = operands_of inst in
-  match op with
-  (* binary operations *)
-  | I_add | I_or | I_adc | I_sbb | I_and | I_sub | I_xor ->
-    let temp = new_temp env (8 lsl lsize) in
-    let args = operands |> List.map (elaborate_operand env) in
-    append_stmt env (S_call (fn, args, Some temp));
-    elaborate_writeback env (List.hd operands) (E_var temp)
-  | I_cmp | I_push ->
-    let args = operands |> List.map (elaborate_operand env) in
-    append_stmt env (S_call (fn, args, None))
-  | I_pop ->
-    let temp = new_temp env (8 lsl lsize) in
-    append_stmt env (S_call (fn, [], Some temp));
-    elaborate_writeback env (List.hd operands) (E_var temp)
-  | _ -> failwith "elaborate_inst: not implemented"
+  let fn inst =
+    let fnname_base =
+      try fnname_of_op op
+      with Failure msg ->
+        Format.printf "%s: %a@." msg Inst.pp inst;
+        exit 1
+    in
+    let fnname = Printf.sprintf "%s%d" fnname_base (1 lsl (lsize+3)) in
+    lookup_predef fnname
+  in
+  let pc' = pc + length_of inst in
+  try
+    match op with
+    | I_add | I_or | I_adc | I_sbb | I_and | I_sub | I_xor | I_shl | I_shr | I_sar ->
+      let temp = new_temp env (8 lsl lsize) in
+      let args = operands |> List.map (elaborate_operand pc' env) in
+      append_stmt env (S_call (fn inst, args, Some (L_var temp)));
+      elaborate_writeback env (List.hd operands) (E_var temp)
+    | I_cmp | I_push | I_call | I_ret | I_retn | I_test ->
+      let args = operands |> List.map (elaborate_operand pc' env) in
+      append_stmt env (S_call (fn inst, args, None))
+    | I_pop ->
+      let temp = new_temp env (8 lsl lsize) in
+      append_stmt env (S_call (fn inst, [], Some (L_var temp)));
+      elaborate_writeback env (List.hd operands) (E_var temp)
+    | I_mov ->
+      let dst, src =
+        match operands with
+        | [d; s] -> d, s
+        | _ -> assert false
+      in
+      elaborate_writeback env dst (elaborate_operand pc' env src)
+    | I_lea ->
+      let dst, src =
+        match operands with
+        | [d; s] -> d, s
+        | _ -> assert false
+      in
+      let addr =
+        match src with
+        | O_mem (m, _size) -> elaborate_mem_addr m
+        | _ -> assert false
+      in
+      elaborate_writeback env dst addr
+    | I_jmp ->
+      append_stmt env (S_jump_var (elaborate_operand pc' inst (List.hd operands)))
+    | I_cjmp ->
+      let cond = cond_expr (inst.variant lsr 2) in
+      append_stmt env (S_br_var (cond, elaborate_operand pc' inst (List.hd operands)))
+    | I_movzx | I_movsx ->
+      let dst, src =
+        match operands with
+        | [d; s] -> d, s
+        | _ -> assert false
+      in
+      (*let lsize_src = inst.variant lsr 2 in*)
+      let dst_size = 8 lsl lsize in
+      (*let src_size = 8 lsl lsize_src in*)
+      let src' = elaborate_operand pc' env src in
+      let result =
+        if op = I_movzx then
+          E_prim (P_zeroextend (src', dst_size))
+        else
+          E_prim (P_signextend (src', dst_size))
+      in
+      elaborate_writeback env dst result
+    | I_xchg ->
+      let dst, src =
+        match operands with
+        | [d; s] -> d, s
+        | _ -> assert false
+      in
+      let dst' = elaborate_operand pc' inst dst in
+      let src' = elaborate_operand pc' inst src in
+      elaborate_writeback env dst src';
+      elaborate_writeback env src dst'
+    | _ ->
+      Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst;
+      exit 1
+  with Failure msg ->
+    (* internal error *)
+    Format.printf "%s: %a@." msg Inst.pp inst;
+    exit 1
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in
@@ -205,7 +278,7 @@ let load_spec filepath =
     | Translate.Index_out_of_bounds ((e,w),b) ->
       let open Format in
       fprintf err_formatter
-        "width of expression %a is %d, %d is out of bounds\n"
+        "width of expression %a is %d, %d is out of bounds@."
         Spec_ast.pp_astexpr e w b;
       exit 1
   in

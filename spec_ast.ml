@@ -46,9 +46,15 @@ let pp_index f = function
 
 type unary_op =
   | Not
+  | Reduce_and
+  | Reduce_xor
+  | Reduce_or
 
 let string_of_unary_op = function
   | Not -> "~"
+  | Reduce_and -> "&"
+  | Reduce_xor -> "^"
+  | Reduce_or -> "|"
 
 type binary_op =
   | Concat
@@ -77,13 +83,19 @@ type astexpr =
   | Expr_apply of string * astexpr list
   | Expr_undef of cexpr
   | Expr_repeat of astexpr * cexpr
+  | Expr_load of cexpr * astexpr
+
+type astloc =
+  | Loc_var of string
+  | Loc_part of string * cexpr * cexpr
+  | Loc_newvar of string
 
 type aststmt =
   (* Variables created by let statements are immutable. *)
-  | Stmt_set of string * astexpr
-  | Stmt_call of string * astexpr list * string option
+  | Stmt_set of astloc * astexpr
+  | Stmt_call of string * astexpr list * astloc option
   | Stmt_return of astexpr
-  | Stmt_load of cexpr * astexpr * string
+  (*| Stmt_load of cexpr * astexpr * string*)
   | Stmt_store of cexpr * astexpr * astexpr
   | Stmt_jump of astexpr
 
@@ -107,21 +119,29 @@ let rec pp_astexpr f = function
   | Expr_undef width -> fprintf f "undefined(%a)" pp_cexpr width
   | Expr_repeat (data, n) ->
     fprintf f "repeat(%a, %a)" pp_astexpr data pp_cexpr n
+  | Expr_load (size, addr) ->
+    fprintf f "load(%a, %a)" pp_cexpr size pp_astexpr addr
+
+let pp_astloc f = function
+  | Loc_var name -> pp_print_string f name
+  | Loc_part (name, hi, lo) ->
+    fprintf f "%s[%a:%a]" name pp_cexpr hi pp_cexpr lo
+  | Loc_newvar name -> fprintf f "let %s" name
 
 let pp_aststmt f = function
-  | Stmt_set (name, value) ->
-    fprintf f "%s = %a;" name pp_astexpr value
-  | Stmt_call (proc_name, args, result_name_opt) ->
-    begin match result_name_opt with
+  | Stmt_set (loc, value) ->
+    fprintf f "%a = %a;" pp_astloc loc pp_astexpr value
+  | Stmt_call (proc_name, args, result_loc_opt) ->
+    begin match result_loc_opt with
       | None -> ()
-      | Some s -> fprintf f "%s = " s
+      | Some loc -> fprintf f "%a = " pp_astloc loc
     end;
     fprintf f "call %s(%a);"
       proc_name (pp_comma_separated_list pp_astexpr) args;
   | Stmt_return e ->
     fprintf f "return %a;" pp_astexpr e
-  | Stmt_load (size, addr, name) ->
-    fprintf f "%s = load %a, %a;" name pp_cexpr size pp_astexpr addr
+  (*| Stmt_load (size, addr, name) ->
+    fprintf f "%s = load %a, %a;" name pp_cexpr size pp_astexpr addr*)
   | Stmt_store (size, addr, data) ->
     fprintf f "store %a, %a, %a;"
       pp_cexpr size pp_astexpr addr pp_astexpr data
