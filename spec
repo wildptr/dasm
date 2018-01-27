@@ -106,14 +106,14 @@ proc sar32 = sar<32, 5>;
 
 proc push32(data:32)
 {
-	SP = SP - {4:32};
-	store 4, SP, data;
+	ESP = ESP - {4:32};
+	store 4, ESP, data;
 }
 
 proc pop32():32
 {
-	output load(4, SP);
-	SP = SP + {4:32};
+	output load(4, ESP);
+	ESP = ESP + {4:32};
 }
 
 proc push_segr32(data:16)
@@ -140,22 +140,3 @@ proc inc32 = inc_dec<32, '0'>;
 proc dec8  = inc_dec< 8, '1'>;
 proc dec16 = inc_dec<16, '1'>;
 proc dec32 = inc_dec<32, '1'>;
-
-proc call32(pc:32, dst:32)
-{
-	call push32(pc);
-	jump dst;
-}
-
-proc ret32()
-{
-	let addr = call pop32();
-	jump addr;
-}
-
-proc retn32(n:32)
-{
-	let addr = call pop32();
-	SP = SP + n;
-	jump addr;
-}

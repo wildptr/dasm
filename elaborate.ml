@@ -17,17 +17,15 @@ let lookup_predef name =
   with Not_found ->
     failwith ("predefined semantic procedure not found: " ^ name)
 
-let to_label addr = Printf.sprintf "L%x" addr
-
 let cond_expr1 = function
-  | 0x0 -> eOF
-  | 0x1 -> eCF
-  | 0x2 -> eZF
-  | 0x3 -> E_prim (P_or [eCF; eZF]) (* CF|XF *)
-  | 0x4 -> eSF
-  | 0x5 -> ePF
-  | 0x6 -> E_prim (P_xor [eSF; eOF]) (* SF^OF *)
-  | 0x7 -> E_prim (P_or [eZF; E_prim (P_xor [eSF; eOF])]) (* ZF|(SF^OF) *)
+  | 0 -> eOF
+  | 1 -> eCF
+  | 2 -> eZF
+  | 3 -> E_prim (P_or [eCF; eZF]) (* CF|XF *)
+  | 4 -> eSF
+  | 5 -> ePF
+  | 6 -> E_prim (P_xor [eSF; eOF]) (* SF^OF *)
+  | 7 -> E_prim (P_or [eZF; E_prim (P_xor [eSF; eOF])]) (* ZF|(SF^OF) *)
   | _ -> assert false
 
 let cond_expr code =
@@ -90,7 +88,7 @@ let elaborate_writeback env o_dst e_data =
   match o_dst with
   | O_reg r ->
     let module L = struct
-      type reg_type = Other | OL | OH | OX | EOX
+      type reg_type = Other | OL | OH | OX | EOX | OO | EOO
     end in
     let open L in
     let reg_type =
@@ -99,6 +97,8 @@ let elaborate_writeback env o_dst e_data =
       | R_AH | R_CH | R_DH | R_BH -> OH
       | R_AX | R_CX | R_DX | R_BX -> OX
       | R_EAX | R_ECX | R_EDX | R_EBX -> EOX
+      | R_SP | R_BP | R_SI | R_DI -> OO
+      | R_ESP | R_EBP | R_ESI | R_EDI -> EOO
       | _ -> Other
     in
     if reg_type = Other then
@@ -113,6 +113,10 @@ let elaborate_writeback env o_dst e_data =
         | R_CL | R_CH | R_CX | R_ECX -> "CL", "CH", "CX", "ECX"
         | R_DL | R_DH | R_DX | R_EDX -> "DL", "DH", "DX", "EDX"
         | R_BL | R_BH | R_BX | R_EBX -> "BL", "BH", "BX", "EBX"
+        | R_SP | R_ESP -> "", "", "SP", "ESP"
+        | R_BP | R_EBP -> "", "", "BP", "EBP"
+        | R_SI | R_ESI -> "", "", "SI", "ESI"
+        | R_DI | R_EDI -> "", "", "DI", "EDI"
         | _ -> assert false
       in
       match reg_type with
@@ -137,6 +141,13 @@ let elaborate_writeback env o_dst e_data =
         append_stmt env (S_set (eox, E_prim (P_concat [bits8_32; e_temp])));
         append_stmt env (S_set (ox, E_prim (P_concat [E_var oh; e_temp])));
         append_stmt env (S_set (ol, e_temp));
+      | EOO ->
+        append_stmt env (S_set (eox, e_temp));
+        append_stmt env (S_set (ox, E_part (e_temp, 0, 16)))
+      | OO ->
+        let bits16_32 = E_part (E_var eox, 16, 32) in
+        append_stmt env (S_set (eox, E_prim (P_concat [bits16_32; e_temp])));
+        append_stmt env (S_set (ox, e_temp))
       | _ -> assert false
     end
   | O_mem (m, size) ->
@@ -149,13 +160,13 @@ let fnname_of_op = function
   | I_adc -> "adc"
   | I_add -> "add"
   | I_and -> "and"
-  | I_call -> "call"
+  | I_call -> "push"
   | I_cmp -> "sub"
   | I_or -> "or"
   | I_pop -> "pop"
   | I_push -> "push"
-  | I_ret -> "ret"
-  | I_retn -> "retn"
+  | I_ret -> "pop"
+  | I_retn -> "pop"
   | I_sar -> "sar"
   | I_sbb -> "sbb"
   | I_shl -> "shl"
@@ -187,7 +198,7 @@ let elaborate_inst env pc inst =
       let args = operands |> List.map (elaborate_operand pc') in
       append_stmt env (S_call (fn inst, args, Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
-    | I_cmp | I_push | I_ret | I_retn | I_test ->
+    | I_cmp | I_push | I_test ->
       let args = operands |> List.map (elaborate_operand pc') in
       append_stmt env (S_call (fn inst, args, None))
     | I_pop ->
@@ -214,10 +225,12 @@ let elaborate_inst env pc inst =
       in
       elaborate_writeback env dst addr
     | I_jmp ->
-      append_stmt env (S_jump (elaborate_operand pc' (List.hd operands)))
+      let unresolved = List.mem pc env.unresolved_jumps in
+      append_stmt env (S_jump (elaborate_operand pc' (List.hd operands), unresolved))
     | I_cjmp ->
+      let unresolved = List.mem pc env.unresolved_jumps in
       let cond = cond_expr (inst.variant lsr 2) in
-      append_stmt env (S_br (cond, elaborate_operand pc' (List.hd operands)))
+      append_stmt env (S_br (cond, elaborate_operand pc' (List.hd operands), unresolved))
     | I_movzx | I_movsx ->
       let dst, src =
         match operands with
@@ -247,7 +260,31 @@ let elaborate_inst env pc inst =
       elaborate_writeback env src dst'
     | I_call ->
       let dst' = elaborate_operand pc' (List.hd operands) in
-      append_stmt env (S_call (fn inst, [make_address pc'; dst'], None))
+      (* push pc *)
+      append_stmt env (S_call (fn inst, [make_address pc'], None));
+      (* jump dst *)
+      append_stmt env (S_jump (dst', true))
+    | I_ret ->
+      (* pop addr *)
+      let addr = new_temp env (8 lsl lsize) in
+      append_stmt env (S_call (fn inst, [], Some addr));
+      (* jump addr *)
+      append_stmt env (S_jump (E_var addr, true))
+    | I_retn ->
+      let inc = elaborate_operand pc' (List.hd operands) in
+      (* pop addr *)
+      let addr = new_temp env (8 lsl lsize) in
+      append_stmt env (S_call (fn inst, [], Some addr));
+      (* increment SP *)
+      let sp_name =
+        match lsize with
+        | 1 -> "SP"
+        | 2 -> "ESP"
+        | _ -> assert false
+      in
+      append_stmt env (S_set (sp_name, E_prim (P_add [E_var sp_name; inc])));
+      (* jump addr *)
+      append_stmt env (S_jump (E_var addr, true))
     | _ ->
       Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst;
       exit 1

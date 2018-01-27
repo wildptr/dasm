@@ -6,6 +6,7 @@ type reg =
   | R_EAX | R_ECX | R_EDX | R_EBX | R_ESP | R_EBP | R_ESI | R_EDI
   | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS
   | R_fpu of int | R_xmm of int
+  | R_CF | R_PF | R_AF | R_ZF | R_SF | R_DF | R_OF
 
 let string_of_reg = function
   | R_AL -> "al"
@@ -40,6 +41,7 @@ let string_of_reg = function
   | R_GS -> "gs"
   | R_fpu i -> "st" ^ (string_of_int i)
   | R_xmm i -> "xmm" ^ (string_of_int i)
+  | _ -> failwith "string_of_reg: not implemented"
 
 let size_of_reg = function
   | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH -> 8
@@ -48,8 +50,51 @@ let size_of_reg = function
   | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS -> 16
   | R_fpu _ -> 80
   | R_xmm _ -> 128
+  | R_CF | R_PF | R_AF | R_ZF | R_SF | R_DF | R_OF -> 1
 
-(* let index_of_reg = function
+let lookup_reg name =
+  match name with
+  | "AL" -> R_AL
+  | "CL" -> R_CL
+  | "DL" -> R_DL
+  | "BL" -> R_BL
+  | "AH" -> R_AH
+  | "CH" -> R_CH
+  | "DH" -> R_DH
+  | "BH" -> R_BH
+  | "AX" -> R_AX
+  | "CX" -> R_CX
+  | "DX" -> R_DX
+  | "BX" -> R_BX
+  | "SP" -> R_SP
+  | "BP" -> R_BP
+  | "SI" -> R_SI
+  | "DI" -> R_DI
+  | "EAX" -> R_EAX
+  | "ECX" -> R_ECX
+  | "EDX" -> R_EDX
+  | "EBX" -> R_EBX
+  | "ESP" -> R_ESP
+  | "EBP" -> R_EBP
+  | "ESI" -> R_ESI
+  | "EDI" -> R_EDI
+  | "CF" -> R_CF
+  | "PF" -> R_PF
+  | "AF" -> R_AF
+  | "ZF" -> R_ZF
+  | "SF" -> R_SF
+  | "DF" -> R_DF
+  | "OF" -> R_OF
+  | "ES" -> R_ES
+  | "CS" -> R_CS
+  | "SS" -> R_SS
+  | "DS" -> R_DS
+  | "FS" -> R_FS
+  | "GS" -> R_GS
+  | _ -> failwith ("lookup_reg: not implemented: " ^ name)
+
+let index_of_reg reg =
+  match reg with
   | R_AL -> 0
   | R_CL -> 1
   | R_DL -> 2
@@ -58,22 +103,78 @@ let size_of_reg = function
   | R_CH -> 5
   | R_DH -> 6
   | R_BH -> 7
-  | R_AX -> 0
-  | R_CX -> 1
-  | R_DX -> 2
-  | R_BX -> 3
-  | R_SI -> 4
-  | R_DI -> 5
-  | R_SP -> 6
-  | R_BP -> 7
-  | R_EAX -> 0
-  | R_ECX -> 1
-  | R_EDX -> 2
-  | R_EBX -> 3
-  | R_ESI -> 4
-  | R_EDI -> 5
-  | R_ESP -> 6
-  | R_EBP -> 7 *)
+  | R_AX -> 8
+  | R_CX -> 9
+  | R_DX -> 10
+  | R_BX -> 11
+  | R_SP -> 12
+  | R_BP -> 13
+  | R_SI -> 14
+  | R_DI -> 15
+  | R_EAX -> 16
+  | R_ECX -> 17
+  | R_EDX -> 18
+  | R_EBX -> 19
+  | R_ESP -> 20
+  | R_EBP -> 21
+  | R_ESI -> 22
+  | R_EDI -> 23
+  | R_CF -> 24
+  | R_PF -> 25
+  | R_AF -> 26
+  | R_ZF -> 27
+  | R_SF -> 28
+  | R_DF -> 29
+  | R_OF -> 30
+  | R_ES -> 31
+  | R_CS -> 32
+  | R_SS -> 33
+  | R_DS -> 34
+  | R_FS -> 35
+  | R_GS -> 36
+  | _ -> failwith ("index_of_reg: not implemented: " ^ string_of_reg reg)
+
+let reg_name_table = [|
+  "AL";
+  "CL";
+  "DL";
+  "BL";
+  "AH";
+  "CH";
+  "DH";
+  "BH";
+  "AX";
+  "CX";
+  "DX";
+  "BX";
+  "SI";
+  "DI";
+  "SP";
+  "BP";
+  "EAX";
+  "ECX";
+  "EDX";
+  "EBX";
+  "ESP";
+  "EBP";
+  "ESI";
+  "EDI";
+  "CF";
+  "PF";
+  "AF";
+  "ZF";
+  "SF";
+  "DF";
+  "OF";
+  "ES";
+  "CS";
+  "SS";
+  "DS";
+  "FS";
+  "GS";
+|]
+
+let number_of_registers = 37
 
 (* TODO: add segment field *)
 type mem = {

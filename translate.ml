@@ -58,14 +58,30 @@ let width_of_binary_op (op, w1, w2) =
 
 (* 32 just for now *)
 let init_symtab = [
-  "AX", 32;
-  "CX", 32;
-  "DX", 32;
-  "BX", 32;
-  "SP", 32;
-  "BP", 32;
-  "SI", 32;
-  "DI", 32;
+  "EAX", 32;
+  "ECX", 32;
+  "EDX", 32;
+  "EBX", 32;
+  "ESP", 32;
+  "EBP", 32;
+  "ESI", 32;
+  "EDI", 32;
+  "AX", 16;
+  "CX", 16;
+  "DX", 16;
+  "BX", 16;
+  "SP", 16;
+  "BP", 16;
+  "SI", 16;
+  "DI", 16;
+  "AH",  8;
+  "CH",  8;
+  "DH",  8;
+  "BH",  8;
+  "AL",  8;
+  "CL",  8;
+  "DL",  8;
+  "BL",  8;
   "CF",  1;
   "PF",  1;
   "AF",  1;
@@ -147,7 +163,7 @@ let rec translate_expr st = function
     let handle_builtin func_name =
       let f1 prim =
         let args', arg_widths =
-          unzip (args |> List.map (translate_expr st))
+          List.split (args |> List.map (translate_expr st))
         in
         let w = List.hd arg_widths in
         arg_widths |> List.iter (check_width w);
@@ -235,6 +251,7 @@ let translate_stmt st_ref env stmt =
         begin match try_lookup st name with
           | None ->
             st_ref := extend_symtab (name, Var (name, w)) st;
+            Hashtbl.add env.var_tab name w;
             append_stmt env (f name)
           | Some _ -> raise (Redefinition name)
         end
@@ -251,13 +268,13 @@ let translate_stmt st_ref env stmt =
       | _ -> failwith ("not a Proc value: "^proc_name)
     in
     let args, arg_widths =
-      unzip (List.map (translate_expr st) args)
+      List.split (List.map (translate_expr st) args)
     in
     let n_param = List.length proc.p_param_names in
     let n_arg = List.length args in
     if n_param <> n_arg then raise (Wrong_arity (proc_name, n_param));
     (* check arg width *)
-    zip proc.p_param_names arg_widths |> List.iter
+    List.combine proc.p_param_names arg_widths |> List.iter
       (fun (param_name, arg_width) ->
          let param_width = Hashtbl.find proc.p_var_tab param_name in
          check_width param_width arg_width);
@@ -288,10 +305,7 @@ let translate_stmt st_ref env stmt =
     let data', data_width = translate_expr st data in
     check_width (size*8) data_width;
     append_stmt env (S_store (size, addr', data'))
-  | Stmt_jump addr ->
-    let addr', w = translate_expr st addr in
-    check_width w 32;
-    append_stmt env (S_jump addr')
+  | Stmt_jump addr -> assert false
 
 let translate_proc st proc =
   (* construct static environment to translate function body in *)
@@ -328,7 +342,7 @@ let translate_ast ast =
         | Templ pt -> pt
         | _ -> failwith ("not a Templ value: "^pi.pi_templ_name)
       in
-      let named_args = zip pt.pt_templ_params pi.pi_templ_args in
+      let named_args = List.combine pt.pt_templ_params pi.pi_templ_args in
       let inst_st =
         named_args |> List.fold_left begin fun st (name, arg) ->
           let value =

@@ -1,3 +1,4 @@
+open Cfg
 open Inst
 
 type itree =
@@ -43,12 +44,6 @@ type string_stream = {
   mutable pos : int;
 }
 
-type basic_block = {
-  start : int;
-  stop : int;
-  stmts : Semant.stmt list;
-}
-
 let build_cfg code init_pc init_offset =
   let start_end = ref Leaf in
   let edges = ref [] in (* from end of basic block to start of basic block *)
@@ -61,6 +56,7 @@ let build_cfg code init_pc init_offset =
     c
   in
   let inst_table = Hashtbl.create 0 in
+  let unresolved_jumps = ref [] in
   while not (Queue.is_empty q) do
     let pc = Queue.pop q in
     begin match itree_find pc !start_end with
@@ -79,15 +75,21 @@ let build_cfg code init_pc init_offset =
           | I_jmp ->
             begin match List.hd inst.operands with
               | O_offset ofs -> pc', [pc+ofs]
-              | _ -> pc', []
+              | _ ->
+                unresolved_jumps := pc :: !unresolved_jumps;
+                pc', []
             end
           | I_jmpfar -> failwith "cannot handle far jump"
           | I_cjmp ->
             begin match List.hd inst.operands with
               | O_offset ofs -> pc', [pc'; pc+ofs]
-              | _ -> pc', [pc']
+              | _ ->
+                unresolved_jumps := pc :: !unresolved_jumps;
+                pc', [pc']
             end
-          | I_ret | I_retfar | I_retn -> pc', []
+          | I_ret | I_retfar | I_retn ->
+            unresolved_jumps := pc :: !unresolved_jumps;
+            pc', []
           | _ ->
             if itree_find pc' !start_end = Start then pc', [pc'] else
               loop pc'
@@ -103,9 +105,10 @@ let build_cfg code init_pc init_offset =
     end
   done;
   let start_end_list = itree_to_list !start_end in
+  let env = Semant.new_env () in
+  env.unresolved_jumps <- !unresolved_jumps;
   let basic_blocks =
     start_end_list |> List.map (fun (start, stop) ->
-        let env = Semant.new_env () in
         let rec loop pc =
           let inst = Hashtbl.find inst_table pc in
           Elaborate.elaborate_inst env pc inst;
@@ -113,25 +116,39 @@ let build_cfg code init_pc init_offset =
           if pc' = stop then () else loop pc'
         in
         loop start;
-        let env' = Expand.expand env in
-        let stmts = Semant.get_stmts env' in
+        Expand.expand env;
+        let stmts = Semant.get_stmts env in
+        env.stmts_rev <- [];
         { start; stop; stmts })
   in
-  basic_blocks, !edges
+  (* basic_blocks, !edges *)
+  let n = List.length basic_blocks in
+  let start_table = Hashtbl.create 0 in
+  let end_table = Hashtbl.create 0 in
+  basic_blocks |> List.iteri (fun i bb ->
+      Hashtbl.add start_table bb.start i;
+      Hashtbl.add end_table bb.stop i);
+  let succ = Array.make n [] in
+  let pred = Array.make n [] in
+  !edges |> List.iter (fun (stop, start) ->
+      let from_id = Hashtbl.find end_table stop in
+      let to_id = Hashtbl.find start_table start in
+      succ.(from_id) <- to_id :: succ.(from_id);
+      pred.(to_id) <- from_id :: pred.(to_id));
+  { node = Array.of_list basic_blocks; succ; pred }
 
-let write_cfg (basic_blocks, edges) =
-  let end_start = Hashtbl.create 0 in
-  List.iter (fun bb -> Hashtbl.add end_start bb.stop bb.start) basic_blocks;
+let write_cfg cfg =
   let open Format in
   print_string "digraph {\n";
   print_string "  node [shape=box fontname=Monospace]\n";
   (*let insts = ref [] in
   let insts = List.rev !insts in*)
-  basic_blocks |> List.iter (fun bb ->
+  cfg.node |> Array.iteri (fun i bb ->
       printf "  loc_%x [label=\"" bb.start;
       List.iter (fun stmt -> printf "%a\\l" Semant.pp_stmt stmt) bb.stmts;
-      print_string "\"];\n");
-  List.iter (fun (f, t) -> printf "  loc_%x -> loc_%x;\n" (Hashtbl.find end_start f) t) edges;
+      print_string "\"];\n";
+      cfg.succ.(i) |> List.iter (fun succ ->
+          printf "  loc_%x -> loc_%x;\n" bb.start cfg.node.(succ).start));
   print_string "}\n"
 
 let () =
@@ -144,4 +161,5 @@ let () =
   let code = really_input_string in_chan in_chan_len in
   close_in in_chan;
   let cfg = build_cfg code init_pc init_offset in
+  Ssa.convert_to_ssa cfg;
   write_cfg cfg

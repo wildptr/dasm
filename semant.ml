@@ -34,8 +34,10 @@ type loc = string
 type stmt =
   | S_set of loc * expr
   | S_store of int * expr * expr
-  | S_jump of expr
-  | S_br of expr * expr
+  | S_jump of expr * bool
+  (* | S_jsr of expr (* jump as part of CALL instruction; for ease of further analysis *) *)
+  | S_br of expr * expr * bool
+  | S_phi of string * string array
   (* the following do not occur after elaboration *)
   | S_call of proc * expr list * loc option
   | S_output of expr
@@ -112,10 +114,17 @@ let pp_stmt f = function
     fprintf f "%a = %a" pp_loc loc pp_expr e
   | S_store (size, e_addr, e_data) ->
     fprintf f "%d[%a] = %a" size pp_expr e_addr pp_expr e_data
-  | S_jump e ->
-    fprintf f "jump %a" pp_expr e
-  | S_br (e, e') ->
-    fprintf f "br %a, %a" pp_expr e pp_expr e'
+  | S_jump (e, u) ->
+    fprintf f "jump%s %a" (if u then "?" else "") pp_expr e
+  | S_br (e, e', u) ->
+    fprintf f "br%s %a, %a" (if u then "?" else "") pp_expr e pp_expr e'
+  | S_phi (lhs, rhs) ->
+    fprintf f "%s = phi(" lhs;
+    begin match Array.to_list rhs with
+      | [] -> ()
+      | hd :: tl -> pp_print_string f hd; List.iter (fprintf f ", %s") tl
+    end;
+    fprintf f ")"
   | S_call (proc, args, result_opt) ->
     begin match result_opt with
       | None -> ()
@@ -149,16 +158,52 @@ let pp_proc f proc =
       fprintf f "%a" pp_stmt stmt;
       if i < n_stmt-1 then fprintf f "@ ");
   fprintf f "@]@ ";
-  fprintf f "}@]";
+  fprintf f "}@]"
+
+let rec rename_variables f = function
+  | E_literal _ as e -> e
+  | E_var name -> E_var (f name)
+  | E_part (e, lo, hi) -> E_part (rename_variables f e, lo, hi)
+  | E_prim p ->
+    let p' =
+      match p with
+      | P_not e -> P_not (rename_variables f e)
+      | P_concat es -> P_concat (List.map (rename_variables f) es)
+      | P_add es -> P_add (List.map (rename_variables f) es)
+      | P_sub (e1, e2) -> P_sub (rename_variables f e1, rename_variables f e2)
+      | P_eq (e1, e2) -> P_eq (rename_variables f e1, rename_variables f e2)
+      | P_and es -> P_and (List.map (rename_variables f) es)
+      | P_xor es -> P_xor (List.map (rename_variables f) es)
+      | P_or es -> P_or (List.map (rename_variables f) es)
+      | P_shiftleft (e1, e2) -> P_shiftleft (rename_variables f e1, rename_variables f e2)
+      | P_logshiftright (e1, e2) -> P_logshiftright (rename_variables f e1, rename_variables f e2)
+      | P_arishiftright (e1, e2) -> P_arishiftright (rename_variables f e1, rename_variables f e2)
+      | P_undef _ as p -> p
+      | P_repeat (e, n) -> P_repeat (rename_variables f e, n)
+      | P_addwithcarry (e1, e2, e3) ->
+        P_addwithcarry (rename_variables f e1, rename_variables f e2, rename_variables f e3)
+      | P_reduce_and e -> P_reduce_and (rename_variables f e)
+      | P_reduce_xor e -> P_reduce_xor (rename_variables f e)
+      | P_reduce_or e -> P_reduce_or (rename_variables f e)
+      | P_zeroextend (e, size) -> P_zeroextend (rename_variables f e, size)
+      | P_signextend (e, size) -> P_signextend (rename_variables f e, size)
+    in
+    E_prim p'
+  | E_load (size, addr) -> E_load (size, rename_variables f addr)
 
 type env = {
   var_tab : (string, int) Hashtbl.t;
   mutable stmts_rev : stmt list;
+  mutable unresolved_jumps : int list; (* list of addresses where unresolved jumps reside *)
+  rename_table : (string, string) Hashtbl.t;
 }
 
-let new_env () =
-  { var_tab = Hashtbl.create 0;
-    stmts_rev = [] }
+let new_env () = {
+  var_tab = Hashtbl.create 0;
+  stmts_rev = [];
+  unresolved_jumps = [];
+  rename_table = Hashtbl.create 0;
+}
 
 let new_temp env width =
   let n = Hashtbl.length env.var_tab in
