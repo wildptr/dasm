@@ -504,7 +504,7 @@ let format_of_inst_single_byte mode prefix opcode r =
     if r >= 6 then raise Invalid_instruction;
     let sr = seg_reg_table.(r) in
     I_movfromseg, lw, [RM w; Lit (O_reg sr)]
-  | 0x8d -> I_lea, lw, [RM w; M 0]
+  | 0x8d -> I_lea, lw, [R w; M 0]
   | 0x8e ->
     if r >= 6 then raise Invalid_instruction;
     let sr = seg_reg_table.(r) in

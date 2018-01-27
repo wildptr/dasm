@@ -14,7 +14,7 @@ type prim =
   | P_arishiftright of expr * expr
   | P_undef of int
   | P_repeat of expr * int
-  | P_add_ex of expr * expr * expr (* add with carry *)
+  | P_addwithcarry of expr * expr * expr
   | P_reduce_and of expr
   | P_reduce_xor of expr
   | P_reduce_or of expr
@@ -24,26 +24,21 @@ type prim =
 and expr =
   | E_literal of Bitvec.t
   | E_var of string
-  | E_part of expr * (int * int)
+  | E_part of expr * int * int
   | E_prim of prim
   | E_load of int * expr
 
-type loc =
-  | L_var of string
-  | L_part of string * int * int
+type loc = string
 
 (* elaborated form of instructions *)
 type stmt =
   | S_set of loc * expr
   | S_store of int * expr * expr
-  | S_label of string
-  | S_jump of string
-  | S_jump_var of expr
-  | S_br of expr * string
-  | S_br_var of expr * expr
+  | S_jump of expr
+  | S_br of expr * expr
   (* the following do not occur after elaboration *)
   | S_call of proc * expr list * loc option
-  | S_return of expr
+  | S_output of expr
 
 and proc = {
   (* for pretty printing *)
@@ -84,8 +79,8 @@ let rec pp_prim f p =
     fprintf f "undefined(%d)" width
   | P_repeat (data, n) ->
     fprintf f "repeat(%a, %d)" pp_expr data n
-  | P_add_ex (e_a, e_b, e_c) ->
-    fprintf f "add_ex(%a, %a, %a)" pp_expr e_a pp_expr e_b pp_expr e_c
+  | P_addwithcarry (e_a, e_b, e_c) ->
+    fprintf f "add_with_carry(%a, %a, %a)" pp_expr e_a pp_expr e_b pp_expr e_c
   | P_reduce_and e ->
     fprintf f "&(%a)" pp_expr e
   | P_reduce_xor e ->
@@ -102,29 +97,25 @@ and pp_expr f = function
     (*fprintf f "%d:%d" (Bitvec.to_int bv) (Bitvec.length bv)*)
     pp_print_int f (Bitvec.to_int bv)
   | E_var s -> fprintf f "%s" s
-  | E_part (e, (lo, hi)) -> fprintf f "%a[%d:%d]" pp_expr e lo hi
+  | E_part (e, lo, hi) -> fprintf f "%a[%d:%d]" pp_expr e lo hi
   | E_prim p -> pp_prim f p
   | E_load (size, addr) -> fprintf f "%d[%a]" size pp_expr addr
 
-let pp_loc f = function
+(*let pp_loc f = function
   | L_var name -> pp_print_string f name
-  | L_part (name, lo, hi) -> fprintf f "%s[%d:%d]" name lo hi
+  | L_part (name, lo, hi) -> fprintf f "%s[%d:%d]" name lo hi*)
+
+let pp_loc = pp_print_string
 
 let pp_stmt f = function
   | S_set (loc, e) ->
     fprintf f "%a = %a" pp_loc loc pp_expr e
   | S_store (size, e_addr, e_data) ->
     fprintf f "%d[%a] = %a" size pp_expr e_addr pp_expr e_data
-  | S_label l ->
-    fprintf f "%s:" l
-  | S_jump l ->
-    fprintf f "jump %s" l
-  | S_jump_var e ->
-    fprintf f "jump_var %a" pp_expr e
-  | S_br (e, l) ->
-    fprintf f "br %a, %s" pp_expr e l
-  | S_br_var (e, e') ->
-    fprintf f "br_var %a, %a" pp_expr e pp_expr e'
+  | S_jump e ->
+    fprintf f "jump %a" pp_expr e
+  | S_br (e, e') ->
+    fprintf f "br %a, %a" pp_expr e pp_expr e'
   | S_call (proc, args, result_opt) ->
     begin match result_opt with
       | None -> ()
@@ -136,8 +127,8 @@ let pp_stmt f = function
         pp_expr f arg;
         if i < n-1 then fprintf f ", ");
     fprintf f ")";
-  | S_return e ->
-    fprintf f "return %a" pp_expr e
+  | S_output e ->
+    fprintf f "output %a" pp_expr e
 
 let pp_proc f proc =
   let n_param = List.length proc.p_param_names in

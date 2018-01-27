@@ -2,14 +2,6 @@ open Inst
 open Semant
 open Util
 
-let eR0 = E_var "AX"
-let eR1 = E_var "CX"
-let eR2 = E_var "DX"
-let eR3 = E_var "BX"
-let eR4 = E_var "SP"
-let eR5 = E_var "BP"
-let eR6 = E_var "SI"
-let eR7 = E_var "DI"
 let eCF = E_var "CF"
 let ePF = E_var "PF"
 let eAF = E_var "AF"
@@ -17,12 +9,6 @@ let eZF = E_var "ZF"
 let eSF = E_var "SF"
 let eDF = E_var "DF"
 let eOF = E_var "OF"
-let eES = E_var "ES"
-let eCS = E_var "CS"
-let eSS = E_var "SS"
-let eDS = E_var "DS"
-let eFS = E_var "FS"
-let eGS = E_var "GS"
 
 let predef_table : (string, proc) Hashtbl.t = Hashtbl.create 0
 
@@ -48,38 +34,9 @@ let cond_expr code =
   let e = cond_expr1 (code lsr 1) in
   if (code land 1) = 0 then e else E_prim (P_not e)
 
-let elaborate_reg = function
-  | R_AL -> E_part (eR0, (0, 8))
-  | R_CL -> E_part (eR1, (0, 8))
-  | R_DL -> E_part (eR2, (0, 8))
-  | R_BL -> E_part (eR3, (0, 8))
-  | R_AH -> E_part (eR0, (8, 16))
-  | R_CH -> E_part (eR1, (8, 16))
-  | R_DH -> E_part (eR2, (8, 16))
-  | R_BH -> E_part (eR3, (8, 16))
-  | R_AX -> E_part (eR0, (0, 16))
-  | R_CX -> E_part (eR1, (0, 16))
-  | R_DX -> E_part (eR2, (0, 16))
-  | R_BX -> E_part (eR3, (0, 16))
-  | R_SP -> E_part (eR4, (0, 16))
-  | R_BP -> E_part (eR5, (0, 16))
-  | R_SI -> E_part (eR6, (0, 16))
-  | R_DI -> E_part (eR7, (0, 16))
-  | R_EAX -> eR0
-  | R_ECX -> eR1
-  | R_EDX -> eR2
-  | R_EBX -> eR3
-  | R_ESP -> eR4
-  | R_EBP -> eR5
-  | R_ESI -> eR6
-  | R_EDI -> eR7
-  | R_ES -> eES
-  | R_CS -> eCS
-  | R_SS -> eSS
-  | R_DS -> eDS
-  | R_FS -> eFS
-  | R_GS -> eGS
-  | _ -> failwith "elaborate_reg: not implemented"
+let name_of_reg r = String.uppercase_ascii (string_of_reg r)
+
+let elaborate_reg r = E_var (name_of_reg r)
 
 let elaborate_mem_index (reg, scale) =
   let e_reg = elaborate_reg reg in
@@ -88,7 +45,7 @@ let elaborate_mem_index (reg, scale) =
     let e_scale = E_literal (Bitvec.of_int 2 scale) in
     E_prim (P_shiftleft (e_reg, e_scale))
 
-let elaborate_disp disp = E_literal (Bitvec.of_int 32 disp)
+let make_address addr = E_literal (Bitvec.of_int 32 addr)
 
 let elaborate_mem_addr m =
   match m.base, m.index with
@@ -98,7 +55,7 @@ let elaborate_mem_addr m =
     let to_be_added =
       if m.disp = 0 then [e_base; e_index]
       else
-        let e_disp = elaborate_disp m.disp in
+        let e_disp = make_address m.disp in
         [e_base; e_index; e_disp]
     in
     E_prim (P_add to_be_added)
@@ -106,18 +63,18 @@ let elaborate_mem_addr m =
     let e_base = elaborate_reg base in
     if m.disp = 0 then e_base
     else
-      let e_disp = elaborate_disp m.disp in
+      let e_disp = make_address m.disp in
       E_prim (P_add [e_base; e_disp])
   | None, Some index ->
     let e_index = elaborate_mem_index index in
     if m.disp = 0 then e_index
     else
-      let e_disp = elaborate_disp m.disp in
+      let e_disp = make_address m.disp in
       E_prim (P_add [e_index; e_disp])
   | None, None ->
-    elaborate_disp m.disp
+    make_address m.disp
 
-let elaborate_operand pc' env = function
+let elaborate_operand pc' = function
   | O_reg reg -> elaborate_reg reg
   | O_mem (mem, size) ->
     if size <= 0 then failwith "size of operand invalid";
@@ -126,17 +83,60 @@ let elaborate_operand pc' env = function
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
     E_literal (Bitvec.of_int (size*8) imm)
-  | O_offset ofs -> E_literal (Bitvec.of_int 32 (pc' + ofs))
+  | O_offset ofs -> make_address (pc'+ofs)
   | _ -> failwith "invalid operand type"
 
 let elaborate_writeback env o_dst e_data =
   match o_dst with
   | O_reg r ->
-    begin match elaborate_reg r with
-      | E_var regname ->
-        append_stmt env (S_set (L_var regname, e_data))
-      | E_part (E_var regname, (lo, hi)) ->
-        append_stmt env (S_set (L_part (regname, lo, hi), e_data))
+    let module L = struct
+      type reg_type = Other | OL | OH | OX | EOX
+    end in
+    let open L in
+    let reg_type =
+      match r with
+      | R_AL | R_CL | R_DL | R_BL -> OL
+      | R_AH | R_CH | R_DH | R_BH -> OH
+      | R_AX | R_CX | R_DX | R_BX -> OX
+      | R_EAX | R_ECX | R_EDX | R_EBX -> EOX
+      | _ -> Other
+    in
+    if reg_type = Other then
+      append_stmt env (S_set (name_of_reg r, e_data))
+    else begin
+      let temp = new_temp env (size_of_reg r) in
+      let e_temp = E_var temp in
+      append_stmt env (S_set (temp, e_data));
+      let ol, oh, ox, eox =
+        match r with
+        | R_AL | R_AH | R_AX | R_EAX -> "AL", "AH", "AX", "EAX"
+        | R_CL | R_CH | R_CX | R_ECX -> "CL", "CH", "CX", "ECX"
+        | R_DL | R_DH | R_DX | R_EDX -> "DL", "DH", "DX", "EDX"
+        | R_BL | R_BH | R_BX | R_EBX -> "BL", "BH", "BX", "EBX"
+        | _ -> assert false
+      in
+      match reg_type with
+      | EOX ->
+        append_stmt env (S_set (eox, e_temp));
+        append_stmt env (S_set (ox, E_part (e_temp, 0, 16)));
+        append_stmt env (S_set (oh, E_part (e_temp, 8, 16)));
+        append_stmt env (S_set (ol, E_part (e_temp, 0, 8)));
+      | OX ->
+        let bits16_32 = E_part (E_var eox, 16, 32) in
+        append_stmt env (S_set (eox, E_prim (P_concat [bits16_32; e_temp])));
+        append_stmt env (S_set (ox, e_temp));
+        append_stmt env (S_set (oh, E_part (e_temp, 8, 16)));
+        append_stmt env (S_set (ol, E_part (e_temp, 0, 8)));
+      | OH ->
+        let bits16_32 = E_part (E_var eox, 16, 32) in
+        append_stmt env (S_set (eox, E_prim (P_concat [bits16_32; e_temp; E_var ol])));
+        append_stmt env (S_set (ox, E_prim (P_concat [e_temp; E_var ol])));
+        append_stmt env (S_set (oh, e_temp));
+      | OL ->
+        let bits8_32 = E_part (E_var eox, 8, 32) in
+        append_stmt env (S_set (eox, E_prim (P_concat [bits8_32; e_temp])));
+        append_stmt env (S_set (ox, E_prim (P_concat [E_var oh; e_temp])));
+        append_stmt env (S_set (ol, e_temp));
       | _ -> assert false
     end
   | O_mem (m, size) ->
@@ -184,15 +184,15 @@ let elaborate_inst env pc inst =
     match op with
     | I_add | I_or | I_adc | I_sbb | I_and | I_sub | I_xor | I_shl | I_shr | I_sar ->
       let temp = new_temp env (8 lsl lsize) in
-      let args = operands |> List.map (elaborate_operand pc' env) in
-      append_stmt env (S_call (fn inst, args, Some (L_var temp)));
+      let args = operands |> List.map (elaborate_operand pc') in
+      append_stmt env (S_call (fn inst, args, Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
-    | I_cmp | I_push | I_call | I_ret | I_retn | I_test ->
-      let args = operands |> List.map (elaborate_operand pc' env) in
+    | I_cmp | I_push | I_ret | I_retn | I_test ->
+      let args = operands |> List.map (elaborate_operand pc') in
       append_stmt env (S_call (fn inst, args, None))
     | I_pop ->
       let temp = new_temp env (8 lsl lsize) in
-      append_stmt env (S_call (fn inst, [], Some (L_var temp)));
+      append_stmt env (S_call (fn inst, [], Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
     | I_mov ->
       let dst, src =
@@ -200,7 +200,7 @@ let elaborate_inst env pc inst =
         | [d; s] -> d, s
         | _ -> assert false
       in
-      elaborate_writeback env dst (elaborate_operand pc' env src)
+      elaborate_writeback env dst (elaborate_operand pc' src)
     | I_lea ->
       let dst, src =
         match operands with
@@ -214,10 +214,10 @@ let elaborate_inst env pc inst =
       in
       elaborate_writeback env dst addr
     | I_jmp ->
-      append_stmt env (S_jump_var (elaborate_operand pc' inst (List.hd operands)))
+      append_stmt env (S_jump (elaborate_operand pc' (List.hd operands)))
     | I_cjmp ->
       let cond = cond_expr (inst.variant lsr 2) in
-      append_stmt env (S_br_var (cond, elaborate_operand pc' inst (List.hd operands)))
+      append_stmt env (S_br (cond, elaborate_operand pc' (List.hd operands)))
     | I_movzx | I_movsx ->
       let dst, src =
         match operands with
@@ -227,7 +227,7 @@ let elaborate_inst env pc inst =
       (*let lsize_src = inst.variant lsr 2 in*)
       let dst_size = 8 lsl lsize in
       (*let src_size = 8 lsl lsize_src in*)
-      let src' = elaborate_operand pc' env src in
+      let src' = elaborate_operand pc' src in
       let result =
         if op = I_movzx then
           E_prim (P_zeroextend (src', dst_size))
@@ -241,10 +241,13 @@ let elaborate_inst env pc inst =
         | [d; s] -> d, s
         | _ -> assert false
       in
-      let dst' = elaborate_operand pc' inst dst in
-      let src' = elaborate_operand pc' inst src in
+      let dst' = elaborate_operand pc' dst in
+      let src' = elaborate_operand pc' src in
       elaborate_writeback env dst src';
       elaborate_writeback env src dst'
+    | I_call ->
+      let dst' = elaborate_operand pc' (List.hd operands) in
+      append_stmt env (S_call (fn inst, [make_address pc'; dst'], None))
     | _ ->
       Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst;
       exit 1

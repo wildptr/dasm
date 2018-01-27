@@ -1,6 +1,6 @@
 template proc adc<N, S, C>(a:N, b:N):N
 {
-	let sum1 = add_ex(a, b, C^S);
+	let sum1 = add_with_carry(a, b, C^S);
 	let cout = sum1[N];
 	let out = sum1[N-1:0];
 	CF = cout^S;
@@ -9,7 +9,7 @@ template proc adc<N, S, C>(a:N, b:N):N
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = cout ^ out[N-1] ^ a[N-1] ^ b[N-1];
-	return out;
+	output out;
 }
 
 template proc log_op<N, OP>(a:N, b:N):N
@@ -21,7 +21,7 @@ template proc log_op<N, OP>(a:N, b:N):N
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = '0';
-	return out;
+	output out;
 }
 
 template proc shl<N, M>(x:N, n:M):N
@@ -35,7 +35,7 @@ template proc shl<N, M>(x:N, n:M):N
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = undefined(1);
-	return out;
+	output out;
 }
 
 template proc shr<N, M>(x:N, n:M):N
@@ -48,7 +48,7 @@ template proc shr<N, M>(x:N, n:M):N
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = undefined(1);
-	return out;
+	output out;
 }
 
 template proc sar<N, M>(x:N, n:M):N
@@ -61,7 +61,7 @@ template proc sar<N, M>(x:N, n:M):N
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = undefined(1);
-	return out;
+	output out;
 }
 
 proc add8  = adc< 8, '0', '0'>;
@@ -112,9 +112,8 @@ proc push32(data:32)
 
 proc pop32():32
 {
-	let data = load(4, SP);
+	output load(4, SP);
 	SP = SP + {4:32};
-	return data;
 }
 
 proc push_segr32(data:16)
@@ -125,7 +124,7 @@ proc push_segr32(data:16)
 
 template proc inc_dec<N, S>(in:N)
 {
-	let sum1 = add_ex(in, repeat(S, N), ~S);
+	let sum1 = add_with_carry(in, repeat(S, N), ~S);
 	let out = sum1[N-1:0];
 	PF = ~^out[7:0];
 	AF = in[4] ^ out[4];
@@ -142,10 +141,10 @@ proc dec8  = inc_dec< 8, '1'>;
 proc dec16 = inc_dec<16, '1'>;
 proc dec32 = inc_dec<32, '1'>;
 
-proc call32(pc:32, offset:32)
+proc call32(pc:32, dst:32)
 {
 	call push32(pc);
-	jump pc + offset;
+	jump dst;
 }
 
 proc ret32()

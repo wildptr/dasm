@@ -135,13 +135,13 @@ let rec translate_expr st = function
       | Index_bit c_b ->
         let b = translate_cexpr st c_b in
         if b >= w then raise (Index_out_of_bounds ((e,w),b));
-        E_part (e', (b, b+1)), 1
+        E_part (e', b, b+1), 1
       | Index_part (c_hi', c_lo) ->
         let hi' = translate_cexpr st c_hi' in
         let lo = translate_cexpr st c_lo in
         let hi = hi'+1 in
         if hi > w then raise (Index_out_of_bounds ((e,w),hi'));
-        E_part (e', (lo, hi)), hi-lo
+        E_part (e', lo, hi), hi-lo
     end
   | Expr_apply (func_name, args) ->
     let handle_builtin func_name =
@@ -164,7 +164,7 @@ let rec translate_expr st = function
         E_prim (prim a1' a2'), w1
       in
       match func_name with
-      | "add_ex" ->
+      | "add_with_carry" ->
         let a1, a2, a3 =
           match args with
           | [a1;a2;a3] -> a1, a2, a3
@@ -175,7 +175,7 @@ let rec translate_expr st = function
         let a3', w3 = translate_expr st a3 in
         check_width w1 w2;
         check_width w3 1;
-        E_prim (P_add_ex (a1', a2', a3')), w1+1
+        E_prim (P_addwithcarry (a1', a2', a3')), w1+1
       | "and" -> f1 (fun args -> P_and args)
       | "or"  -> f1 (fun args -> P_or  args)
       | "xor" -> f1 (fun args -> P_xor args)
@@ -217,10 +217,10 @@ let translate_stmt st_ref env stmt =
         begin match try_lookup st name with
           | None -> raise (Unbound_symbol name)
           | Some (Var (r, r_width)) ->
-            append_stmt env (f (L_var r))
+            append_stmt env (f r)
           | _ -> raise (Invalid_assignment name)
         end
-      | Loc_part (name, hi, lo) ->
+      (*| Loc_part (name, hi, lo) ->
         begin match try_lookup st name with
           | None -> raise (Unbound_symbol name)
           | Some (Var (r, r_width)) ->
@@ -230,12 +230,12 @@ let translate_stmt st_ref env stmt =
             assert (hi' <= r_width);
             append_stmt env (f (L_part (r, lo', hi')))
           | _ -> raise (Invalid_assignment name)
-        end
+        end*)
       | Loc_newvar name ->
         begin match try_lookup st name with
           | None ->
             st_ref := extend_symtab (name, Var (name, w)) st;
-            append_stmt env (f (L_var name))
+            append_stmt env (f name)
           | Some _ -> raise (Redefinition name)
         end
     end
@@ -273,9 +273,9 @@ let translate_stmt st_ref env stmt =
         let rhs_width = proc.p_result_width in
         do_assign loc (fun loc' -> S_call (proc, args, Some loc')) rhs_width
     end
-  | Stmt_return e ->
+  | Stmt_output e ->
     let e', _ = translate_expr st e in
-    append_stmt env (S_return e')
+    append_stmt env (S_output e')
   (*| Stmt_load (c_size, addr, name) ->
     let size = translate_cexpr st c_size in
     let w = size*8 in
@@ -291,7 +291,7 @@ let translate_stmt st_ref env stmt =
   | Stmt_jump addr ->
     let addr', w = translate_expr st addr in
     check_width w 32;
-    append_stmt env (S_jump_var addr')
+    append_stmt env (S_jump addr')
 
 let translate_proc st proc =
   (* construct static environment to translate function body in *)

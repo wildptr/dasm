@@ -41,6 +41,14 @@ let string_of_reg = function
   | R_fpu i -> "st" ^ (string_of_int i)
   | R_xmm i -> "xmm" ^ (string_of_int i)
 
+let size_of_reg = function
+  | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH -> 8
+  | R_AX | R_CX | R_DX | R_BX | R_SI | R_DI | R_SP | R_BP -> 16
+  | R_EAX | R_ECX | R_EDX | R_EBX | R_ESI | R_EDI | R_ESP | R_EBP -> 32
+  | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS -> 16
+  | R_fpu _ -> 80
+  | R_xmm _ -> 128
+
 (* let index_of_reg = function
   | R_AL -> 0
   | R_CL -> 1

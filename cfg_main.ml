@@ -110,9 +110,11 @@ let build_cfg code init_pc init_offset =
           let inst = Hashtbl.find inst_table pc in
           Elaborate.elaborate_inst env pc inst;
           let pc' = pc + length_of inst in
-          if pc' = stop then Semant.get_stmts env else loop pc'
+          if pc' = stop then () else loop pc'
         in
-        let stmts = loop start in
+        loop start;
+        let env' = Expand.expand env in
+        let stmts = Semant.get_stmts env' in
         { start; stop; stmts })
   in
   basic_blocks, !edges

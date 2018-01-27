@@ -31,13 +31,12 @@ open Spec_ast
 %token Tilde
 
 %token K_call
-(*%token K_if*)
 %token K_jump
 %token K_let
 %token K_load
+%token K_output
 %token K_proc
 %token K_repeat
-%token K_return
 %token K_store
 %token K_template
 %token K_undefined
@@ -139,8 +138,8 @@ expr: binary_expr {$1}
 loc:
   | name = Ident
     { Loc_var name }
-  | name = Ident; LBrack; hi = cexpr; Colon; lo = cexpr; RBrack
-    { Loc_part (name, hi, lo) }
+  (*| name = Ident; LBrack; hi = cexpr; Colon; lo = cexpr; RBrack
+    { Loc_part (name, hi, lo) }*)
   | K_let; name = Ident
     { Loc_newvar name }
 
@@ -155,8 +154,8 @@ stmt:
   | loc = loc; Eq; K_call; proc_name = Ident;
     LParen; args = separated_list(Comma, expr); RParen; Semi
     { Stmt_call (proc_name, args, Some loc) }
-  | K_return; value = expr; Semi
-    { Stmt_return value }
+  | K_output; value = expr; Semi
+    { Stmt_output value }
   (*| name = Ident; Eq; K_load; size = cexpr; Comma; addr = expr; Semi
     { Stmt_load (size, addr, name) }*)
   | K_store; size = cexpr; Comma; addr = expr; Comma; data = expr; Semi

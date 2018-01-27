@@ -20,9 +20,9 @@ let keyword_map : token StringMap.t =
     "let", K_let;
     "jump", K_jump;
     "load", K_load;
+    "output", K_output;
     "proc", K_proc;
     "repeat", K_repeat;
-    "return", K_return;
     "store", K_store;
     "template", K_template;
     "undefined", K_undefined;
