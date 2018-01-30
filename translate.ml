@@ -1,7 +1,8 @@
 open Format
 open Semant
 open Spec_ast
-open Util
+
+(* TODO: rewrite this module *)
 
 (* "%s takes exactly %d arguments" *)
 exception Wrong_arity of string * int
@@ -23,29 +24,18 @@ type value =
   | BVConst of Bitvec.t
   | Prim of string
 
-type symtab = value StringMap.t
+type symtab = value BatMap.String.t
 
-let prim_of_unary_op (op, e) =
-  match op with
-  | Not -> P_not e
-  | Reduce_and -> P_reduce_and e
-  | Reduce_xor -> P_reduce_xor e
-  | Reduce_or -> P_reduce_or e
+let prim_of_unary_op = function
+  | Not -> P1_not
+  | Reduce_and -> P1_foldand
+  | Reduce_xor -> P1_foldxor
+  | Reduce_or -> P1_foldor
 
 let width_of_unary_op (op, w) =
   match op with
   | Not -> w
   | Reduce_and | Reduce_xor | Reduce_or -> 1
-
-let prim_of_binary_op (op, e1, e2) =
-  match op with
-  | Concat -> P_concat [e1;e2]
-  | Add -> P_add [e1;e2]
-  | Sub -> P_sub (e1,e2)
-  | Eq -> P_eq (e1,e2)
-  | And -> P_and [e1;e2]
-  | Xor -> P_xor [e1;e2]
-  | Or -> P_or [e1;e2]
 
 let width_of_binary_op (op, w1, w2) =
   match op with
@@ -90,14 +80,15 @@ let init_symtab = [
   "DF",  1;
   "OF",  1;
 ] |> List.fold_left (fun map (name, w) ->
-    StringMap.add name (Var (name, w)) map) StringMap.empty
+    BatMap.String.add name (Var (name, w)) map) BatMap.String.empty
 
 let extend_symtab (name, value) st =
-  if StringMap.mem name st
+  if BatMap.String.mem name st
   then raise (Redefinition name)
-  else StringMap.add name value st
+  else BatMap.String.add name value st
 
-let try_lookup st name = StringMap.find_opt name st
+let try_lookup st name =
+  try Some (BatMap.String.find name st) with Not_found -> None
 
 let lookup st name =
   match try_lookup st name with
@@ -167,7 +158,7 @@ let rec translate_expr st = function
         in
         let w = List.hd arg_widths in
         arg_widths |> List.iter (check_width w);
-        E_prim (prim args'), w
+        E_primn (prim, args'), w
       in
       let f_shift prim =
         let a1, a2 =
@@ -177,7 +168,18 @@ let rec translate_expr st = function
         in
         let a1', w1 = translate_expr st a1 in
         let a2', _ = translate_expr st a2 in
-        E_prim (prim a1' a2'), w1
+        E_prim2 (prim, a1', a2'), w1
+      in
+      let f_pred prim =
+        let a1, a2 =
+          match args with
+          | [a1;a2] -> a1, a2
+          | _ -> raise (Wrong_arity (func_name, 2))
+        in
+        let a1', w1 = translate_expr st a1 in
+        let a2', w2 = translate_expr st a2 in
+        check_width w1 w2;
+        E_prim2 (prim, a1', a2'), 1
       in
       match func_name with
       | "add_with_carry" ->
@@ -191,13 +193,15 @@ let rec translate_expr st = function
         let a3', w3 = translate_expr st a3 in
         check_width w1 w2;
         check_width w3 1;
-        E_prim (P_addwithcarry (a1', a2', a3')), w1+1
-      | "and" -> f1 (fun args -> P_and args)
-      | "or"  -> f1 (fun args -> P_or  args)
-      | "xor" -> f1 (fun args -> P_xor args)
-      | "shift_left" -> f_shift (fun a1' a2' -> P_shiftleft (a1', a2'))
-      | "log_shift_right" -> f_shift (fun a1' a2' -> P_logshiftright (a1', a2'))
-      | "ari_shift_right" -> f_shift (fun a1' a2' -> P_arishiftright (a1', a2'))
+        E_prim3 (P3_addwithcarry, a1', a2', a3'), w1+1
+      | "and" -> f1 Pn_and
+      | "xor" -> f1 Pn_xor
+      | "or"  -> f1 Pn_or
+      | "shift_left" -> f_shift P2_shiftleft
+      | "log_shift_right" -> f_shift P2_logshiftright
+      | "ari_shift_right" -> f_shift P2_arishiftright
+      | "less" -> f_pred P2_less
+      | "below" -> f_pred P2_below
       | _ -> raise (Unknown_primitive func_name)
     in
     begin match try_lookup st func_name with
@@ -207,24 +211,32 @@ let rec translate_expr st = function
     end
   | Expr_unary (op, e) ->
     let e', w = translate_expr st e in
-    E_prim (prim_of_unary_op (op, e')), width_of_unary_op (op, w)
+    E_prim1 (prim_of_unary_op op, e'), width_of_unary_op (op, w)
   | Expr_binary (op, e1, e2) ->
     let e1', w1 = translate_expr st e1 in
     let e2', w2 = translate_expr st e2 in
-    E_prim (prim_of_binary_op (op, e1', e2')), width_of_binary_op (op, w1, w2)
+    let e' = match op with
+      | Concat -> E_primn (Pn_concat, [e1';e2'])
+      | Add -> E_primn (Pn_add, [e1';e2'])
+      | Sub -> E_prim2 (P2_sub, e1', e2')
+      | Eq -> E_prim2 (P2_eq, e1', e2')
+      | And -> E_primn (Pn_and, [e1';e2'])
+      | Xor -> E_primn (Pn_xor, [e1';e2'])
+      | Or -> E_primn (Pn_or, [e1';e2'])
+    in
+    e', width_of_binary_op (op, w1, w2)
   | Expr_undef c_width ->
     let width = translate_cexpr st c_width in
-    E_prim (P_undef width), width
+    E_nondet (width, 0), width (* TODO: nondet id *)
   | Expr_repeat (data, c_n) ->
     let data', w = translate_expr st data in
     let n = translate_cexpr st c_n in
-    E_prim (P_repeat (data', n)), w*n
+    E_repeat (data', n), w*n
   | Expr_load (size, addr) ->
     let size' = translate_cexpr st size in
     let addr', w = translate_expr st addr in
-    E_load (size', addr'), w
+    E_load (size', addr', E_var "M"), w
 
-(* TODO: comment *)
 let translate_stmt st_ref env stmt =
   let st = !st_ref in
   let do_assign loc f w =
@@ -304,13 +316,13 @@ let translate_stmt st_ref env stmt =
     let addr', _ = translate_expr st addr in
     let data', data_width = translate_expr st data in
     check_width (size*8) data_width;
-    append_stmt env (S_store (size, addr', data'))
+    append_stmt env (S_store (size, addr', data', "M", E_var "M"))
   | Stmt_jump addr -> assert false
 
 let translate_proc st proc =
   (* construct static environment to translate function body in *)
   let proc_st = ref st in
-  let proc_env = new_env () in
+  let proc_env = new_env (Hashtbl.create 0) in
   proc.ap_params |> List.iter
     begin fun (param_name, c_param_width) ->
       let param_width = translate_cexpr !proc_st c_param_width in
@@ -381,6 +393,6 @@ let pp_value f = function
 
 let pp_symtab f st =
   fprintf f "@[<v>";
-  st |> StringMap.iter (fun key data ->
+  st |> BatMap.String.iter (fun key data ->
       fprintf f "%s: %a@ " key pp_value data);
   fprintf f "@]"

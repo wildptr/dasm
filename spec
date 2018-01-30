@@ -1,23 +1,62 @@
-template proc adc<N, S, C>(a:N, b:N):N
+//template proc adc<N, S, C>(a:N, b:N):N
+//{
+//	let sum1 = add_with_carry(a, b^sign_extend(S,N), C^S);
+//	let cout = sum1[N];
+//	let out = sum1[N-1:0];
+//	CF = cout^S;
+//	PF = ~^out[7:0];
+//	AF = a[4] ^ b[4] ^ out[4] ^ S;
+//	ZF = out == {0:N};
+//	SF = out[N-1];
+//	OF = cout ^ out[N-1] ^ a[N-1] ^ b[N-1];
+//	output out;
+//}
+
+template proc add<N>(a:N, b:N):N
 {
-	let sum1 = add_with_carry(a, b, C^S);
-	let cout = sum1[N];
-	let out = sum1[N-1:0];
-	CF = cout^S;
-	PF = ~^out[7:0];
-	AF = a[4] ^ b[4] ^ out[4] ^ S;
+	CF = add_with_carry(a, b, '0')[N];
+	ZF = a+b == {0:N};
+	SF = less(a+b, {0:N});
+	OF = CF ^ SF ^ a[N-1] ^ b[N-1];
+	output a+b;
+}
+
+template proc adc<N>(a:N, b:N):N
+{
+	//let out = a + b + zero_extend(CF, N);
+	let out = a + b + {0:N-1}.CF;
+	CF = add_with_carry(a, b, CF)[N];
 	ZF = out == {0:N};
-	SF = out[N-1];
-	OF = cout ^ out[N-1] ^ a[N-1] ^ b[N-1];
+	SF = less(out, {0:N});
+	OF = CF ^ SF ^ a[N-1] ^ b[N-1];
 	output out;
+}
+
+template proc sub<N>(a:N, b:N):N
+{
+	CF = below(a, b);
+	ZF = a-b == {0:N};
+	SF = less(a-b, {0:N});
+	OF = SF ^ less(a, b);
+	output a-b;
+}
+
+template proc sbb<N>(a:N, b:N)
+{
+	//let out = a - b - zero_extend(CF, N);
+	let out = a - b - {0:N-1}.CF;
+	CF = ~add_with_carry(a, ~b, ~CF)[N];
+	ZF = out == {0:N};
+	SF = less(out, {0:N});
+	OF = CF ^ SF ^ a[N-1] ^ b[N-1];
 }
 
 template proc log_op<N, OP>(a:N, b:N):N
 {
 	let out = OP(a, b);
 	CF = '0';
-	PF = ~^out[7:0];
-	AF = undefined(1);
+	//PF = ~^out[7:0];
+	//AF = undefined(1);
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = '0';
@@ -30,8 +69,8 @@ template proc shl<N, M>(x:N, n:M):N
 	let out = out1[N-1:0];
 	CF = out1[N];
 	// TODO: the following is incorrect; see 325383.pdf p.1236
-	PF = ~^out[7:0];
-	AF = undefined(1);
+	//PF = ~^out[7:0];
+	//AF = undefined(1);
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = undefined(1);
@@ -43,8 +82,8 @@ template proc shr<N, M>(x:N, n:M):N
 	let out1 = log_shift_right(x.CF, n);
 	let out = out1[N:1];
 	CF = out[0];
-	PF = ~^out[7:0];
-	AF = undefined(1);
+	//PF = ~^out[7:0];
+	//AF = undefined(1);
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = undefined(1);
@@ -56,29 +95,29 @@ template proc sar<N, M>(x:N, n:M):N
 	let out1 = ari_shift_right(x.CF, n);
 	let out = out1[N:1];
 	CF = out[0];
-	PF = ~^out[7:0];
-	AF = undefined(1);
+	//PF = ~^out[7:0];
+	//AF = undefined(1);
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = undefined(1);
 	output out;
 }
 
-proc add8  = adc< 8, '0', '0'>;
-proc add16 = adc<16, '0', '0'>;
-proc add32 = adc<32, '0', '0'>;
+proc add8  = add< 8>;
+proc add16 = add<16>;
+proc add32 = add<32>;
 
-proc adc8  = adc< 8, '0', CF>;
-proc adc16 = adc<16, '0', CF>;
-proc adc32 = adc<32, '0', CF>;
+proc adc8  = adc< 8>;
+proc adc16 = adc<16>;
+proc adc32 = adc<32>;
 
-proc sub8  = adc< 8, '1', '0'>;
-proc sub16 = adc<16, '1', '0'>;
-proc sub32 = adc<32, '1', '0'>;
+proc sub8  = sub< 8>;
+proc sub16 = sub<16>;
+proc sub32 = sub<32>;
 
-proc sbb8  = adc< 8, '1', CF>;
-proc sbb16 = adc<16, '1', CF>;
-proc sbb32 = adc<32, '1', CF>;
+proc sbb8  = sbb< 8>;
+proc sbb16 = sbb<16>;
+proc sbb32 = sbb<32>;
 
 proc or8  = log_op< 8, or>;
 proc or16 = log_op<16, or>;
@@ -126,8 +165,8 @@ template proc inc_dec<N, S>(in:N)
 {
 	let sum1 = add_with_carry(in, repeat(S, N), ~S);
 	let out = sum1[N-1:0];
-	PF = ~^out[7:0];
-	AF = in[4] ^ out[4];
+	//PF = ~^out[7:0];
+	//AF = in[4] ^ out[4];
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = sum1[N] ^ out[N-1] ^ in[N-1];

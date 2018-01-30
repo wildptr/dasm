@@ -8,6 +8,8 @@ type reg =
   | R_fpu of int | R_xmm of int
   | R_CF | R_PF | R_AF | R_ZF | R_SF | R_DF | R_OF
 
+(* TODO: clean up utility functions related to register names *)
+
 let string_of_reg = function
   | R_AL -> "al"
   | R_CL -> "cl"
@@ -29,10 +31,17 @@ let string_of_reg = function
   | R_ECX -> "ecx"
   | R_EDX -> "edx"
   | R_EBX -> "ebx"
-  | R_ESI -> "esi"
-  | R_EDI -> "edi"
   | R_ESP -> "esp"
   | R_EBP -> "ebp"
+  | R_ESI -> "esi"
+  | R_EDI -> "edi"
+  | R_CF -> "cf"
+  | R_PF -> "pf"
+  | R_AF -> "af"
+  | R_ZF -> "zf"
+  | R_SF -> "sf"
+  | R_DF -> "df"
+  | R_OF -> "of"
   | R_ES -> "es"
   | R_CS -> "cs"
   | R_SS -> "ss"
@@ -41,7 +50,9 @@ let string_of_reg = function
   | R_GS -> "gs"
   | R_fpu i -> "st" ^ (string_of_int i)
   | R_xmm i -> "xmm" ^ (string_of_int i)
-  | _ -> failwith "string_of_reg: not implemented"
+  (*| _ -> failwith "string_of_reg: not implemented"*)
+
+let name_of_reg r = String.uppercase_ascii (string_of_reg r)
 
 let size_of_reg = function
   | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH -> 8

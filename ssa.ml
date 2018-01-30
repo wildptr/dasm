@@ -1,7 +1,17 @@
 open Cfg
 open List
 open Semant
-open Util
+
+module S = BatSet.String
+
+let get_rmid name =
+  if name = "M" then
+    Inst.number_of_registers
+  else
+    Inst.index_of_reg (Inst.lookup_reg name)
+
+let get_rm_name rmid =
+  if rmid = Inst.number_of_registers then "M" else Inst.reg_name_table.(rmid)
 
 (* adapted from Modern Compiler Implementation in C, pp. 448-449 *)
 let compute_idom cfg =
@@ -61,76 +71,24 @@ let compute_idom cfg =
     let n = vertex.(i) in
     if samedom.(n) >= 0 then idom.(n) <- idom.(samedom.(n))
   done;
+  (*let open Format in
+  for i=1 to size-1 do
+    fprintf err_formatter "%d -> %d@." idom.(i) i
+  done;*)
   idom
-
-let all_registers = range 0 (Inst.number_of_registers-1)
-
-let register_modified_by_stmt = function
-  | S_set (name, _) ->
-    begin match name.[0] with
-      | 'A'..'Z' -> [Inst.index_of_reg (Inst.lookup_reg name)]
-      | _ -> []
-    end
-  | S_jump (_, true) -> all_registers
-  | _ -> []
-
-let rec registers_used_by_expr = function
-  | E_literal _ -> []
-  | E_var name ->
-    begin match name.[0] with
-      | 'A'..'Z' -> [Inst.index_of_reg (Inst.lookup_reg name)]
-      | _ -> []
-    end
-  | E_part (e, _, _) -> registers_used_by_expr e
-  | E_prim p ->
-    begin match p with
-      | P_not e -> registers_used_by_expr e
-      | P_concat es -> union_set (map registers_used_by_expr es)
-      | P_add es -> union_set (map registers_used_by_expr es)
-      | P_sub (e1, e2) ->
-        union (registers_used_by_expr e1) (registers_used_by_expr e2)
-      | P_eq (e1, e2) ->
-        union (registers_used_by_expr e1) (registers_used_by_expr e2)
-      | P_and es -> union_set (map registers_used_by_expr es)
-      | P_xor es -> union_set (map registers_used_by_expr es)
-      | P_or es -> union_set (map registers_used_by_expr es)
-      | P_shiftleft (e1, e2) ->
-        union (registers_used_by_expr e1) (registers_used_by_expr e2)
-      | P_logshiftright (e1, e2) ->
-        union (registers_used_by_expr e1) (registers_used_by_expr e2)
-      | P_arishiftright (e1, e2) ->
-        union (registers_used_by_expr e1) (registers_used_by_expr e2)
-      | P_undef _ -> []
-      | P_repeat (e, _) -> registers_used_by_expr e
-      | P_addwithcarry (e1, e2, e3) ->
-        union_set (map registers_used_by_expr [e1;e2;e3])
-      | P_reduce_and e -> registers_used_by_expr e
-      | P_reduce_xor e -> registers_used_by_expr e
-      | P_reduce_or e -> registers_used_by_expr e
-      | P_signextend (e, _) -> registers_used_by_expr e
-      | P_zeroextend (e, _) -> registers_used_by_expr e
-    end
-  | E_load (_, e) -> registers_used_by_expr e
-
-(* return type is int list *)
-let registers_used_by_stmt = function
-  | S_set (_, e) -> registers_used_by_expr e
-  | S_store (_, addr, data) ->
-    union (registers_used_by_expr addr) (registers_used_by_expr data)
-  | S_jump (e, u) ->
-    if u then all_registers else registers_used_by_expr e
-  | S_br (cond, e, u) ->
-    if u then all_registers
-    else union (registers_used_by_expr cond) (registers_used_by_expr e)
-  | _ -> assert false
 
 let compute_defs cfg =
   let size = Array.length cfg.node in
-  let defs = Array.make Inst.number_of_registers [] in
+  let defs = Array.make (Inst.number_of_registers+1) BatSet.Int.empty in
   for i=0 to size-1 do
     cfg.node.(i).stmts |> iter (fun stmt ->
-        register_modified_by_stmt stmt |> iter (fun regid ->
-            defs.(regid) <- union defs.(regid) [i]));
+        Dataflow.defs' stmt |> S.iter (fun name ->
+          begin match name.[0] with
+            | 'A'..'Z' ->
+              let rmid = get_rmid name in
+              defs.(rmid) <- BatSet.Int.add i defs.(rmid)
+            | _ -> ()
+          end))
   done;
   defs
 
@@ -162,91 +120,97 @@ let convert_to_ssa cfg =
   in
   compute_df 0;
   let defs = compute_defs cfg in
-  for regid = 0 to Inst.number_of_registers-1 do
+  for rmid = 0 to Inst.number_of_registers do
     let phi_inserted_at = Array.make size false in
     let worklist = Queue.create () in
-    defs.(regid) |> iter (fun defsite -> Queue.add defsite worklist);
+    defs.(rmid) |> BatSet.Int.iter (fun defsite -> Queue.add defsite worklist);
     while not (Queue.is_empty worklist) do
       let n = Queue.pop worklist in
       df.(n) |> iter (fun y ->
           if not phi_inserted_at.(y) then begin
             let n_pred = length cfg.pred.(y) in
-            let phi = S_phi (Inst.reg_name_table.(regid), Array.make n_pred Inst.reg_name_table.(regid)) in
+            let phi =
+              S_phi (get_rm_name rmid, Array.make n_pred (E_var (get_rm_name rmid)))
+            in
             cfg.node.(y).stmts <- phi :: cfg.node.(y).stmts;
             phi_inserted_at.(y) <- true;
-            if not (mem y defs.(regid)) then Queue.push y worklist
+            if not (BatSet.Int.mem y defs.(rmid)) then Queue.push y worklist
           end)
     done
   done;
   (* rename variables *)
-  let count = Array.make Inst.number_of_registers 0 in
-  let stack = Array.make Inst.number_of_registers [0] in
-  let rename_variable name =
+  let count = Array.make (Inst.number_of_registers+1) 0 in
+  let stack = Array.make (Inst.number_of_registers+1) [0] in
+  let rename_rhs name =
     match name.[0] with
     | 'A'..'Z' ->
-      let regid = Inst.index_of_reg (Inst.lookup_reg name) in
-      let i = hd stack.(regid) in
+      let rmid = get_rmid name in
+      let i = hd stack.(rmid) in
       name ^ "_" ^ string_of_int i
     | _ -> name
   in
   let rec rename n =
-    let n_def = Array.copy count in
-    cfg.node.(n).stmts <-
-      cfg.node.(n).stmts |> map (function
+    (*Format.(fprintf err_formatter "[%d]@." n);*)
+    let rename_lhs name =
+      match name.[0] with
+      | 'A'..'Z' ->
+        let rmid = get_rmid name in
+        let i = count.(rmid) + 1 in
+        count.(rmid) <- i;
+        stack.(rmid) <- i :: stack.(rmid);
+        name ^ "_" ^ string_of_int i
+      | _ -> name
+    in
+    let new_stmts = ref [] in
+    cfg.node.(n).stmts |> iter (fun stmt ->
+        let new_stmt =
+          match stmt with
           | S_set (name, e) ->
-            let e' = rename_variables rename_variable e in
-            let name' =
-              match name.[0] with
-              | 'A'..'Z' ->
-                let regid = Inst.index_of_reg (Inst.lookup_reg name) in
-                let i = count.(regid) + 1 in
-                count.(regid) <- i;
-                stack.(regid) <- i :: stack.(regid);
-                n_def.(regid) <- n_def.(regid) + 1;
-                name ^ "_" ^ string_of_int i
-              | _ -> name
-            in
+            let e' = rename_variables rename_rhs e in
+            let name' = rename_lhs name in
             S_set (name', e')
-          | S_store (size, addr, data) ->
-            let addr' = rename_variables rename_variable addr in
-            let data' = rename_variables rename_variable data in
-            S_store (size, addr', data')
-          | S_jump (dst, u) -> S_jump (rename_variables rename_variable dst, u)
-          | S_br (cond, dst, u) ->
-            let cond' = rename_variables rename_variable cond in
-            let dst' = rename_variables rename_variable dst in
-            S_br (cond', dst', u)
-          | S_phi (lhs, rhs) ->
-            let lhs' =
-              match lhs.[0] with
-              | 'A'..'Z' ->
-                let regid = Inst.index_of_reg (Inst.lookup_reg lhs) in
-                let i = count.(regid) + 1 in
-                count.(regid) <- i;
-                stack.(regid) <- i :: stack.(regid);
-                (*n_def.(regid) <- n_def.(regid) + 1;*)
-                lhs ^ "_" ^ string_of_int i
-              | _ -> lhs
-            in
-            S_phi (lhs', rhs)
-          | _ -> assert false);
-    for i=0 to Inst.number_of_registers-1 do
-      n_def.(i) <- count.(i) - n_def.(i)
-    done;
+          | S_store (size, addr, data, m1, m0) ->
+            let addr' = rename_variables rename_rhs addr in
+            let data' = rename_variables rename_rhs data in
+            let m0' = rename_variables rename_rhs m0 in
+            let m1' = rename_lhs m1 in
+            S_store (size, addr', data', m1', m0')
+          | S_jump (c, dst, d, u) ->
+            let c' = BatOption.map (rename_variables rename_rhs) c in
+            let dst' = rename_variables rename_rhs dst in
+            let u' = map (rename_variables rename_rhs) u in
+            let d' = map rename_lhs d in
+            S_jump (c', dst', d', u')
+          | S_phi (lhs, rhs) -> S_phi (rename_lhs lhs, rhs)
+          | _ -> assert false
+        in
+        (*Format.(fprintf err_formatter "%a -> %a@." pp_stmt stmt pp_stmt new_stmt);*)
+        new_stmts := new_stmt :: !new_stmts);
+    let old_stmts = cfg.node.(n).stmts in
+    cfg.node.(n).stmts <- rev !new_stmts;
     (* rename variables in RHS of phi-functions *)
     cfg.succ.(n) |> iter (fun y ->
         (* n is the j-th predecessor of y *)
-        let j = index n cfg.pred.(y) in
+        let j =
+          match BatList.index_of n cfg.pred.(y) with
+          | Some i -> i
+          | None -> assert false
+        in
         begin
           try
             cfg.node.(y).stmts |> iter (function
-                | S_phi (lhs, rhs) -> rhs.(j) <- rename_variable rhs.(j)
+                | S_phi (_, rhs) -> rhs.(j) <- rename_variables rename_rhs rhs.(j)
                 | _ -> raise Break);
           with Break -> ()
         end);
     children.(n) |> iter rename;
-    for i=0 to Inst.number_of_registers-1 do
-      stack.(i) <- drop stack.(i) n_def.(i)
-    done
+    old_stmts |> iter (fun stmt ->
+        Dataflow.defs' stmt |> S.iter (fun name ->
+          begin match name.[0] with
+            | 'A'..'Z' ->
+              let rmid = get_rmid name in
+              stack.(rmid) <- List.tl stack.(rmid)
+            | _ -> ()
+          end))
   in
   rename 0

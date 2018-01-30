@@ -1,11 +1,15 @@
-type basic_block = {
+type 'a basic_block = {
   start : int;
   stop : int;
-  mutable stmts : Semant.stmt list;
+  mutable stmts : 'a list;
 }
 
-type cfg = {
-  node : basic_block array;
+type edge_attr = Edge_normal | Edge_taken | Edge_not_taken
+type edge = int * int * edge_attr
+
+type 'a cfg = {
+  node : 'a basic_block array;
   succ : int list array;
   pred : int list array;
+  edges : edge list;
 }
