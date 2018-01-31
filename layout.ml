@@ -12,15 +12,13 @@ type node = {
   mutable width : int;
   mutable height : int;
   mutable text : string list;
-  is_virtual : bool;
-  color : color;
 }
 
 type segment = (int * int) list * color
 
 type layout = {
   nodes : node array;
-  connections : segment list array;
+  connections : segment list;
   width : int;
   height : int;
 }
@@ -31,6 +29,13 @@ let node_width = 256
 let margin = 4
 let text_height = 16
 let text_height_f = float_of_int text_height
+
+type vpath_info = {
+  col : int;
+  top : int; (* node id *)
+  bot : int; (* node id *)
+  color : color;
+}
 
 let layout_cfg cfg =
   let n = Array.length cfg.node in
@@ -85,9 +90,8 @@ let layout_cfg cfg =
     node_rank'
   in
   let next_vid = ref n in
-  let vpath_cols = ref [] in
+  let vpath_info = ref [] in
   let vnode_vpath = Array.make nvirt 0 in
-  let vnode_color = Array.make nvirt Black in
   cfg.edges |> List.iter begin fun (src, dst, attr) ->
     let sr = node_rank.(src) in
     let dr = node_rank.(dst) in
@@ -98,11 +102,7 @@ let layout_cfg cfg =
         List.range sr `Downto dr
     in
     let vpath = !nvpath in
-    if vnode_ranks <> [] then begin
-      incr nvpath;
-      let vpath_col = min node_col.(src) node_col.(dst) in
-      vpath_cols := vpath_col :: !vpath_cols
-    end;
+    let first_vnode = !next_vid in
     let edge_color =
       let open Control_flow in
       match attr with
@@ -115,13 +115,23 @@ let layout_cfg cfg =
       vnode_ranks |> List.map begin fun vr ->
         let vid = !next_vid in
         incr next_vid;
-        (*             all_ranks.(vr) <- vid :: all_ranks.(vr); *)
         node_rank.(vid) <- vr;
         vnode_vpath.(vid-n) <- vpath;
-        vnode_color.(vid-n) <- edge_color;
         vid
       end
     in
+    let last_vnode = !next_vid - 1 in
+    if vnode_ranks <> [] then begin
+      incr nvpath;
+      let col = min node_col.(src) node_col.(dst) in
+      let top, bot =
+        if dr > sr then (* forward *)
+          first_vnode, last_vnode
+        else (* backward *)
+          last_vnode, first_vnode
+      in
+      vpath_info := { col; top; bot; color = edge_color } :: !vpath_info
+    end;
     (* add connections *)
     List.combine (src :: vnodes) (vnodes @ [dst]) |> List.iter begin fun (f,t) ->
       let fr = node_rank.(f) in
@@ -141,12 +151,12 @@ let layout_cfg cfg =
     end;
   end;
 
-  let vpath_col = Array.of_list (List.rev !vpath_cols) in
+  let vpath_info = Array.of_list (List.rev !vpath_info) in
   let nvpath = !nvpath in
   (* offset is relative to x of node at specified column *)
   let vpath_x_offset = Array.make nvpath 0 in
   let col_nvpath = Array.make ncol 0 in
-  vpath_col |> Array.iteri begin fun vpath col ->
+  vpath_info |> Array.iteri begin fun vpath { col; _ } ->
     let nvp = col_nvpath.(col) in
     col_nvpath.(col) <- nvp + 1;
     vpath_x_offset.(vpath) <- -8*(nvp+1)
@@ -168,9 +178,7 @@ let layout_cfg cfg =
       in
       let nline = List.length text in
       let height = text_height * nline + margin*2 in
-      let color = if i < n then Black else vnode_color.(i-n) in
-      { x = 0; y = 0; width = if i>=n then 0 else node_width; height;
-        text; is_virtual = i>=n; color }
+      { x = 0; y = 0; width = if i>=n then 0 else node_width; height; text }
     end
   in
 
@@ -190,7 +198,7 @@ let layout_cfg cfg =
   (* determine x for each virtual node *)
   for v=0 to nvirt-1 do
     let vpath = vnode_vpath.(v) in
-    let col = vpath_col.(vpath) in
+    let col = vpath_info.(vpath).col in
     let offset = vpath_x_offset.(vpath) in
     nodes.(n+v).x <- col_x.(col) + offset
   done;
@@ -242,7 +250,7 @@ let layout_cfg cfg =
   let x_start_bot =
     Array.init n' (fun i -> nodes.(i).x + nodes.(i).width / 2 - 4*(deg_bot.(i)-1))
   in
-  let y_of_rank = Array.make nrank 0 in
+  let rank_y = Array.make nrank 0 in
   let rank_height =
     Array.init nrank begin fun rank ->
       all_ranks.(rank) |> List.map (fun i -> nodes.(i).height) |> List.max
@@ -253,10 +261,12 @@ let layout_cfg cfg =
     let rank = node_rank.(i) in
     nodes.(i).height <- rank_height.(rank)
   done;
-  let connections =
-    con' |> Array.mapi begin fun r0 c ->
-      let nc = List.length c in
-      c |> List.mapi begin fun ci ((stb, si, sj), (dtb, di, dj), color) ->
+
+  let con_rev = ref [] in
+  con' |> Array.iteri begin fun r0 c ->
+    let nc = List.length c in
+    c |> List.iteri begin fun ci ((stb, si, sj), (dtb, di, dj), color) ->
+      if not (si >= n && di >= n) then begin
         let sx =
           match stb with
           | Top -> x_start_top.(si) + 8*sj
@@ -267,9 +277,9 @@ let layout_cfg cfg =
           | Top -> x_start_top.(di) + 8*dj
           | Bot -> x_start_bot.(di) + 8*dj
         in
-        let bot_y = y_of_rank.(r0) + rank_height.(r0) in
+        let bot_y = rank_y.(r0) + rank_height.(r0) in
         let top_y = bot_y + 8*(nc+1) in
-        y_of_rank.(r0+1) <- top_y;
+        rank_y.(r0+1) <- top_y;
         let sy =
           match stb with
           | Top -> top_y
@@ -281,27 +291,37 @@ let layout_cfg cfg =
           | Bot -> bot_y
         in
         if sx = dx then
-          [sx,sy;dx,dy], color
+          con_rev := ([sx,sy;dx,dy], color) :: !con_rev
         else
           let lane_y = bot_y + (1+ci)*8 in
-          [sx,sy;sx,lane_y;dx,lane_y;dx,dy], color
+          con_rev := ([sx,sy;sx,lane_y;dx,lane_y;dx,dy], color) :: !con_rev
       end
     end
-  in
+  end;
 
   (* determine y for each node *)
   for i=0 to n'-1 do
     let r = node_rank.(i) in
-    nodes.(i).y <- y_of_rank.(r)
+    nodes.(i).y <- rank_y.(r)
   done;
+
+  vpath_info |> Array.iter begin fun { top; bot; color; _ } ->
+    let x = nodes.(top).x in
+    let r = node_rank.(bot) in
+    let y0 = nodes.(top).y in
+    let y1 = nodes.(bot).y + rank_height.(r) in
+    con_rev := ([x,y0;x,y1], color) :: !con_rev
+  end;
 
   (* compute width & height of whole layout *)
   let width = ref 0 in
   let height = ref 0 in
   for r=0 to nrank-1 do
-    all_ranks.(r) |> List.iteri (fun x i ->
-        width := max !width (nodes.(i).x + nodes.(i).width);
-        height := max !height (nodes.(i).y + nodes.(i).height))
+    all_ranks.(r) |> List.iteri begin fun x i ->
+      width := max !width (nodes.(i).x + nodes.(i).width);
+      height := max !height (nodes.(i).y + nodes.(i).height)
+    end
   done;
 
-  { nodes; connections; width = !width; height = !height }
+  let nodes = Array.sub nodes 0 n in
+  { nodes; connections = !con_rev; width = !width; height = !height }
