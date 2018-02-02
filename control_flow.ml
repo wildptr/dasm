@@ -1,3 +1,4 @@
+open Batteries
 open Cfg
 open Inst
 
@@ -156,3 +157,202 @@ let build_cfg code init_pc init_offset =
     pred.(i) <- List.rev pred.(i)
   done;
   { node = Array.of_list basic_blocks; succ; pred; edges }
+
+(* adapted from Modern Compiler Implementation in C, pp. 448-449 *)
+let compute_idom succ pred root =
+  let n = Array.length succ in
+  let bucket = Array.make n [] in
+  let dfnum = Array.make n 0 in
+  let semi = Array.make n (-1) in
+  let ancestor = Array.make n (-1) in
+  let idom = Array.make n (-1) in
+  let samedom = Array.make n (-1) in
+  let vertex = Array.make n 0 in
+  let parent = Array.make n (-1) in
+  let best = Array.make n 0 in
+  let rec ancestor_with_lowest_semi v =
+    let a = ancestor.(v) in
+    if ancestor.(a) >= 0 then begin
+      let b = ancestor_with_lowest_semi a in
+      ancestor.(v) <- ancestor.(a);
+      if dfnum.(semi.(b)) < dfnum.(semi.(best.(v))) then best.(v) <- b;
+    end;
+    best.(v)
+  in
+  let link p i =
+    ancestor.(i) <- p;
+    best.(i) <- i
+  in
+  let next_dfnum = ref 0 in
+  let rec dfs p i =
+    if dfnum.(i) = 0 then begin
+      dfnum.(i) <- !next_dfnum;
+      vertex.(!next_dfnum) <- i;
+      parent.(i) <- p;
+      incr next_dfnum;
+      List.iter (fun w -> dfs i w) succ.(i)
+    end
+  in
+  dfs (-1) root;
+  let n' = !next_dfnum - 1 in
+  for dfn = n' downto 1 do
+    let i = vertex.(dfn) in
+    let p = parent.(i) in
+    (* semi-dominator of i *)
+    let s =
+      pred.(i) |> List.map begin fun v ->
+        if dfnum.(v) <= dfnum.(i) then v
+        else semi.(ancestor_with_lowest_semi v)
+      end |> List.fold_left min p
+    in
+    semi.(i) <- s;
+    bucket.(s) <- i :: bucket.(s);
+    link p i;
+    bucket.(p) |> List.iter begin fun v ->
+      let y = ancestor_with_lowest_semi v in
+      if semi.(y) = semi.(v) then idom.(v) <- p else samedom.(v) <- y
+    end;
+    bucket.(p) <- []
+  done;
+  for dfn = 1 to n' do
+    let i = vertex.(dfn) in
+    if samedom.(i) >= 0 then idom.(i) <- idom.(samedom.(i))
+  done;
+  idom
+
+type node =
+  | Absent
+  | BB of int
+  | Generic of node array * edge list
+  | If of node * node * node
+  | If_else of node * node * node * node option
+
+exception Break
+
+let fold_cfg cfg =
+  let n = Array.length cfg.node in
+  let rec fold_cfg_rec nodes node edges =
+    let succ = Array.make n [] in
+    let pred = Array.make n [] in
+    edges |> List.iter begin fun (src, dst, _) ->
+      succ.(src) <- dst :: succ.(src);
+      pred.(dst) <- src :: pred.(dst)
+    end;
+    Format.eprintf "fold_cfg_rec";
+    nodes |> List.iter (Format.eprintf " %d");
+    Format.eprintf "@.";
+    let parent = compute_idom succ pred (List.hd nodes) in
+    let children = Array.make n [] in
+    parent |> Array.iteri begin fun i p ->
+      if p >= 0 then children.(p) <- i :: children.(p)
+    end;
+    let module S = BatSet.Int in
+    let rec nodes_in i =
+      children.(i) |> List.map nodes_in |> List.fold_left S.union S.empty |> S.add i
+    in
+    let subgraph p =
+      let nodes' = nodes |> List.filter p in
+      let node' = Array.init n (fun i -> if p i then node.(i) else Absent) in
+      let edges' =
+        edges |> List.filter (fun (src, dst, _) -> p src && p dst)
+      in
+      nodes', node', edges'
+    in
+    let recur folded new_node entry exit =
+      let nodes' =
+        nodes |> List.filter (fun i -> not (S.mem i folded) && i <> exit)
+      in
+      let node' =
+        Array.init n begin fun i ->
+          if i = entry then new_node
+          else if i = exit || S.mem i folded then Absent
+          else node.(i)
+        end
+      in
+      let edges' =
+        edges |> List.filter_map begin fun (src, dst, attr) ->
+          if S.mem src folded || src = entry || S.mem dst folded || dst = exit then None
+          else if src = exit then Some (entry, dst, attr)
+          else Some (src, dst, attr)
+        end
+      in
+      fold_cfg_rec nodes' node' edges'
+    in
+    let rec loop = function
+      | [] ->
+        let tbl = Array.make n 0 in
+        nodes |> List.iteri (fun i' i -> tbl.(i) <- i');
+        let node' = node |> Array.filter (fun x -> x <> Absent) in
+        let edges' =
+          edges |> List.map begin fun (src, dst, attr) ->
+            tbl.(src), tbl.(dst), attr
+          end
+        in
+        Format.eprintf "Generic";
+        nodes |> List.iter (Format.eprintf " %d");
+        Format.eprintf "@.";
+        Generic (node', edges')
+      | i :: rest ->
+        begin match succ.(i) with
+(*
+          | [j] ->
+            if i <> j && pred.(j) = [i] then begin
+              let new_node = Seq (node.(i), node.(j)) in
+              recur S.empty new_node i j
+            end else loop rest
+*)
+          | [j;k] ->
+            let try_fold_if br exit =
+              Format.eprintf "IF candidate: (%d,%d,%d)@." i br exit;
+              let nodes_in_br = nodes_in br in
+              try
+                let br_exits = ref [] in
+                nodes_in_br |> S.iter begin fun l ->
+                  succ.(l) |> List.iter begin fun m ->
+                    if m <> exit && not (S.mem m nodes_in_br) then begin
+                      Format.eprintf "%d -> %d dst out of branch@." l m;
+                      raise Break;
+                    end;
+                    if m = exit then br_exits := l::!br_exits
+                  end
+                end;
+                let br_exits = !br_exits in
+                let nexit = List.length br_exits in
+                if List.length pred.(exit) - 1 > nexit then begin
+                  Format.eprintf "exit has too many preds@.";
+                  raise Break;
+                end;
+                if nexit > 1 then begin
+                  Format.eprintf "nexit = %d > 1@." nexit;
+                  raise Break (* TODO *)
+                end;
+                let br_exit = List.hd br_exits in
+                let nodes_br, node_br, edges_br = subgraph (fun l -> S.mem l nodes_in_br) in
+                Format.eprintf "If";
+                nodes_br |> List.iter (Format.eprintf " %d");
+                Format.eprintf "@.";
+                let br_node = fold_cfg_rec nodes_br node_br edges_br in
+                let new_node = If (node.(i), br_node, node.(exit)) in
+                recur nodes_in_br new_node i exit
+              with Break -> loop rest
+            in
+            if i <> j && i <> k then
+              begin match List.length pred.(j), List.length pred.(k) with
+                | 1, 1 ->
+                  (* if-else *)
+                  loop rest
+                | 1, _ ->
+                  (* k is exit *)
+                  try_fold_if j k
+                | _, 1 ->
+                  (* j is exit *)
+                  try_fold_if k j
+                | _, _ -> loop rest
+              end
+            else loop rest
+          | _ -> loop rest
+        end
+    in
+    loop nodes
+  in
+  fold_cfg_rec (List.range 0 `To (n-1)) (Array.init n (fun i -> BB i)) cfg.edges

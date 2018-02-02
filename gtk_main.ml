@@ -5,56 +5,65 @@ open GMain
 open GdkKeysyms
 open Cairo
 
-type shape =
-  | Node of node
-  | Segment of segment
-
-type drawing_object = {
-  x : int;
-  y : int;
-  width : int;
-  height : int;
-  shape : shape;
-}
+type rect = { x : int; y : int; width : int; height : int }
 
 let layout_margin = 32
 let layout_margin_f = float_of_int layout_margin
 
-let intersects (x1, y1, w1, h1) (x2, y2, w2, h2) =
+let intersects {x=x1;y=y1;width=w1;height=h1} {x=x2;y=y2;width=w2;height=h2} =
   not (x1+w1 <= x2 || x2+w2 <= x1 || y1+h1 <= y2 || y2+h2 <= y1)
 
-let draw_object cr obj =
-  match obj.shape with
-  | Node node ->
-    let nx = float_of_int (node.x) in
-    let ny = float_of_int (node.y) in
-    set_source_rgb cr 0.0 0.0 0.0;
+let rec draw_object cr x y (node:layout_node) =
+  let fx = float_of_int (x) in
+  let fy = float_of_int (y) in
+  match node.shape with
+  | Layout_box box ->
+    set_source_rgb cr 1.0 1.0 1.0;
     (* draw box *)
-    rectangle cr nx ny (float_of_int node.width) (float_of_int node.height);
-    stroke cr;
+    rectangle cr (float_of_int (x + node.left)) fy (float_of_int (node.right - node.left)) (float_of_int node.height);
+    fill cr;
     (* draw text *)
-    let tx = float_of_int (node.x + margin) in
-    let ty = ref @@ float_of_int (node.y + margin) in
-    node.text |> List.iter begin fun text ->
-      ty := !ty +. text_height_f;
+    set_source_rgb cr 0.0 0.0 0.0;
+    let fe = font_extents cr in
+    let tx = float_of_int (x + node.left) in
+    let ty = ref (fy +. fe.ascent) in
+    box.text |> List.iter begin fun text ->
       move_to cr tx !ty;
-      show_text cr text
+      show_text cr text;
+      ty := !ty +. fe.baseline
     end
-  | Segment (path, color) ->
-    let set_color cr = function
-      | Black -> set_source_rgb cr 0.0 0.0 0.0
-      | Red -> set_source_rgb cr 0.75 0.0 0.0
-      | Green -> set_source_rgb cr 0.0 0.75 0.0
-    in
-    match path with
-    | [] -> ()
-    | (x,y) :: tl ->
-      set_color cr color;
-      move_to cr (float_of_int x) (float_of_int y);
-      tl |> List.iter (fun (x,y) -> line_to cr (float_of_int x) (float_of_int y));
-      stroke cr
+  | Layout_composite com ->
+    save cr;
+    translate cr fx fy;
+    com.nodes |> Array.iter (fun (x,y,n) -> draw_object cr x y n);
+    com.connections |> List.iter begin fun (path, color) ->
+      let set_color cr = function
+        | Black -> set_source_rgb cr 0.0 0.0 0.0
+        | Red -> set_source_rgb cr 0.75 0.0 0.0
+        | Green -> set_source_rgb cr 0.0 0.75 0.0
+      in
+      match path with
+      | [] -> ()
+      | (x,y) :: tl ->
+        set_color cr color;
+        move_to cr (float_of_int x) (float_of_int y);
+        tl |> List.iter (fun (x,y) -> line_to cr (float_of_int x) (float_of_int y));
+        stroke cr
+    end;
+    restore cr
 
-let expose drawing_area objects ev =
+(*
+let bounding_box = function
+  | Node node ->
+    { x = node.x; y = node.y; width = node.width; height = node.height }
+  | Segment (_, bbox) -> bbox
+*)
+
+let set_cairo_font cr =
+  select_font_face cr "Monospace";
+  set_font_size cr 16.0
+
+let expose drawing_area layout ev =
   let area = GdkEvent.Expose.area ev in
   let x = Gdk.Rectangle.x area in
   let y = Gdk.Rectangle.y area in
@@ -62,26 +71,18 @@ let expose drawing_area objects ev =
   let height = Gdk.Rectangle.height area in
 
   let cr = Cairo_gtk.create drawing_area#misc#window in
-  select_font_face cr "Monospace";
-  set_font_size cr text_height_f;
+  set_cairo_font cr;
 
-  set_source_rgb cr 1.0 1.0 1.0;
+  set_source_rgb cr 1.0 1.0 0.75;
   rectangle cr (float_of_int x) (float_of_int y)
     (float_of_int width) (float_of_int height);
   fill cr;
 
-  translate cr layout_margin_f layout_margin_f;
-  objects |> List.iter begin fun obj ->
-    if intersects (x, y, width, height)
-        (obj.x+layout_margin, obj.y+layout_margin, obj.width, obj.height)
-    then begin
-      draw_object cr obj
-    end
-  end;
+  draw_object cr (layout_margin - layout.left) layout_margin layout;
 
   true
 
-let bounding_box path =
+let bounding_box_of_path path =
   match path with
   | [] -> assert false
   | (x,y) :: tl ->
@@ -95,21 +96,11 @@ let bounding_box path =
       y0 := min !y0 y;
       y1 := max !y1 y
     end;
-    !x0 - 1, !y0 - 1, !x1 - !x0 + 2, !y1 - !y0 + 2
-
-let convert_layout (layout:layout) =
-  let result = ref [] in
-  layout.nodes |> Array.iter begin fun (node:node) ->
-    result :=
-      { x = node.x; y = node.y; width = node.width; height = node.height;
-        shape = Node node } :: !result
-  end;
-  layout.connections |> List.iter begin fun (path, color) ->
-    let x, y, width, height = bounding_box path in
-    result :=
-      { x; y; width; height; shape = Segment (path, color) } :: !result
-  end;
-  !result
+    let x = !x0 - 1 in
+    let y = !y0 - 1 in
+    let width = !x1 - !x0 + 2 in
+    let height = !y1 - !y0 + 2 in
+    { x; y; width; height }
 
 let () =
   Printexc.record_backtrace true;
@@ -123,9 +114,6 @@ let () =
   close_in in_chan;
   let cfg = Control_flow.build_cfg code init_pc init_offset in
 
-  let layout = layout_cfg cfg in
-  let objects = convert_layout layout in
-
   let _ = GtkMain.Main.init () in
 
   let window = GWindow.window ~width:512 ~height:512
@@ -136,10 +124,6 @@ let () =
       ~packing:window#add () in
 
   let da = GMisc.drawing_area ~packing:sw#add_with_viewport () in
-  let _ = da#event#connect#expose (expose da objects) in
-
-  da#misc#set_size_request ~width:(layout.width+layout_margin*2)
-    ~height:(layout.height+layout_margin*2) ();
 
 (*
   let pixmap_width = layout.width+48 in
@@ -159,4 +143,16 @@ let () =
 *)
 
   window#show ();
+
+  let cr = Cairo_gtk.create window#misc#window in
+  set_cairo_font cr;
+  let fe = font_extents cr in
+
+  let conf = { char_width = int_of_float fe.max_x_advance; char_height = int_of_float fe.baseline } in
+  let cfg' = Control_flow.fold_cfg cfg in
+  let layout = layout_node conf cfg.node cfg' in
+  let _ = da#event#connect#expose (expose da layout) in
+  da#misc#set_size_request ~width:(layout.right-layout.left+layout_margin*2)
+    ~height:(layout.height+layout_margin*2) ();
+
   Main.main ()

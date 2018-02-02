@@ -105,3 +105,159 @@ let remove_dead_code cfg =
         live)
   done;
   !changed
+
+let get_rmid name =
+  if name = "M" then
+    Inst.number_of_registers
+  else
+    Inst.index_of_reg (Inst.lookup_reg name)
+
+let get_rm_name rmid =
+  if rmid = Inst.number_of_registers then "M" else Inst.reg_name_table.(rmid)
+
+let compute_defs cfg =
+  let size = Array.length cfg.node in
+  let defs = Array.make (Inst.number_of_registers+1) BatSet.Int.empty in
+  for i=0 to size-1 do
+    cfg.node.(i).stmts |> iter begin fun stmt ->
+      defs' stmt |> S.iter begin fun name ->
+        begin match name.[0] with
+          | 'A'..'Z' ->
+            let rmid = get_rmid name in
+            defs.(rmid) <- BatSet.Int.add i defs.(rmid)
+          | _ -> ()
+        end
+      end
+    end
+  done;
+  defs
+
+exception Break
+
+let convert_to_ssa cfg =
+  (* place phi functions *)
+  let size = Array.length cfg.node in
+  let idom = Control_flow.compute_idom cfg.succ cfg.pred in
+  let children = Array.make size [] in
+  let df = Array.make size [] in
+  let rec dominates x y =
+    if x = y then true
+    else
+      let dy = idom.(y) in
+      if dy < 0 then false
+      else dominates x dy
+  in
+  idom |> Array.iteri begin fun n p ->
+    if p >= 0 then children.(p) <- n :: children.(p)
+  end;
+  let rec compute_df n =
+    let s = ref [] in
+    cfg.succ.(n) |> iter (fun y -> if idom.(y) <> n then s := y :: !s);
+    children.(n) |> iter begin fun c ->
+      compute_df c;
+      df.(c) |> iter (fun w -> if not (dominates n w) then s := w :: !s)
+    end;
+    df.(n) <- !s
+  in
+  compute_df 0;
+  let defs = compute_defs cfg in
+  for rmid = 0 to Inst.number_of_registers do
+    let phi_inserted_at = Array.make size false in
+    let worklist = Queue.create () in
+    defs.(rmid) |> BatSet.Int.iter (fun defsite -> Queue.add defsite worklist);
+    while not (Queue.is_empty worklist) do
+      let n = Queue.pop worklist in
+      df.(n) |> iter begin fun y ->
+        if not phi_inserted_at.(y) then begin
+          let n_pred = length cfg.pred.(y) in
+          let phi =
+            S_phi (get_rm_name rmid, Array.make n_pred (E_var (get_rm_name rmid)))
+          in
+          cfg.node.(y).stmts <- phi :: cfg.node.(y).stmts;
+          phi_inserted_at.(y) <- true;
+          if not (BatSet.Int.mem y defs.(rmid)) then Queue.push y worklist
+        end
+      end
+    done
+  done;
+  (* rename variables *)
+  let count = Array.make (Inst.number_of_registers+1) 0 in
+  let stack = Array.make (Inst.number_of_registers+1) [0] in
+  let rename_rhs name =
+    match name.[0] with
+    | 'A'..'Z' ->
+      let rmid = get_rmid name in
+      let i = hd stack.(rmid) in
+      name ^ "_" ^ string_of_int i
+    | _ -> name
+  in
+  let rec rename n =
+    (*Format.(fprintf err_formatter "[%d]@." n);*)
+    let rename_lhs name =
+      match name.[0] with
+      | 'A'..'Z' ->
+        let rmid = get_rmid name in
+        let i = count.(rmid) + 1 in
+        count.(rmid) <- i;
+        stack.(rmid) <- i :: stack.(rmid);
+        name ^ "_" ^ string_of_int i
+      | _ -> name
+    in
+    let new_stmts = ref [] in
+    cfg.node.(n).stmts |> iter begin fun stmt ->
+      let new_stmt =
+        match stmt with
+        | S_set (name, e) ->
+          let e' = rename_variables rename_rhs e in
+          let name' = rename_lhs name in
+          S_set (name', e')
+        | S_store (size, addr, data, m1, m0) ->
+          let addr' = rename_variables rename_rhs addr in
+          let data' = rename_variables rename_rhs data in
+          let m0' = rename_variables rename_rhs m0 in
+          let m1' = rename_lhs m1 in
+          S_store (size, addr', data', m1', m0')
+        | S_jump (c, dst, d, u) ->
+          let c' = BatOption.map (rename_variables rename_rhs) c in
+          let dst' = rename_variables rename_rhs dst in
+          let u' = map (rename_variables rename_rhs) u in
+          let d' = map rename_lhs d in
+          S_jump (c', dst', d', u')
+        | S_phi (lhs, rhs) -> S_phi (rename_lhs lhs, rhs)
+        | _ -> assert false
+      in
+      (*Format.(fprintf err_formatter "%a -> %a@." pp_stmt stmt pp_stmt new_stmt);*)
+      new_stmts := new_stmt :: !new_stmts
+    end;
+    let old_stmts = cfg.node.(n).stmts in
+    cfg.node.(n).stmts <- rev !new_stmts;
+    (* rename variables in RHS of phi-functions *)
+    cfg.succ.(n) |> iter begin fun y ->
+      (* n is the j-th predecessor of y *)
+      let j =
+        match BatList.index_of n cfg.pred.(y) with
+        | Some i -> i
+        | None -> assert false
+      in
+      begin
+        try
+          cfg.node.(y).stmts |> iter begin function
+            | S_phi (_, rhs) -> rhs.(j) <- rename_variables rename_rhs rhs.(j)
+            | _ -> raise Break
+          end;
+        with Break -> ()
+      end
+    end;
+    children.(n) |> iter rename;
+    old_stmts |> iter begin fun stmt ->
+      defs' stmt |> S.iter begin fun name ->
+        begin match name.[0] with
+          | 'A'..'Z' ->
+            let rmid = get_rmid name in
+            stack.(rmid) <- List.tl stack.(rmid)
+          | _ -> ()
+        end
+      end
+    end
+  in
+  rename 0
