@@ -8,7 +8,6 @@ open Cairo
 type rect = { x : int; y : int; width : int; height : int }
 
 let layout_margin = 32
-let layout_margin_f = float_of_int layout_margin
 
 let intersects {x=x1;y=y1;width=w1;height=h1} {x=x2;y=y2;width=w2;height=h2} =
   not (x1+w1 <= x2 || x2+w2 <= x1 || y1+h1 <= y2 || y2+h2 <= y1)
@@ -17,6 +16,7 @@ let rec draw_object cr x y (node:layout_node) =
   let fx = float_of_int (x) in
   let fy = float_of_int (y) in
   match node.shape with
+  | Layout_none -> ()
   | Layout_box box ->
     set_source_rgb cr 1.0 1.0 1.0;
     (* draw box *)
@@ -152,7 +152,9 @@ let () =
   let cfg' = Control_flow.fold_cfg cfg in
   let layout = layout_node conf cfg.node cfg' in
   let _ = da#event#connect#expose (expose da layout) in
-  da#misc#set_size_request ~width:(layout.right-layout.left+layout_margin*2)
+  let layout_width = layout.right - layout.left in
+  Format.eprintf "layout width: %d@." layout_width;
+  da#misc#set_size_request ~width:(layout_width+layout_margin*2)
     ~height:(layout.height+layout_margin*2) ();
 
   Main.main ()

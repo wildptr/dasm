@@ -4,7 +4,7 @@ type 'a basic_block = {
   mutable stmts : 'a list;
 }
 
-type edge_attr = Edge_normal | Edge_taken | Edge_not_taken
+type edge_attr = Edge_neutral | Edge_true | Edge_false
 type edge = int * int * edge_attr
 
 type 'a cfg = {
