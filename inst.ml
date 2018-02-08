@@ -476,7 +476,7 @@ type operation =
   | I_xlat
   | I_xor
 
-type t = {
+type inst = {
   ext_opcode : int; (* opcode << 3 | opcode_extension *)
   prefix : int;
   bytes : string;

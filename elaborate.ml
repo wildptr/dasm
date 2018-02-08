@@ -31,16 +31,34 @@ let cond_expr code =
   let e = cond_expr1 (code lsr 1) in
   if (code land 1) = 0 then e else E_prim1 (P1_not, e)
 
-let elaborate_reg r = E_var (name_of_reg r)
+let elaborate_reg r =
+  match r with
+  | R_AL -> E_part (E_var "EAX", 0, 8)
+  | R_CL -> E_part (E_var "ECX", 0, 8)
+  | R_DL -> E_part (E_var "EDX", 0, 8)
+  | R_BL -> E_part (E_var "EBX", 0, 8)
+  | R_AH -> E_part (E_var "EAX", 8, 16)
+  | R_CH -> E_part (E_var "ECX", 8, 16)
+  | R_DH -> E_part (E_var "EDX", 8, 16)
+  | R_BH -> E_part (E_var "EBX", 8, 16)
+  | R_AX -> E_part (E_var "EAX", 0, 16)
+  | R_CX -> E_part (E_var "ECX", 0, 16)
+  | R_DX -> E_part (E_var "EDX", 0, 16)
+  | R_BX -> E_part (E_var "EBX", 0, 16)
+  | R_SP -> E_part (E_var "ESP", 0, 16)
+  | R_BP -> E_part (E_var "EBP", 0, 16)
+  | R_SI -> E_part (E_var "ESI", 0, 16)
+  | R_DI -> E_part (E_var "EDI", 0, 16)
+  | _ -> E_var (name_of_reg r)
 
 let elaborate_mem_index (reg, scale) =
   let e_reg = elaborate_reg reg in
   if scale = 0 then e_reg
   else
-    let e_scale = E_literal (Bitvec.of_int 2 scale) in
+    let e_scale = E_lit (Bitvec.of_int 2 scale) in
     E_prim2 (P2_shiftleft, e_reg, e_scale)
 
-let make_address addr = E_literal (Bitvec.of_int 32 addr)
+let make_address addr = E_lit (Bitvec.of_int 32 addr)
 
 let elaborate_mem_addr m =
   match m.base, m.index with
@@ -74,10 +92,10 @@ let elaborate_operand pc' = function
   | O_mem (mem, size) ->
     if size <= 0 then failwith "size of operand invalid";
     let e_addr = elaborate_mem_addr mem in
-    E_load (size, e_addr, E_var "M")
+    E_load (size, e_addr)
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
-    E_literal (Bitvec.of_int (size*8) imm)
+    E_lit (Bitvec.of_int (size*8) imm)
   | O_offset ofs -> make_address (pc'+ofs)
   | _ -> failwith "invalid operand type"
 
@@ -87,7 +105,7 @@ let elaborate_writeback env o_dst e_data =
   | O_mem (m, size) ->
     assert (size > 0);
     let e_addr = elaborate_mem_addr m in
-    append_stmt env (S_store (size, e_addr, e_data, "M", E_var "M"))
+    append_stmt env (S_store (size, e_addr, e_data))
   | _ -> failwith "elaborate_writeback: invalid operand type"
 
 let fnname_of_op = function
@@ -117,10 +135,10 @@ let xxx env pc =
     | J_unknown -> [], (Array.to_list reg_name_table) |> List.map (fun name -> E_var name)
     | J_resolved -> [], []
     | J_call ->
-      ["M"; "EAX"; "AX"; "AH"; "AL"; "ECX"; "CX"; "CH"; "CL"; "EDX"; "DX"; "DH"; "DL"; "ESP"; "SP"],
-      ["M"; "ECX"; "CX"; "CH"; "CL"; "EDX"; "DX"; "DH"; "DL"; "ESP"; "SP"] |> List.map (fun name -> E_var name)
+      ["EAX"; "ECX"; "EDX"; "ESP"],
+      ["ECX"; "EDX"; "ESP"] |> List.map (fun name -> E_var name)
     | J_ret ->
-      [], ["M"; "EAX"; "EBX"; "ESP"; "EBP"; "ESI"; "EDI"] |> List.map (fun name -> E_var name)
+      [], ["EAX"; "EBX"; "ESP"; "EBP"; "ESI"; "EDI"] |> List.map (fun name -> E_var name)
   in
   d, u
 
@@ -239,6 +257,22 @@ let elaborate_inst env pc inst =
     (* internal error *)
     Format.printf "%s: %a@." msg Inst.pp inst;
     exit 1
+
+let elaborate_basic_block expand env bb =
+  let pc = ref bb.Cfg.start in
+  bb.stmts |> List.iter begin fun inst ->
+    elaborate_inst env !pc inst;
+    pc := !pc + length_of inst
+  end;
+  if expand then Expand.expand env;
+  let stmts = get_stmts env in
+  env.stmts_rev <- [];
+  { bb with stmts }
+
+let elaborate_cfg expand jump_info cfg =
+  let env = new_env jump_info in
+  let node' = cfg.Cfg.node |> Array.map (elaborate_basic_block expand env) in
+  { cfg with node = node' }, env
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in

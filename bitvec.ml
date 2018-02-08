@@ -176,3 +176,5 @@ let pp f bv = Format.pp_print_string f (to_string bv)
 let to_bool bv =
   if bv.len <> 1 then invalid_arg "Bitvec.to_bool";
   bv.bits.(0) <> 0
+
+let equal b1 b2 = b1 = b2

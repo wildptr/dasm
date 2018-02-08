@@ -156,10 +156,10 @@ let build_cfg code init_pc init_offset =
     succ.(i) <- List.rev succ.(i);
     pred.(i) <- List.rev pred.(i)
   done;
-  { node = Array.of_list basic_blocks; succ; pred; edges }
+  { node = Array.of_list basic_blocks; succ; pred; edges }, jump_info
 
 (* adapted from Modern Compiler Implementation in C, pp. 448-449 *)
-let compute_idom succ pred root =
+let compute_idom succ pred =
   let n = Array.length succ in
   let bucket = Array.make n [] in
   let dfnum = Array.make n (-1) in
@@ -193,7 +193,7 @@ let compute_idom succ pred root =
       List.iter (fun w -> dfs i w) succ.(i)
     end
   in
-  dfs (-1) root;
+  dfs (-1) 0;
   let n' = !next_dfnum - 1 in
   for dfn = n' downto 1 do
     let i = vertex.(dfn) in
@@ -220,17 +220,30 @@ let compute_idom succ pred root =
   done;
   idom
 
-type node =
-  | Exit
-  | BB of int * int
-  | Seq of node * node
-  | Generic of int list * node array * edge list
-  | If of node * bool * node * bool
-  | If_else of node * bool * node * node * bool
-  | Fork1 of node * bool * node * bool
-  | Fork2 of node * bool * node * bool * node * bool
-  | Do_while of node * bool
-  | While_true of node
+type 'a node =
+  | Virtual
+  | BB of 'a basic_block * int
+  | Seq of 'a node * 'a node
+  | Generic of int list * 'a node array * edge list
+  | If of 'a node * bool * 'a node * bool
+  | If_else of 'a node * bool * 'a node * 'a node
+  | Fork1 of 'a node * bool * 'a node * bool
+  | Fork2 of 'a node * bool * 'a node * bool * 'a node * bool
+  | Do_while of 'a node * bool
+  | While_true of 'a node
+
+let rec map_snode f = function
+  | Virtual -> Virtual
+  | BB (b, nexit) -> BB (f b, nexit)
+  | Seq (v1, v2) -> Seq (map_snode f v1, map_snode f v2)
+  | Generic (exits, node, edges) ->
+    Generic (exits, Array.map (map_snode f) node, edges)
+  | If (v1, t, v2, has_exit) ->
+    If (map_snode f v1, t, map_snode f v2, has_exit)
+  | If_else (v1, t, v2, v3) ->
+    If_else (map_snode f v1, t, map_snode f v2, map_snode f v3)
+  | Do_while (v, t) -> Do_while (map_snode f v, t)
+  | _ -> failwith "not implemented"
 
 exception Break
 
@@ -253,7 +266,7 @@ let rec root parent i =
 
 let fold_cfg cfg =
   let n = Array.length cfg.node in
-  let parent = compute_idom cfg.succ cfg.pred 0 in
+  let parent = compute_idom cfg.succ cfg.pred in
   let children = Array.make n [] in
   parent |> Array.iteri begin fun i p ->
     if p >= 0 then children.(p) <- i :: children.(p)
@@ -271,7 +284,7 @@ let fold_cfg cfg =
       end
     end
   in
-  let node = Array.init n (fun i -> BB (i, List.length succ.(i))) in
+  let node = Array.init n (fun i -> BB (cfg.node.(i), List.length succ.(i))) in
 
   let module S = BatSet.Int in
 
@@ -318,7 +331,7 @@ let fold_cfg cfg =
         end
       end
     end;
-    let parent' = compute_idom succ pred 0 in
+    let parent' = compute_idom succ pred in
     parent' |> Array.iteri begin fun i p ->
       if reachable.(i) then assert (parent.(i) = p)
     end;
@@ -334,7 +347,13 @@ let fold_cfg cfg =
     end
   in
 
+  let get_edge_attr i j =
+    List.combine succ.(i) succ_attr.(i) |>
+    List.find (fun (j', a) -> j' = j) |> snd
+  in
+
   let fold_generic' entry stop_opt =
+    (* determine set of nodes to be merged *)
     let nodes_set =
       begin match stop_opt with
         | Some stop ->
@@ -348,34 +367,36 @@ let fold_cfg cfg =
       end
     in
     let nodes = S.to_list nodes_set in
-    let exits = ref [] in
-    nodes |> List.iter begin fun i ->
-      succ.(i) |> List.iter begin fun j ->
-        if not (List.mem j nodes) then
-          exits := j :: !exits
-      end
-    end;
-    let exits = S.of_list !exits in
-    let exits_list = S.to_list exits in
-    let nodes' = nodes @ exits_list in
-    let tbl = Array.make n (-1) in
-    let n' = List.length nodes' in
-    let node' = Array.make n' Exit in
-    nodes' |> List.iteri begin fun i' i ->
-      tbl.(i) <- i';
-      if not (S.mem i exits) then node'.(i') <- node.(i)
-    end;
-    let edges =
-      nodes |> List.map begin fun i ->
-        succ.(i) |> List.map (fun j -> i, j, Edge_neutral)
-      end |> List.concat |> List.map begin fun (src, dst, attr) ->
-        assert (tbl.(src) >= 0);
-        assert (tbl.(dst) >= 0);
-        tbl.(src), tbl.(dst), attr
-      end
-    in
+    (* already fully reduced? *)
     if nodes = [entry] && not (List.mem entry succ.(entry)) then ()
     else begin
+      let exits = ref [] in
+      nodes |> List.iter begin fun i ->
+        succ.(i) |> List.iter begin fun j ->
+          if not (List.mem j nodes) then
+            exits := j :: !exits
+        end
+      end;
+      let exits = S.of_list !exits in
+      let exits_list = S.to_list exits in
+      let nodes' = nodes @ exits_list in
+      (* compact subgraph *)
+      let tbl = Array.make n (-1) in
+      let n' = List.length nodes' in
+      let node' = Array.make n' Virtual in
+      nodes' |> List.iteri begin fun i' i ->
+        tbl.(i) <- i';
+        if not (S.mem i exits) then node'.(i') <- node.(i)
+      end;
+      let edges =
+        nodes |> List.map begin fun i ->
+          succ.(i) |> List.map (fun j -> i, j, get_edge_attr i j)
+        end |> List.concat |> List.map begin fun (src, dst, attr) ->
+          assert (tbl.(src) >= 0);
+          assert (tbl.(dst) >= 0);
+          tbl.(src), tbl.(dst), attr
+        end
+      in
       Format.eprintf "generic [";
       nodes |> List.iter (Format.eprintf " %d");
       Format.eprintf " ] -> [";
@@ -398,11 +419,6 @@ let fold_cfg cfg =
 
   let fold_generic entry =
     fold_generic' entry None
-  in
-
-  let get_edge_attr i j =
-    List.combine succ.(i) succ_attr.(i) |>
-    List.find (fun (j', a) -> j' = j) |> snd
   in
 
   let is_fork i =
@@ -472,6 +488,7 @@ let fold_cfg cfg =
           else raise Break
         | _ -> assert false
       in
+      if dominates exit entry then raise Break;
       pred.(body) |> List.iter begin fun i ->
         if i <> entry && not (dominates body i) then raise Break
       end;
@@ -531,27 +548,21 @@ let fold_cfg cfg =
       end;
       let body1_has_exit = S.cardinal body1_exits = 1 in
       let body2_has_exit = S.cardinal body2_exits = 1 in
-      assert (body1_has_exit = body2_has_exit);
-      let has_exit = body1_has_exit in
+      assert body1_has_exit;
+      assert body2_has_exit;
+      let exit = body1_exits |> S.to_list |> List.hd in
+      if dominates exit entry then raise Break;
       fold_generic body1;
       fold_generic body2;
       let t = get_edge_attr entry body1 = Edge_true in
       let new_node =
-        If_else (node.(entry), t, node.(body1), node.(body2), has_exit)
+        If_else (node.(entry), t, node.(body1), node.(body2))
       in
       node.(entry) <- new_node;
-      Format.eprintf "if-else (%d,%b,%d,%d)" entry t body1 body2;
-      if has_exit then begin
-        let exit = body1_exits |> S.to_list |> List.hd in
-        Format.eprintf " -> %d@." exit;
-        succ.(entry) <- [exit];
-        succ_attr.(entry) <- [Edge_neutral];
-        fix_pred entry (S.union nodes_in_body1 nodes_in_body2) exit
-      end else begin
-        Format.eprintf "@.";
-        succ.(entry) <- [];
-        succ_attr.(entry) <- []
-      end;
+      Format.eprintf "if-else (%d,%b,%d,%d) -> %d@." entry t body1 body2 exit;
+      succ.(entry) <- [exit];
+      succ_attr.(entry) <- [Edge_neutral];
+      fix_pred entry (S.union nodes_in_body1 nodes_in_body2) exit;
       children.(entry) <- children.(entry) |> List.filter (fun i -> i <> body1 && i <> body2);
       check_consistency ();
       true
@@ -586,26 +597,33 @@ let fold_cfg cfg =
         else
           nodes_in entry
       in
-      Format.eprintf "do-while candidate: (%d,%d,%d)@." entry fork exit;
+(*       Format.eprintf "do-while candidate: (%d,%d,%d)@." entry fork exit; *)
       nodes_in_body |> S.iter begin fun i ->
         succ.(i) |> List.iter begin fun j ->
           if j <> exit && not (S.mem j nodes_in_body) then begin
-            Format.eprintf "%d -> %d out of body@." i j;
+(*             Format.eprintf "%d -> %d out of body@." i j; *)
             raise Break
           end
         end
       end;
       let t = get_edge_attr fork entry = Edge_true in
-      fold_generic' entry (if exit_dominated then Some exit else None);
-      Format.eprintf "do-while (%d,%b) -> %d@." entry t exit;
-      let new_node = Do_while (node.(entry), t) in
-      node.(entry) <- new_node;
+      if entry = fork then begin
+        Format.eprintf "do-while (%d,%b) -> %d@." entry t exit;
+        let new_node = Do_while (node.(entry), t) in
+        node.(entry) <- new_node;
+        (* just remove the backward edge *)
+        succ.(entry) <- [exit];
+        succ_attr.(entry) <- [Edge_neutral];
+        pred.(entry) <- List.remove pred.(entry) entry;
+      end else begin
+        fold_generic' entry (if exit_dominated then Some exit else None)
+      end;
       check_consistency ();
       true
     with Break -> false
   in
 
-  let try_fold_fork1 entry body exit_f =
+  (*let try_fold_fork1 entry body exit_f =
     try
       assert (is_fork entry);
       if parent.(body) <> entry then raise Break;
@@ -634,7 +652,7 @@ let fold_cfg cfg =
       check_consistency ();
       true
     with Break -> false
-  in
+  in*)
 
   let rec fold_cfg_rec entry =
     children.(entry) |> List.iter fold_cfg_rec;
@@ -646,30 +664,30 @@ let fold_cfg cfg =
           try_fold_seq entry i ||
           begin
             is_fork entry && begin
-              try_fold_if entry i ||
+              try_fold_if entry i (*||
               begin match succ.(entry) with
                 | [a;b] ->
                   try_fold_fork1 entry a b ||
                   try_fold_fork1 entry b a
                 | _ -> assert false
-              end
+              end*)
             end
           end
         | [i;j] ->
           is_fork entry && begin
             try_fold_if entry i ||
             try_fold_if entry j ||
-            try_fold_if_else entry i j ||
+            try_fold_if_else entry i j (*||
             try_fold_fork1 entry i j ||
-            try_fold_fork1 entry j i
+            try_fold_fork1 entry j i*)
           end
         | _ ->
           is_fork entry && begin
             match succ.(entry) with
             | [a;b] ->
-              try_fold_if_else entry a b ||
+              try_fold_if_else entry a b (*||
               try_fold_fork1 entry a b ||
-              try_fold_fork1 entry b a
+              try_fold_fork1 entry b a*)
             | _ -> assert false
           end
       end ||

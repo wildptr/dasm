@@ -1,3 +1,4 @@
+open Batteries
 open Format
 
 type prim1 =
@@ -26,14 +27,14 @@ type primn =
   | Pn_or
 
 type expr =
-  | E_literal of Bitvec.t
+  | E_lit of Bitvec.t
   | E_var of string
   | E_part of expr * int * int
   | E_prim1 of prim1 * expr
   | E_prim2 of prim2 * expr * expr
   | E_prim3 of prim3 * expr * expr * expr
   | E_primn of primn * expr list
-  | E_load of int * expr * expr
+  | E_load of int * expr
   | E_nondet of int * int
   | E_repeat of expr * int
   | E_extend of bool * expr * int
@@ -49,12 +50,15 @@ type jump =
 (* elaborated form of instructions *)
 type stmt =
   | S_set of loc * expr
-  | S_store of int * expr * expr * string * expr
+  | S_store of int * expr * expr
   | S_jump of expr option * expr * string list * expr list
   | S_phi of string * expr array
   (* the following do not occur after elaboration *)
   | S_call of proc * expr list * loc option
   | S_output of expr
+  | S_if of expr * stmt list
+  | S_if_else of expr * stmt list * stmt list
+  | S_do_while of stmt list * expr
 
 and proc = {
   (* for pretty printing *)
@@ -72,7 +76,7 @@ let pp_sep_list sep pp f = function
     List.iter (fprintf f "%s%a" sep pp) tl
 
 let rec pp_expr f = function
-  | E_literal bv -> (*fprintf f "'%a'" Bitvec.pp bv*)
+  | E_lit bv -> (*fprintf f "'%a'" Bitvec.pp bv*)
     (*fprintf f "%d:%d" (Bitvec.to_int bv) (Bitvec.length bv)*)
     pp_print_int f (Bitvec.to_int bv)
   | E_var s -> pp_print_string f s
@@ -111,7 +115,7 @@ let rec pp_expr f = function
       | Pn_or -> "|"
     in
     fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") pp_expr) es
-  | E_load (size, addr, m) -> fprintf f "%a[%a]@%d" pp_expr m pp_expr addr size
+  | E_load (size, addr) -> fprintf f "[%a]@%d" pp_expr addr size
   | E_nondet (n, id) -> fprintf f "nondet(%d)#%d" n id
   | E_repeat (e, n) -> fprintf f "repeat(%a, %d)" pp_expr e n
   | E_extend (sign, e, n) ->
@@ -127,8 +131,8 @@ let pp_loc = pp_print_string
 let pp_stmt f = function
   | S_set (loc, e) ->
     fprintf f "%a = %a" pp_loc loc pp_expr e
-  | S_store (size, e_addr, e_data, m1, m0) ->
-    fprintf f "%s = %a[%a]@%d <- %a" m1 pp_expr m0 pp_expr e_addr size pp_expr e_data
+  | S_store (size, e_addr, e_data) ->
+    fprintf f "[%a]@%d = %a" pp_expr e_addr size pp_expr e_data
   | S_jump (cond_opt, e, _, _) ->
     (*let j_s =
       match j with
@@ -138,11 +142,11 @@ let pp_stmt f = function
       | J_ret -> "(ret)"
     in
     fprintf f "jump%s %a" j_s pp_expr e;*)
-    fprintf f "jump %a" pp_expr e;
     begin match cond_opt with
-      | Some cond -> fprintf f " if %a" pp_expr cond
+      | Some cond -> fprintf f "if (%a) " pp_expr cond
       | None -> ()
-    end
+    end;
+    fprintf f "goto %a" pp_expr e
   | S_phi (lhs, rhs) ->
     fprintf f "%s = phi(%a)" lhs (pp_sep_list ", " pp_expr) (Array.to_list rhs)
   | S_call (proc, args, result_opt) ->
@@ -158,6 +162,9 @@ let pp_stmt f = function
     fprintf f ")";
   | S_output e ->
     fprintf f "output %a" pp_expr e
+  | S_if (e, _) -> fprintf f "if (%a) ..." pp_expr e
+  | S_if_else (e, _, _) -> fprintf f "if (%a) ... else ..." pp_expr e
+  | S_do_while (_, e) -> fprintf f "do ... while (%a)" pp_expr e
 
 let pp_proc f proc =
   let n_param = List.length proc.p_param_names in
@@ -181,7 +188,7 @@ let pp_proc f proc =
   fprintf f "}@]"
 
 let rec subst_expr f = function
-  | E_literal _ as e -> e
+  | E_lit _ as e -> e
   | E_var name -> f name
   | E_part (e, lo, hi) -> E_part (subst_expr f e, lo, hi)
   | E_prim1 (p, e) -> E_prim1 (p, subst_expr f e)
@@ -191,19 +198,24 @@ let rec subst_expr f = function
     E_prim3 (p, subst_expr f e1, subst_expr f e2, subst_expr f e3)
   | E_primn (p, es) ->
     E_primn (p, List.map (subst_expr f) es)
-  | E_load (size, addr, m) -> E_load (size, subst_expr f addr, subst_expr f m)
+  | E_load (size, addr) -> E_load (size, subst_expr f addr)
   | E_nondet _ as e -> e
   | E_repeat (e, n) -> E_repeat (subst_expr f e, n)
   | E_extend (sign, e, n) -> E_extend (sign, subst_expr f e, n)
 
-let subst_stmt f = function
-  | S_set (lhs, rhs) -> S_set (lhs, subst_expr f rhs)
-  | S_store (size, addr, data, m1, m0) ->
-    S_store (size, subst_expr f addr, subst_expr f data, m1, subst_expr f m0)
-  | S_jump (cond_opt, e, d, u) ->
-    S_jump (BatOption.map (subst_expr f) cond_opt, subst_expr f e, d, List.map (subst_expr f) u)
-  | S_phi (lhs, rhs) -> S_phi (lhs, Array.map (subst_expr f) rhs)
-  | _ -> assert false
+let map_stmt f = function
+  | S_set (lhs, rhs) -> S_set (lhs, f rhs)
+  | S_store (size, addr, data) ->
+    S_store (size, f addr, f data)
+  | S_jump (cond_opt, dest, d, u) ->
+    let cond_opt' = Option.map f cond_opt in
+    let dest' = f dest in
+    let u' = List.map f u in
+    S_jump (cond_opt', dest', d, u')
+  | S_phi (lhs, rhs) -> S_phi (lhs, Array.map f rhs)
+  | _ -> failwith "not implemented"
+
+let subst_stmt f stmt = map_stmt (subst_expr f) stmt
 
 let rec rename_variables f expr = subst_expr (fun name -> E_var (f name)) expr
 
@@ -214,6 +226,55 @@ type env = {
   rename_table : (string, string) Hashtbl.t;
   mutable next_nondet_id : int;
 }
+
+let rec size_of_expr env = function
+  | E_lit b -> Bitvec.length b
+  | E_var name ->
+    begin match name.[0] with
+      | 'A'..'Z' ->
+        let name' =
+          match String.index_opt name '_' with
+          | Some i -> String.sub name 0 i
+          | None -> name
+        in
+        Inst.(lookup_reg name' |> size_of_reg)
+      | _ ->
+        Hashtbl.find env.var_tab name
+    end
+  | E_part (e, lo, hi) -> hi-lo
+  | E_prim1 (p, e) ->
+    begin match p with
+      | P1_not -> size_of_expr env e
+      | P1_foldand
+      | P1_foldxor
+      | P1_foldor -> 1
+    end
+  | E_prim2 (p, e1, e2) ->
+    begin match p with
+      | P2_sub
+      | P2_shiftleft
+      | P2_logshiftright
+      | P2_arishiftright -> size_of_expr env e1
+      | P2_eq
+      | P2_less
+      | P2_below -> 1
+    end
+  | E_prim3 (p, e1, e2, e3) ->
+    begin match p with
+      | P3_addwithcarry -> size_of_expr env e3 + 1
+    end
+  | E_primn (p, es) ->
+    begin match p with
+      | Pn_concat -> es |> List.map (size_of_expr env) |> List.sum
+      | Pn_add
+      | Pn_and
+      | Pn_xor
+      | Pn_or -> List.hd es |> size_of_expr env
+    end
+  | E_load (size, _) -> size * 8
+  | E_nondet (n, _) -> n
+  | E_repeat (e, n) -> size_of_expr env e * n
+  | E_extend (_, e, n) -> n
 
 let new_env jump_info = {
   var_tab = Hashtbl.create 0;

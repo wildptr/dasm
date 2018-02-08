@@ -128,14 +128,14 @@ let rec translate_expr st = function
   | Expr_sym s ->
     begin match lookup st s with
       | Var (name, w) -> E_var name, w
-      | BVConst bv -> E_literal bv, Bitvec.length bv
+      | BVConst bv -> E_lit bv, Bitvec.length bv
       | _ -> failwith ("not a Var or BVConst value: "^s)
     end
-  | Expr_literal bv -> E_literal bv, Bitvec.length bv
+  | Expr_literal bv -> E_lit bv, Bitvec.length bv
   | Expr_literal2 (c_v, c_w) ->
     let v = translate_cexpr st c_v in
     let w = translate_cexpr st c_w in
-    E_literal (Bitvec.of_int w v), w
+    E_lit (Bitvec.of_int w v), w
   | Expr_index (e, i) ->
     let e', w = translate_expr st e in
     begin match i with
@@ -235,7 +235,7 @@ let rec translate_expr st = function
   | Expr_load (size, addr) ->
     let size' = translate_cexpr st size in
     let addr', w = translate_expr st addr in
-    E_load (size', addr', E_var "M"), w
+    E_load (size', addr'), w
 
 let translate_stmt st_ref env stmt =
   let st = !st_ref in
@@ -316,7 +316,7 @@ let translate_stmt st_ref env stmt =
     let addr', _ = translate_expr st addr in
     let data', data_width = translate_expr st data in
     check_width (size*8) data_width;
-    append_stmt env (S_store (size, addr', data', "M", E_var "M"))
+    append_stmt env (S_store (size, addr', data'))
   | Stmt_jump addr -> assert false
 
 let translate_proc st proc =

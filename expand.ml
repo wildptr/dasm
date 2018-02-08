@@ -13,6 +13,7 @@ let rec expand_stmt env retval stmt =
   match stmt with
   | S_set (loc, e) ->
     let e' = rename e in
+(*
     begin match loc.[0] with
       | 'A'..'Z' ->
         let r = Inst.lookup_reg loc in
@@ -75,8 +76,10 @@ let rec expand_stmt env retval stmt =
         end
       | _ -> append_stmt env (S_set (rename_var loc, e'))
     end
-  | S_store (size, addr, data, m1, m0) ->
-    append_stmt env (S_store (size, rename addr, rename data, m1, m0))
+*)
+    append_stmt env (S_set (rename_var loc, e'))
+  | S_store (size, addr, data) ->
+    append_stmt env (S_store (size, rename addr, rename data))
   | S_jump (c, e, d, u) ->
     append_stmt env (S_jump (BatOption.map rename c, rename e, d, u))
   | S_call (proc, args, rv) ->
@@ -110,7 +113,7 @@ let rec expand_stmt env retval stmt =
       | Some name ->
         append_stmt env (S_set (name, rename e))
     end
-  | S_phi _ -> assert false
+  | _ -> assert false
 
 let expand env =
   let stmts = get_stmts env in

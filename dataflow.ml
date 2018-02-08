@@ -1,27 +1,25 @@
+open Batteries
 open Cfg
 open List
 open Semant
 
-module S = BatSet.String
-module M = BatMap.String
+module S = Set.String
 
 let all_register_names = S.of_array Inst.reg_name_table
 
 let defs = function
   | S_set (lhs, _) -> Some lhs
   | S_phi (lhs, _) -> Some lhs
-  | S_store (_, _, _, m1, _) -> Some m1
   | _ -> None
 
 let defs' = function
   | S_set (lhs, _) -> S.singleton lhs
   | S_phi (lhs, _) -> S.singleton lhs
-  | S_store (_, _, _, m1, _) -> S.singleton m1
   | S_jump (_, _, d, _) -> S.of_list d
   | _ -> S.empty
 
 let rec uses_expr = function
-  | E_literal _ -> S.empty
+  | E_lit _ -> S.empty
   | E_var name -> S.singleton name
   | E_part (e, _, _) -> uses_expr e
   | E_prim1 (_, e) -> uses_expr e
@@ -32,15 +30,14 @@ let rec uses_expr = function
   | E_nondet _ -> S.empty
   | E_repeat (e, _) -> uses_expr e
   | E_extend (_, e, _) -> uses_expr e
-  | E_load (_, e, m) -> S.union (uses_expr e) (uses_expr m)
+  | E_load (_, e) -> uses_expr e
 
 and uses_expr_list es =
   es |> map uses_expr |> fold_left S.union S.empty
 
 let uses = function
   | S_set (_, e) -> uses_expr e
-  | S_store (_, addr, data, m1, m0) ->
-    S.add m1 @@ (uses_expr m0) |> S.union (uses_expr data) |> S.union (uses_expr addr)
+  | S_store (_, addr, data) -> S.union (uses_expr data) (uses_expr addr)
   | S_jump (cond_opt, e, _, u) ->
     begin match cond_opt with
       | Some cond -> S.union (uses_expr cond) (uses_expr e)
@@ -53,78 +50,103 @@ let count_uses cfg =
   let use_count = Hashtbl.create 0 in
   let n = Array.length cfg.node in
   for i=0 to n-1 do
-    cfg.node.(i).stmts |> iter (fun stmt ->
-        uses stmt |> S.iter (fun name ->
-            if Hashtbl.mem use_count name then
-              Hashtbl.replace use_count name (Hashtbl.find use_count name + 1)
-            else
-              Hashtbl.add use_count name 1))
+(*     Format.eprintf "=== Basic block %d ===@." i; *)
+    cfg.node.(i).stmts |> iter begin fun stmt ->
+(*       Format.eprintf "%a uses [" pp_stmt stmt; *)
+      uses stmt |> S.iter begin fun name ->
+(*         Format.eprintf " %s" name; *)
+        if Hashtbl.mem use_count name then
+          Hashtbl.replace use_count name (Hashtbl.find use_count name + 1)
+        else
+          Hashtbl.add use_count name 1
+      end;
+(*       Format.eprintf " ]@." *)
+    end
   done;
   fun name ->
     if Hashtbl.mem use_count name then Hashtbl.find use_count name else 0
 
 let auto_subst cfg =
-  let changed = ref false in
-  let t = Hashtbl.create 0 in
   let n = Array.length cfg.node in
+(*   let use_count = count_uses cfg in *)
+  let t = Hashtbl.create 0 in
   for i=0 to n-1 do
-    cfg.node.(i).stmts |> iter (function
-        | S_set (lhs, rhs) ->
-          let is_candidate =
-            begin match rhs with
-              | E_var _ | E_literal _ -> true
-              | _ -> false
+    cfg.node.(i).stmts |> iter begin function
+      | S_set (lhs, rhs) ->
+        let subst =
+          begin match rhs with
+            | E_var _ | E_lit _ | E_part (E_var _, _, _) -> true
+            | _ ->
+              (*use_count lhs <= 1 ||*)
+              String.length lhs >= 3 && String.sub lhs 0 3 = "ESP"
+          end
+        in
+        if subst then begin
+          let rhs' =
+            rhs |> subst_expr begin fun name ->
+              Hashtbl.find_option t name |> Option.default rhs
             end
           in
-          if is_candidate then begin
-            changed := true;
-            Hashtbl.add t lhs rhs
-          end
-        | _ -> ())
+          Hashtbl.add t lhs rhs'
+        end
+      | _ -> ()
+    end;
   done;
-  let f name =
-    if Hashtbl.mem t name then Hashtbl.find t name else (E_var name)
-  in
-  for i=0 to n-1 do
-    cfg.node.(i).stmts <- map (subst_stmt f) cfg.node.(i).stmts
-  done;
-  !changed
+
+  if Hashtbl.is_empty t then false
+  else begin
+    let f name =
+      if Hashtbl.mem t name then Hashtbl.find t name else (E_var name)
+    in
+    for i=0 to n-1 do
+      cfg.node.(i).stmts <-
+        cfg.node.(i).stmts |> filter_map begin fun stmt ->
+          match stmt with
+          | S_set (lhs, rhs) ->
+            if Hashtbl.mem t lhs then None else Some (subst_stmt f stmt)
+          | _ -> Some (subst_stmt f stmt)
+        end
+    done;
+    true
+  end
 
 let remove_dead_code cfg =
   let n = Array.length cfg.node in
   let changed = ref false in
   let use_count = count_uses cfg in
   for i=0 to n-1 do
-    cfg.node.(i).stmts <- cfg.node.(i).stmts |> filter (fun stmt ->
+    cfg.node.(i).stmts <- begin
+      cfg.node.(i).stmts |> filter begin fun stmt ->
         let live =
-          match defs stmt with
-          | Some name -> use_count name > 0
-          | None -> true
+          match stmt with
+          | S_jump _ | S_store _ -> true
+          | _ ->
+            begin match defs stmt with
+              | Some name -> use_count name > 0
+              | None -> true
+            end
         in
         if not live then changed := true;
-        live)
+        live
+      end
+    end
   done;
   !changed
 
-let get_rmid name =
-  if name = "M" then
-    Inst.number_of_registers
-  else
-    Inst.index_of_reg (Inst.lookup_reg name)
+let get_rmid name = Inst.index_of_reg (Inst.lookup_reg name)
 
-let get_rm_name rmid =
-  if rmid = Inst.number_of_registers then "M" else Inst.reg_name_table.(rmid)
+let get_rm_name rmid = Inst.reg_name_table.(rmid)
 
 let compute_defs cfg =
   let size = Array.length cfg.node in
-  let defs = Array.make (Inst.number_of_registers+1) BatSet.Int.empty in
+  let defs = Array.make Inst.number_of_registers Set.Int.empty in
   for i=0 to size-1 do
     cfg.node.(i).stmts |> iter begin fun stmt ->
       defs' stmt |> S.iter begin fun name ->
         begin match name.[0] with
           | 'A'..'Z' ->
             let rmid = get_rmid name in
-            defs.(rmid) <- BatSet.Int.add i defs.(rmid)
+            defs.(rmid) <- Set.Int.add i defs.(rmid)
           | _ -> ()
         end
       end
@@ -161,10 +183,10 @@ let convert_to_ssa cfg =
   in
   compute_df 0;
   let defs = compute_defs cfg in
-  for rmid = 0 to Inst.number_of_registers do
+  for rmid = 0 to Inst.number_of_registers - 1 do
     let phi_inserted_at = Array.make size false in
     let worklist = Queue.create () in
-    defs.(rmid) |> BatSet.Int.iter (fun defsite -> Queue.add defsite worklist);
+    defs.(rmid) |> Set.Int.iter (fun defsite -> Queue.add defsite worklist);
     while not (Queue.is_empty worklist) do
       let n = Queue.pop worklist in
       df.(n) |> iter begin fun y ->
@@ -175,14 +197,14 @@ let convert_to_ssa cfg =
           in
           cfg.node.(y).stmts <- phi :: cfg.node.(y).stmts;
           phi_inserted_at.(y) <- true;
-          if not (BatSet.Int.mem y defs.(rmid)) then Queue.push y worklist
+          if not (Set.Int.mem y defs.(rmid)) then Queue.push y worklist
         end
       end
     done
   done;
   (* rename variables *)
-  let count = Array.make (Inst.number_of_registers+1) 0 in
-  let stack = Array.make (Inst.number_of_registers+1) [0] in
+  let count = Array.make Inst.number_of_registers 0 in
+  let stack = Array.make Inst.number_of_registers [0] in
   let rename_rhs name =
     match name.[0] with
     | 'A'..'Z' ->
@@ -211,14 +233,12 @@ let convert_to_ssa cfg =
           let e' = rename_variables rename_rhs e in
           let name' = rename_lhs name in
           S_set (name', e')
-        | S_store (size, addr, data, m1, m0) ->
+        | S_store (size, addr, data) ->
           let addr' = rename_variables rename_rhs addr in
           let data' = rename_variables rename_rhs data in
-          let m0' = rename_variables rename_rhs m0 in
-          let m1' = rename_lhs m1 in
-          S_store (size, addr', data', m1', m0')
+          S_store (size, addr', data')
         | S_jump (c, dst, d, u) ->
-          let c' = BatOption.map (rename_variables rename_rhs) c in
+          let c' = Option.map (rename_variables rename_rhs) c in
           let dst' = rename_variables rename_rhs dst in
           let u' = map (rename_variables rename_rhs) u in
           let d' = map rename_lhs d in
@@ -235,7 +255,7 @@ let convert_to_ssa cfg =
     cfg.succ.(n) |> iter begin fun y ->
       (* n is the j-th predecessor of y *)
       let j =
-        match BatList.index_of n cfg.pred.(y) with
+        match index_of n cfg.pred.(y) with
         | Some i -> i
         | None -> assert false
       in
@@ -254,7 +274,7 @@ let convert_to_ssa cfg =
         begin match name.[0] with
           | 'A'..'Z' ->
             let rmid = get_rmid name in
-            stack.(rmid) <- List.tl stack.(rmid)
+            stack.(rmid) <- tl stack.(rmid)
           | _ -> ()
         end
       end

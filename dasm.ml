@@ -777,7 +777,7 @@ let convert_inst mode ext_opcode prefix bytes operand_pack =
   let operands = List.map convert_operand fmt in
   Inst.make ext_opcode prefix bytes op var operands
 
-let disassemble mode s : Inst.t =
+let disassemble mode s =
   let buf = Buffer.create 8 in
   let prefix, opcode = read_prefix_and_opcode buf s in
   let inst_format =
