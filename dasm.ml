@@ -1,3 +1,4 @@
+open Batteries
 open Format
 open Inst
 
@@ -35,6 +36,11 @@ type cpu_mode =
   | Mode32bit
   | Mode64bit
 
+type config = {
+  mode : cpu_mode;
+  pc_opt : int option;
+}
+
 let read_sib buf s : int * ((int * int) option) =
   let c = s () in
   Buffer.add_char buf c;
@@ -66,12 +72,22 @@ let read_imm n buf s =
   f 0 0
 
 (* the int in return value is opcode extension field i.e. ModRM[5:3] *)
-let read_regmem32 buf s : int * regmem =
+let read_regmem32 buf s seg_override_opt : int * regmem =
   let regset = Reg32bit in
   (* helper function *)
   let convert_index = function
     | Some (r, s) -> Some (int_to_reg regset r, s)
     | None -> None
+  in
+
+  let compute_seg b =
+    match seg_override_opt with
+    | Some seg -> seg
+    | None ->
+      begin match b with
+        | 4 | 5 -> Seg_SS
+        | _ -> Seg_DS
+      end
   in
 
   let c = s () in
@@ -88,14 +104,19 @@ let read_regmem32 buf s : int * regmem =
             if base = 5
             then
               let disp = read_imm 4 buf s in
-              Mem { base = None; index = convert_index index; disp }
+              Mem { base = None; index = convert_index index; disp;
+                    seg = compute_seg 0 }
             else
-              Mem { base = Some (int_to_reg regset base); index = convert_index index; disp = 0 }
+              let b = int_to_reg regset base in
+              Mem { base = Some b; index = convert_index index; disp = 0;
+                    seg = compute_seg base }
           | 5 ->
             let disp = read_imm 4 buf s in
-            Mem { base = None; index = None; disp }
+            Mem { base = None; index = None; disp; seg = compute_seg 0 }
           | _ ->
-            Mem { base = Some (int_to_reg regset r); index = None; disp = 0 }
+            let b = int_to_reg regset r in
+            Mem { base = Some b; index = None; disp = 0;
+                  seg = compute_seg r }
         end
       | 1 | 2 ->
         let disp_size = if m = 1 then 1 else 4 in
@@ -103,10 +124,13 @@ let read_regmem32 buf s : int * regmem =
         then
           let base, index = read_sib buf s in
           let disp = read_imm disp_size buf s in
-          Mem { base = Some (int_to_reg regset base); index = convert_index index; disp }
+          let b = int_to_reg regset base in
+          Mem { base = Some b; index = convert_index index; disp;
+                seg = compute_seg base }
         else
           let disp = read_imm disp_size buf s in
-          Mem { base = Some (int_to_reg regset r); index = None; disp }
+          let b = int_to_reg regset r in
+          Mem { base = Some b; index = None; disp; seg = compute_seg r }
       | 3 ->
         Reg r
       | _ -> assert false
@@ -730,7 +754,7 @@ let convert_reg size r =
   let regset = gpr_set_of_size size in
   O_reg (int_to_reg regset r)
 
-let convert_inst mode ext_opcode prefix bytes operand_pack =
+let convert_inst { mode; pc_opt } ext_opcode prefix bytes operand_pack =
   let opcode = ext_opcode lsr 3 in
   let r = ext_opcode land 7 in
   let g, imm1, imm2 =
@@ -759,7 +783,12 @@ let convert_inst mode ext_opcode prefix bytes operand_pack =
       end
     | I size -> O_imm (imm1, size)
     | I2 size -> O_imm (imm2, size)
-    | Offset -> O_offset (imm1 + String.length bytes)
+    | Offset ->
+      let offset = imm1 + String.length bytes in
+      begin match pc_opt with
+        | Some pc -> O_imm (pc + offset, 4(* FIXME *))
+        | None -> O_offset offset
+      end
     | Far_ptr -> O_farptr (imm1, imm2)
     | FPU_R ->
       begin match g with
@@ -777,7 +806,7 @@ let convert_inst mode ext_opcode prefix bytes operand_pack =
   let operands = List.map convert_operand fmt in
   Inst.make ext_opcode prefix bytes op var operands
 
-let disassemble mode s =
+let disassemble config s =
   let buf = Buffer.create 8 in
   let prefix, opcode = read_prefix_and_opcode buf s in
   let inst_format =
@@ -794,10 +823,20 @@ let disassemble mode s =
   let alt_addr = prefix land (prefix_mask Prefix_67) <> 0 in
   let data_size = if alt_data then 2 else 4 in
   let addr_size = if alt_addr then 2 else 4 in
+  let seg_override_opt =
+    match prefix land 0x1c with
+    | 0x04 -> Some Seg_ES
+    | 0x08 -> Some Seg_CS
+    | 0x0c -> Some Seg_SS
+    | 0x10 -> Some Seg_DS
+    | 0x14 -> Some Seg_FS
+    | 0x18 -> Some Seg_GS
+    | _ -> None
+  in
   let ext_opcode, operand_pack =
     if inst_format land 0x10 <> 0
     then (* has regmem operand *)
-      let r, g = read_regmem32 buf s in
+      let r, g = read_regmem32 buf s seg_override_opt in
       let ext_opcode = extend_opcode opcode r in
       begin match opcode with
       | 0xd8 | 0xd9 | 0xda | 0xdb | 0xdc | 0xdd | 0xde | 0xdf ->
@@ -862,11 +901,12 @@ let disassemble mode s =
           Op_II (imm1, imm2)
         | 6 ->
           let g =
-            Mem { base = None; index = None; disp = read_imm addr_size buf s }
+            Mem { base = None; index = None; disp = read_imm addr_size buf s;
+                  seg = seg_override_opt |> Option.default Seg_DS }
           in
           Op_M g
         | _ -> assert false
       in
       ext_opcode, operand_pack
   in
-  convert_inst mode ext_opcode prefix (Buffer.contents buf) operand_pack
+  convert_inst config ext_opcode prefix (Buffer.contents buf) operand_pack

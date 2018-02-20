@@ -1,9 +1,8 @@
 open Cfg
+open Database
 open Layout
 
 open GMain
-open GdkKeysyms
-open Cairo
 
 type rect = { x : int; y : int; width : int; height : int }
 
@@ -21,7 +20,17 @@ let point_in_rect (x,y) (rect:rect) =
   x0 < x && x < x1 && y0 < y && y < y1
 *)
 
+type view = {
+  cairo : Cairo.context;
+  canvas : GMisc.drawing_area;
+  text_view : GMisc.label;
+  mutable layout : layout_node option;
+  mutable current_function_va : int;
+  db : Database.db;
+}
+
 let rec draw_object cr (exposed:rect) x y (node:layout_node) =
+  let open Cairo in
   let fx = float_of_int x in
   let fy = float_of_int y in
   let node_bbox = {
@@ -75,17 +84,19 @@ let rec draw_object cr (exposed:rect) x y (node:layout_node) =
   end
 
 let set_cairo_font cr =
+  let open Cairo in
   select_font_face cr "Monospace";
   set_font_size cr 16.0
 
-let expose drawing_area layout ev =
+let expose view ev =
+  let open Cairo in
   let area = GdkEvent.Expose.area ev in
   let x = Gdk.Rectangle.x area in
   let y = Gdk.Rectangle.y area in
   let width = Gdk.Rectangle.width area in
   let height = Gdk.Rectangle.height area in
 
-  let cr = Cairo_gtk.create drawing_area#misc#window in
+  let cr = Cairo_gtk.create view.canvas#misc#window in
   set_cairo_font cr;
 
   set_source_rgb cr 1.0 1.0 0.75;
@@ -93,33 +104,18 @@ let expose drawing_area layout ev =
     (float_of_int width) (float_of_int height);
   fill cr;
 
-  draw_object cr { x; y; width; height }
-    (layout_margin - layout.left) layout_margin layout;
+  begin match view.layout with
+    | Some layout ->
+      draw_object cr { x; y; width; height }
+        (layout_margin - layout.left) layout_margin layout;
+    | None -> ()
+  end;
 
   true
 
-let bounding_box_of_path path =
-  match path with
-  | [] -> assert false
-  | (x,y) :: tl ->
-    let x0 = ref x in
-    let x1 = ref x in
-    let y0 = ref y in
-    let y1 = ref y in
-    tl |> List.iter begin fun (x,y) ->
-      x0 := min !x0 x;
-      x1 := max !x1 x;
-      y0 := min !y0 y;
-      y1 := max !y1 y
-    end;
-    let x = !x0 - 1 in
-    let y = !y0 - 1 in
-    let width = !x1 - !x0 + 2 in
-    let height = !y1 - !y0 + 2 in
-    { x; y; width; height }
-
-let show_pseudocode snode widget () =
-  let stmts = Pseudocode.convert snode in
+let show_pseudocode view () =
+  let proc = Hashtbl.find view.db.Database.proc_table view.current_function_va in
+  let stmts = Pseudocode.convert proc.stmt_snode in
   let buf = Buffer.create 0 in
   let open Format in
   let fmtr = formatter_of_buffer buf in
@@ -144,23 +140,121 @@ let show_pseudocode snode widget () =
   in
   stmts |> List.iter (print_stmt "");
   let text = Buffer.contents buf in
-  widget#set_text text
+  view.text_view#set_text text
 
-let show_ssa cfg' widget () =
-  let snode = Control_flow.fold_cfg cfg' in
-  show_pseudocode snode widget ()
+let show_ssa view () =
+  let db = view.db in
+  let proc = Hashtbl.find db.Database.proc_table view.current_function_va in
+  let cfg', env' = Elaborate.elaborate_cfg db true proc.cfg in
+  Dataflow.convert_to_ssa cfg';
+  let rec loop () =
+    if Dataflow.auto_subst cfg' ||
+       Simplify.simplify_cfg env' cfg' ||
+       Dataflow.remove_dead_code cfg' then loop ()
+  in
+  loop ();
+  show_pseudocode view ()
+
+let goto_function view va =
+  let db = view.db in
+  let proc =
+    match BatHashtbl.find_option db.Database.proc_table va with
+    | Some proc -> proc
+    | None ->
+      let cfg = Control_flow.build_cfg db va (va-0x400000) in
+      let inst_snode = Control_flow.fold_cfg cfg in
+      let env = Env.new_env db in
+      let stmt_snode =
+        inst_snode |>
+        Control_flow.map_snode (Elaborate.elaborate_basic_block false env)
+      in
+      let proc = Database.{ cfg; inst_snode; stmt_snode } in
+      Hashtbl.add db.Database.proc_table va proc;
+      proc
+  in
+  let fe = Cairo.font_extents view.cairo in
+  let conf = {
+    char_width = int_of_float fe.max_x_advance;
+    char_height = int_of_float fe.baseline
+  } in
+  let layout = layout_node conf 0 proc.inst_snode in
+  let layout_width = layout.right - layout.left in
+  view.canvas#misc#set_size_request ~width:(layout_width+layout_margin*2)
+    ~height:(layout.height+layout_margin*2) ();
+  view.current_function_va <- va;
+  view.layout <- Some layout
+
+let goto_function_prompt view () =
+  let dlg = GWindow.dialog ~title:"Go to function" () in
+  let textbox = GEdit.entry ~packing:dlg#vbox#add () in
+  let ok_button = GButton.button ~label:"OK" ~packing:dlg#action_area#add () in
+  let _ =
+    ok_button#connect#clicked ~callback:begin fun () ->
+      goto_function view (int_of_string textbox#text)
+    end
+  in
+  dlg#show ()
+
+exception Invalid_offset
+
+let read_u16 s offset =
+  if String.length s < offset+2 then raise Invalid_offset;
+  (int_of_char s.[offset  ]       ) lor
+  (int_of_char s.[offset+1] lsl  8)
+
+(* works only on 64-bit platforms *)
+let read_u32 s offset =
+  if String.length s < offset+4 then raise Invalid_offset;
+  (int_of_char s.[offset  ]       ) lor
+  (int_of_char s.[offset+1] lsl  8) lor
+  (int_of_char s.[offset+2] lsl 16) lor
+  (int_of_char s.[offset+3] lsl 24)
 
 let () =
   Printexc.record_backtrace true;
-  let init_pc = int_of_string Sys.argv.(1) in
-  let in_path = Sys.argv.(2) in
-  let init_offset = int_of_string Sys.argv.(3) in
+  if Array.length Sys.argv <= 1 then begin
+    Format.eprintf "@.";
+    exit 1
+  end;
+  let in_path = Sys.argv.(1) in
   Elaborate.load_spec "spec";
   let in_chan = open_in in_path in
   let in_chan_len = in_channel_length in_chan in
   let code = really_input_string in_chan in_chan_len in
   close_in in_chan;
-  let cfg, jump_info = Control_flow.build_cfg code init_pc init_offset in
+
+  let entry_point =
+    try
+      if not (BatString.starts_with code "MZ") then begin
+        Format.eprintf "invalid DOS executable signature@.";
+        exit 1
+      end;
+      let e_lfanew = read_u32 code 0x3c in
+      let pe_signature = read_u32 code e_lfanew in
+      if pe_signature <> 0x4550 then begin
+        Format.eprintf "invalid PE signature@.";
+        exit 1
+      end;
+      let coff_header_offset = e_lfanew + 4 in
+      let size_of_opt_header = read_u16 code (coff_header_offset + 16) in
+      Format.eprintf "SizeOfOptionalHeader = %d@." size_of_opt_header;
+      let opt_header_offset = coff_header_offset + 20 in
+      let opt_header_magic = read_u16 code opt_header_offset in
+      Format.eprintf "Magic = 0x%x@." opt_header_magic;
+      if opt_header_magic <> 0x10b then begin
+        Format.eprintf "not a PE32 file@.";
+        exit 1
+      end;
+      read_u32 code (opt_header_offset + 16)
+    with Invalid_offset ->
+      Format.eprintf "invalid PE file@.";
+      exit 1
+  in
+  Format.eprintf "AddressOfEntryPoint = 0x%x@." entry_point;
+  let init_pc = entry_point + 0x400000 (* FIXME *) in
+(*   let init_offset = entry_point in *)
+
+  let db = Database.create code in
 
   let _ = GtkMain.Main.init () in
 
@@ -174,59 +268,42 @@ let () =
 
   let button1 = GButton.button ~label:"pseudocode" ~packing:toolbar#add () in
   let button2 = GButton.button ~label:"SSA" ~packing:toolbar#add () in
+  let button3 = GButton.button ~label:"Go to function" ~packing:toolbar#add () in
 
-  let hbox = GPack.hbox ~packing:vbox#add () in
+  let nb = GPack.notebook ~packing:vbox#add () in
 
-  let sw = GBin.scrolled_window ~hpolicy:`AUTOMATIC ~vpolicy:`AUTOMATIC
-      ~packing:hbox#add () in
+  let label1 = GMisc.label ~text:"CFG" () in
+  let label2 = GMisc.label ~text:"Pseudocode" () in
+
+  let sw1 = GBin.scrolled_window ~hpolicy:`AUTOMATIC ~vpolicy:`AUTOMATIC
+      ~packing:(fun w -> ignore @@ nb#append_page ~tab_label:label1#coerce w) () in
 
   let sw2 = GBin.scrolled_window ~hpolicy:`AUTOMATIC ~vpolicy:`AUTOMATIC
-      ~packing:hbox#add () in
+      ~packing:(fun w -> ignore @@ nb#append_page ~tab_label:label2#coerce w) () in
 
-  let label1 = GMisc.label ~packing:sw2#add_with_viewport () in
+  let canvas = GMisc.drawing_area ~packing:sw1#add_with_viewport () in
 
-  let da = GMisc.drawing_area ~packing:sw#add_with_viewport () in
-
-(*
-  let pixmap_width = layout.width+48 in
-  let pixmap_height = layout.height+48 in
-
-  let pixmap = GDraw.pixmap ~width:pixmap_width ~height:pixmap_height () in
-
-  (* fill pixmap with white *)
-  pixmap#set_foreground GDraw.(`WHITE);
-  pixmap#rectangle ~x:0 ~y:0 ~width:pixmap_width ~height:pixmap_height ~filled:true ();
-
-  let _ = da#event#connect#expose (expose da pixmap) in
-
-  let cr = Cairo_gtk.create pixmap#pixmap in
-
-  draw_layout cr ~x:24 ~y:24 layout;
-*)
+  let text_view = GMisc.label ~packing:sw2#add_with_viewport () in
 
   window#show ();
 
   let cr = Cairo_gtk.create window#misc#window in
   set_cairo_font cr;
-  let fe = font_extents cr in
 
-  let conf = { char_width = int_of_float fe.max_x_advance; char_height = int_of_float fe.baseline } in
-  let snode = Control_flow.fold_cfg cfg in
-  let layout = layout_node conf 0 snode in
-  let _ = da#event#connect#expose (expose da layout) in
-  let layout_width = layout.right - layout.left in
-  da#misc#set_size_request ~width:(layout_width+layout_margin*2)
-    ~height:(layout.height+layout_margin*2) ();
+  let view = {
+    cairo = cr;
+    canvas;
+    text_view;
+    layout = None;
+    current_function_va = 0;
+    db;
+  } in
 
-  let env = Semant.new_env jump_info in
-  let snode' = Control_flow.map_snode (Elaborate.elaborate_basic_block false env) snode in
-  let _ = button1#connect#clicked ~callback:(show_pseudocode snode' label1) in
-  let cfg', env' = Elaborate.elaborate_cfg true jump_info cfg in
-  Dataflow.convert_to_ssa cfg';
-  let rec loop () =
-    if Dataflow.auto_subst cfg' || Simplify.simplify_cfg env' cfg' || Dataflow.remove_dead_code cfg' then loop ()
-  in
-  loop ();
-  let _ = button2#connect#clicked ~callback:(show_ssa cfg' label1) in
+  let _ = canvas#event#connect#expose (expose view) in
+  let _ = button1#connect#clicked ~callback:(show_pseudocode view) in
+  let _ = button2#connect#clicked ~callback:(show_ssa view) in
+  let _ = button3#connect#clicked ~callback:(goto_function_prompt view) in
+
+  goto_function view init_pc;
 
   Main.main ()

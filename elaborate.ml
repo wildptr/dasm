@@ -1,3 +1,4 @@
+open Env
 open Inst
 open Semant
 
@@ -129,7 +130,7 @@ let fnname_of_op = function
   | _ -> failwith "fnname_of_op: not implemented"
 
 let xxx env pc =
-  let jump = Hashtbl.find env.jump_info pc in
+  let jump = Hashtbl.find env.db.Database.jump_info pc in
   let d, u =
     match jump with
     | J_unknown -> [], (Array.to_list reg_name_table) |> List.map (fun name -> E_var name)
@@ -269,8 +270,8 @@ let elaborate_basic_block expand env bb =
   env.stmts_rev <- [];
   { bb with stmts }
 
-let elaborate_cfg expand jump_info cfg =
-  let env = new_env jump_info in
+let elaborate_cfg db expand cfg =
+  let env = new_env db in
   let node' = cfg.Cfg.node |> Array.map (elaborate_basic_block expand env) in
   { cfg with node = node' }, env
 

@@ -1,4 +1,5 @@
 open Batteries
+open Env
 open Semant
 
 let rec simplify env = function

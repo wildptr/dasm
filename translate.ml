@@ -2,8 +2,6 @@ open Format
 open Semant
 open Spec_ast
 
-(* TODO: rewrite this module *)
-
 (* "%s takes exactly %d arguments" *)
 exception Wrong_arity of string * int
 exception Index_out_of_bounds of (astexpr * int) * int
@@ -25,6 +23,18 @@ type value =
   | Prim of string
 
 type symtab = value BatMap.String.t
+
+type env = {
+  mutable symtab : symtab;
+  var_tab : (string, int) Hashtbl.t;
+  mutable stmts_rev : stmt list;
+}
+
+let new_env symtab =
+  let var_tab = Hashtbl.create 0 in
+  { symtab; var_tab; stmts_rev = [] }
+
+let append_stmt env stmt = env.stmts_rev <- stmt :: env.stmts_rev
 
 let prim_of_unary_op = function
   | Not -> P1_not
@@ -237,8 +247,8 @@ let rec translate_expr st = function
     let addr', w = translate_expr st addr in
     E_load (size', addr'), w
 
-let translate_stmt st_ref env stmt =
-  let st = !st_ref in
+let translate_stmt env stmt =
+  let st = env.symtab in
   let do_assign loc f w =
     begin match loc with
       | Loc_var name ->
@@ -262,7 +272,7 @@ let translate_stmt st_ref env stmt =
       | Loc_newvar name ->
         begin match try_lookup st name with
           | None ->
-            st_ref := extend_symtab (name, Var (name, w)) st;
+            env.symtab <- extend_symtab (name, Var (name, w)) st;
             Hashtbl.add env.var_tab name w;
             append_stmt env (f name)
           | Some _ -> raise (Redefinition name)
@@ -321,21 +331,21 @@ let translate_stmt st_ref env stmt =
 
 let translate_proc st proc =
   (* construct static environment to translate function body in *)
-  let proc_st = ref st in
-  let proc_env = new_env (Hashtbl.create 0) in
+  let proc_env = new_env st in
   proc.ap_params |> List.iter
     begin fun (param_name, c_param_width) ->
-      let param_width = translate_cexpr !proc_st c_param_width in
-      proc_st :=
-        extend_symtab (param_name, Var (param_name, param_width)) !proc_st;
+      let param_width = translate_cexpr proc_env.symtab c_param_width in
+      proc_env.symtab <-
+        extend_symtab (param_name, Var (param_name, param_width))
+          proc_env.symtab;
       Hashtbl.add proc_env.var_tab param_name param_width
     end;
   let param_names = proc.ap_params |> List.map fst in
   let result_width = translate_cexpr st proc.ap_result_width in
-  proc.ap_body |> List.iter (translate_stmt proc_st proc_env);
+  proc.ap_body |> List.iter (translate_stmt proc_env);
   (*Printf.printf "%s: %d statements\n" proc.ap_name (List.length proc_env.stmts_rev);*)
   { p_name = proc.ap_name;
-    p_body = get_stmts proc_env;
+    p_body = List.rev proc_env.stmts_rev;
     p_param_names = param_names;
     p_result_width = result_width;
     p_var_tab = proc_env.var_tab }

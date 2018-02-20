@@ -187,11 +187,19 @@ let reg_name_table = [|
 
 let number_of_registers = 37
 
-(* TODO: add segment field *)
+type segment =
+  | Seg_ES
+  | Seg_CS
+  | Seg_SS
+  | Seg_DS
+  | Seg_FS
+  | Seg_GS
+
 type mem = {
   base : reg option;
   index : (reg * int (* scale *)) option;
   disp : int;
+  seg : segment;
 }
 
 let pp_mem f m =
@@ -200,6 +208,16 @@ let pp_mem f m =
     pp_print_string f (string_of_reg reg);
     if scale > 1 then fprintf f "*%d" scale
   in
+  let seg_name =
+    match m.seg with
+    | Seg_ES -> "es"
+    | Seg_CS -> "cs"
+    | Seg_SS -> "ss"
+    | Seg_DS -> "ds"
+    | Seg_FS -> "fs"
+    | Seg_GS -> "gs"
+  in
+  fprintf f "%s:" seg_name;
   match m.base, m.index with
   | Some base, Some index ->
     fprintf f "[%s+%a" (string_of_reg base) pp_index index;
@@ -221,12 +239,12 @@ type regmem =
   | Mem of mem
 
 type prefix =
-  | Prefix_26
-  | Prefix_2e
-  | Prefix_36
-  | Prefix_3e
-  | Prefix_64
-  | Prefix_65
+  | Prefix_26 (* ES *)
+  | Prefix_2e (* CS or branch not taken *)
+  | Prefix_36 (* SS *)
+  | Prefix_3e (* DS of branch taken *)
+  | Prefix_64 (* FS *)
+  | Prefix_65 (* GS *)
   | Prefix_66
   | Prefix_67
   | Prefix_f0

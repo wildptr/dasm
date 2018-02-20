@@ -65,12 +65,11 @@ template proc log_op<N, OP>(a:N, b:N):N
 
 template proc shl<N, M>(x:N, n:M):N
 {
-	let out1 = shift_left(CF.x, n);
-	let out = out1[N-1:0];
-	CF = out1[N];
+	let out = shift_left(x, n);
 	// TODO: the following is incorrect; see 325383.pdf p.1236
 	//PF = ~^out[7:0];
 	//AF = undefined(1);
+	CF = undefined(1);
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = undefined(1);
@@ -79,11 +78,10 @@ template proc shl<N, M>(x:N, n:M):N
 
 template proc shr<N, M>(x:N, n:M):N
 {
-	let out1 = log_shift_right(x.CF, n);
-	let out = out1[N:1];
-	CF = out[0];
+	let out = log_shift_right(x, n);
 	//PF = ~^out[7:0];
 	//AF = undefined(1);
+	CF = undefined(1);
 	ZF = out == {0:N};
 	SF = out[N-1];
 	OF = undefined(1);
@@ -92,9 +90,8 @@ template proc shr<N, M>(x:N, n:M):N
 
 template proc sar<N, M>(x:N, n:M):N
 {
-	let out1 = ari_shift_right(x.CF, n);
-	let out = out1[N:1];
-	CF = out[0];
+	let out = ari_shift_right(x, n);
+	CF = undefined(1);
 	//PF = ~^out[7:0];
 	//AF = undefined(1);
 	ZF = out == {0:N};
@@ -161,21 +158,29 @@ proc push_segr32(data:16)
 	call push32({0:16}.data);
 }
 
-template proc inc_dec<N, S>(in:N)
+template proc inc<N>(in:N)
 {
-	let sum1 = add_with_carry(in, repeat(S, N), ~S);
-	let out = sum1[N-1:0];
+	let out = in + {1:N};
 	//PF = ~^out[7:0];
 	//AF = in[4] ^ out[4];
 	ZF = out == {0:N};
 	SF = out[N-1];
-	OF = sum1[N] ^ out[N-1] ^ in[N-1];
+	//OF = sum1[N] ^ out[N-1] ^ in[N-1];
+	OF = undefined(1);
 }
 
-proc inc8  = inc_dec< 8, '0'>;
-proc inc16 = inc_dec<16, '0'>;
-proc inc32 = inc_dec<32, '0'>;
+template proc dec<N>(in:N)
+{
+	let out = in - {1:N};
+	ZF = out == {0:N};
+	SF = out[N-1];
+	OF = undefined(1);
+}
 
-proc dec8  = inc_dec< 8, '1'>;
-proc dec16 = inc_dec<16, '1'>;
-proc dec32 = inc_dec<32, '1'>;
+proc inc8  = inc< 8>;
+proc inc16 = inc<16>;
+proc inc32 = inc<32>;
+
+proc dec8  = dec< 8>;
+proc dec16 = dec<16>;
+proc dec32 = dec<32>;

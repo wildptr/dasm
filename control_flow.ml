@@ -45,7 +45,9 @@ type string_stream = {
   mutable pos : int;
 }
 
-let build_cfg code init_pc init_offset =
+let build_cfg db init_pc init_offset =
+  let open Database in
+  let code = db.code in
   let start_end = ref Leaf in
   let edges = ref [] in (* from end of basic block to start of basic block *)
   let q = Queue.create () in
@@ -56,8 +58,6 @@ let build_cfg code init_pc init_offset =
     s.pos <- s.pos + 1;
     c
   in
-  let inst_table = Hashtbl.create 0 in
-  let jump_info = Hashtbl.create 0 in
   while not (Queue.is_empty q) do
     let pc = Queue.pop q in
     begin match itree_find pc !start_end with
@@ -68,18 +68,19 @@ let build_cfg code init_pc init_offset =
       | Nowhere ->
         s.pos <- init_offset + (pc - init_pc);
         let rec loop pc =
-          let inst = Dasm.(disassemble Mode32bit next) in
-          Hashtbl.add inst_table pc inst;
+          let config = Dasm.{ mode = Mode32bit; pc_opt = Some pc } in
+          let inst = Dasm.(disassemble config next) in
+          Hashtbl.add db.inst_table pc inst;
           let l = length_of inst in
           let pc' = pc+l in
           match inst.operation with
           | I_jmp ->
             begin match List.hd inst.operands with
               | O_offset ofs ->
-                Hashtbl.add jump_info pc Semant.J_resolved;
+                Hashtbl.add db.jump_info pc Semant.J_resolved;
                 pc', [pc+ofs, Edge_neutral]
               | _ ->
-                Hashtbl.add jump_info pc Semant.J_unknown;
+                Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', []
             end
           | I_jmpfar -> failwith "cannot handle far jump"
@@ -87,18 +88,18 @@ let build_cfg code init_pc init_offset =
           | I_cjmp ->
             begin match List.hd inst.operands with
               | O_offset ofs ->
-                Hashtbl.add jump_info pc Semant.J_resolved;
+                Hashtbl.add db.jump_info pc Semant.J_resolved;
                 pc', [pc', Edge_false; pc+ofs, Edge_true]
               | _ ->
-                Hashtbl.add jump_info pc Semant.J_unknown;
+                Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', [pc', Edge_false]
             end
           | I_ret | I_retfar | I_retn ->
-            Hashtbl.add jump_info pc Semant.J_ret;
+            Hashtbl.add db.jump_info pc Semant.J_ret;
             pc', []
           | _ ->
             if inst.operation = I_call then
-              Hashtbl.add jump_info pc Semant.J_call;
+              Hashtbl.add db.jump_info pc Semant.J_call;
             if itree_find pc' !start_end = Start then
               pc', [pc', Edge_neutral]
             else
@@ -106,35 +107,28 @@ let build_cfg code init_pc init_offset =
         in
         let pc', dests = loop pc in
         start_end := itree_add (pc,pc') !start_end;
-        dests |> List.iter (fun (dest, attr) ->
-            edges := (pc', dest, attr) :: !edges;
-            (* If dest is strictly between start(b) and end(b) for some basic
-               block b, then split b at dest.  If dest equals start(b) for some b,
-               then do nothing.  Otherwise add dest to queue.  *)
-            Queue.add dest q)
+        dests |> List.iter begin fun (dest, attr) ->
+          edges := (pc', dest, attr) :: !edges;
+          (* If dest is strictly between start(b) and end(b) for some basic
+             block b, then split b at dest.  If dest equals start(b) for some b,
+             then do nothing.  Otherwise add dest to queue.  *)
+          Queue.add dest q
+        end
     end
   done;
   let start_end_list = itree_to_list !start_end in
-(*   let env = Semant.new_env jump_info in *)
   let basic_blocks =
     start_end_list |> List.map begin fun (start, stop) ->
       let rec loop pc insts =
-        let inst = Hashtbl.find inst_table pc in
+        let inst = Hashtbl.find db.inst_table pc in
         let insts' = inst :: insts in
-        (*           Elaborate.elaborate_inst env pc inst; *)
         let pc' = pc + length_of inst in
         if pc' = stop then insts' else loop pc' insts'
       in
       let insts = List.rev (loop start []) in
-(*
-        Expand.expand env;
-        let stmts = Semant.get_stmts env in
-        env.stmts_rev <- [];
-*)
       { start; stop; stmts = insts }
     end
   in
-  (* basic_blocks, !edges *)
   let n = List.length basic_blocks in
   let start_table = Hashtbl.create 0 in
   let end_table = Hashtbl.create 0 in
@@ -156,7 +150,7 @@ let build_cfg code init_pc init_offset =
     succ.(i) <- List.rev succ.(i);
     pred.(i) <- List.rev pred.(i)
   done;
-  { node = Array.of_list basic_blocks; succ; pred; edges }, jump_info
+  { node = Array.of_list basic_blocks; succ; pred; edges }
 
 (* adapted from Modern Compiler Implementation in C, pp. 448-449 *)
 let compute_idom succ pred =
@@ -219,18 +213,6 @@ let compute_idom succ pred =
     if samedom.(i) >= 0 then idom.(i) <- idom.(samedom.(i))
   done;
   idom
-
-type 'a node =
-  | Virtual
-  | BB of 'a basic_block * int
-  | Seq of 'a node * 'a node
-  | Generic of int list * 'a node array * edge list
-  | If of 'a node * bool * 'a node * bool
-  | If_else of 'a node * bool * 'a node * 'a node
-  | Fork1 of 'a node * bool * 'a node * bool
-  | Fork2 of 'a node * bool * 'a node * bool * 'a node * bool
-  | Do_while of 'a node * bool
-  | While_true of 'a node
 
 let rec map_snode f = function
   | Virtual -> Virtual
