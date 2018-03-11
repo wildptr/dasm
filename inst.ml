@@ -238,46 +238,6 @@ type regmem =
   | Reg of int
   | Mem of mem
 
-type prefix =
-  | Prefix_26 (* ES *)
-  | Prefix_2e (* CS or branch not taken *)
-  | Prefix_36 (* SS *)
-  | Prefix_3e (* DS of branch taken *)
-  | Prefix_64 (* FS *)
-  | Prefix_65 (* GS *)
-  | Prefix_66
-  | Prefix_67
-  | Prefix_f0
-  | Prefix_f2
-  | Prefix_f3
-
-(* prefixes can be packed into 7 bits *)
-let prefix_mask = function
-  | Prefix_26
-  | Prefix_2e
-  | Prefix_36
-  | Prefix_3e
-  | Prefix_64
-  | Prefix_65 -> 0x1c
-  | Prefix_66 -> 0x20
-  | Prefix_67 -> 0x40
-  | Prefix_f0
-  | Prefix_f2
-  | Prefix_f3 -> 3
-
-let prefix_value = function
-  | Prefix_26 -> 1 lsl 2
-  | Prefix_2e -> 2 lsl 2
-  | Prefix_36 -> 3 lsl 2
-  | Prefix_3e -> 4 lsl 2
-  | Prefix_64 -> 5 lsl 2
-  | Prefix_65 -> 6 lsl 2
-  | Prefix_66 -> 0x20
-  | Prefix_67 -> 0x40
-  | Prefix_f0 -> 1
-  | Prefix_f2 -> 2
-  | Prefix_f3 -> 3
-
 let format_size = function
   | 1 -> "byte"
   | 2 -> "word"
@@ -496,19 +456,16 @@ type operation =
 
 type inst = {
   ext_opcode : int; (* opcode << 3 | opcode_extension *)
-  prefix : int;
   bytes : string;
   operation : operation;
   variant : int;
   operands : operand list;
 }
 
-let make ext_opcode prefix bytes operation variant operands =
-  { ext_opcode; prefix; bytes; operation; variant; operands }
+let make ext_opcode bytes operation variant operands =
+  { ext_opcode; bytes; operation; variant; operands }
 
 let ext_opcode_of inst = inst.ext_opcode
-
-let prefix_of inst = inst.prefix
 
 let bytes_of inst = inst.bytes
 
@@ -732,6 +689,3 @@ let pp f inst =
     pp_print_string f " ";
     pp_operand f o_hd;
     List.iter (fun o -> pp_print_string f ","; pp_operand f o) o_tl
-
-let has_prefix inst prefix =
-  inst.prefix land (prefix_mask prefix) = prefix_value prefix
