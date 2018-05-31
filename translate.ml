@@ -74,14 +74,20 @@ let init_symtab = [
   "BP", 16;
   "SI", 16;
   "DI", 16;
-  "AH",  8;
-  "CH",  8;
-  "DH",  8;
-  "BH",  8;
   "AL",  8;
   "CL",  8;
   "DL",  8;
   "BL",  8;
+  "AH",  8;
+  "CH",  8;
+  "DH",  8;
+  "BH",  8;
+  "ES", 16;
+  "CS", 16;
+  "SS", 16;
+  "DS", 16;
+  "FS", 16;
+  "GS", 16;
   "CF",  1;
   "PF",  1;
   "AF",  1;
@@ -192,7 +198,7 @@ let rec translate_expr st = function
         E_prim2 (prim, a1', a2'), 1
       in
       match func_name with
-      | "add_with_carry" ->
+      | "carry" ->
         let a1, a2, a3 =
           match args with
           | [a1;a2;a3] -> a1, a2, a3
@@ -203,7 +209,7 @@ let rec translate_expr st = function
         let a3', w3 = translate_expr st a3 in
         check_width w1 w2;
         check_width w3 1;
-        E_prim3 (P3_addwithcarry, a1', a2', a3'), w1+1
+        E_prim3 (P3_carry, a1', a2', a3'), 1
       | "and" -> f1 Pn_and
       | "xor" -> f1 Pn_xor
       | "or"  -> f1 Pn_or
@@ -244,16 +250,19 @@ let rec translate_expr st = function
     let addr', w = translate_expr st addr in
     let size' = translate_cexpr st size in
     E_load (size', seg', addr'), w
+  | Expr_extend (sign, data, size) ->
+    let data', _ = translate_expr st data in
+    let size' = translate_cexpr st size in
+    E_extend (sign, data', size'), size'
 
-let translate_stmt env stmt =
-  let st = env.symtab in
+let translate_stmt st emit stmt =
   let do_assign loc f w =
     begin match loc with
       | Lhs_var name ->
         begin match try_lookup st name with
           | None -> raise (Unbound_symbol name)
           | Some (Var (r, r_width)) ->
-            append_stmt env (f r)
+            emit (f r)
           | _ -> raise (Invalid_assignment name)
         end
       | Lhs_mem memloc -> () (* TODO *)
@@ -281,37 +290,28 @@ let translate_stmt env stmt =
          let param_width = Hashtbl.find proc.p_var_tab param_name in
          check_width param_width arg_width);
     (* function that translates arguments *)
-    (*let rec f = function
-      | [] -> proc_body
-      | (arg, _) :: args'_widths' -> E_let (arg, (f args'_widths'))
-      in
-      f args'_widths, result_width*)
-    append_stmt env (S_call (proc, args, None))
+    emit (S_call (proc, args, None))
   | Stmt_return e ->
     let e', _ = translate_expr st e in
-    append_stmt env (S_return e')
-  (*| Stmt_load (c_size, addr, name) ->
-    let size = translate_cexpr st c_size in
-    let w = size*8 in
-    st_ref := extend_symtab (name, Var (name, w)) st;
-    let addr', _ = translate_expr st addr in
-    append_stmt env (S_load (size, addr', name))*)
+    emit (S_return e')
   | Stmt_jump addr -> assert false
 
 let translate_proc st proc =
   (* construct static environment to translate function body in *)
   let proc_env = new_env st in
-  proc.ap_params |> List.iter
-    begin fun (param_name, c_param_width) ->
-      let param_width = translate_cexpr proc_env.symtab c_param_width in
-      proc_env.symtab <-
-        extend_symtab (param_name, Var (param_name, param_width))
-          proc_env.symtab;
-      Hashtbl.add proc_env.var_tab param_name param_width
-    end;
+  let register_var (name, c_width) =
+    let width = translate_cexpr proc_env.symtab c_width in
+    proc_env.symtab <-
+      extend_symtab (name, Var (name, width))
+        proc_env.symtab;
+    Hashtbl.add proc_env.var_tab name width
+  in
+  proc.ap_params |> List.iter register_var;
+  let vardecls, stmts = proc.ap_body in
+  vardecls |> List.iter register_var;
   let param_names = proc.ap_params |> List.map fst in
   let result_width = translate_cexpr st proc.ap_result_width in
-  proc.ap_body |> List.iter (translate_stmt proc_env);
+  stmts |> List.iter (translate_stmt proc_env.symtab (append_stmt proc_env));
   (*Printf.printf "%s: %d statements\n" proc.ap_name (List.length proc_env.stmts_rev);*)
   { p_name = proc.ap_name;
     p_body = List.rev proc_env.stmts_rev;

@@ -37,6 +37,7 @@ open Spec_ast
 %token K_proc
 %token K_template
 %token K_undefined
+%token K_var
 
 %left Bar
 %left Caret
@@ -59,11 +60,18 @@ decl:
   | proc_templ { Decl_proc_templ $1 }
   | proc_inst { Decl_proc_inst $1 }
 
+localdecl:
+  | K_var; name = Ident; Colon; size = cexpr; Semi
+    { name, size }
+
+block:
+  | LBrace; decls = list(localdecl); stmts = list(stmt); RBrace
+    { decls, stmts }
+
 proc_def:
   | K_proc; ap_name = Ident;
     LParen; ap_params = separated_list(Comma, name_length_pair); RParen;
-    result_width_opt = option(preceded(Colon, cexpr));
-    LBrace; ap_body = list(stmt); RBrace
+    result_width_opt = option(preceded(Colon, cexpr)); ap_body = block
     {{ ap_name; ap_params; ap_body;
        ap_result_width =
          match result_width_opt with None -> C_int 0 | Some width -> width }}
@@ -88,6 +96,8 @@ primary_expr:
     { Expr_undef width }
   | memloc
     { Expr_load $1 }
+  | LParen; e = primary_expr; Colon; w = primary_cexpr; RParen
+    { Expr_extend (false, e, w) }
 
 memloc:
   | LBrack; seg = primary_expr; Colon; off = primary_expr; RBrack; Colon;
@@ -192,8 +202,7 @@ proc_templ:
   | K_template; K_proc; pt_name = Ident;
     LAngle; pt_templ_params = separated_list(Comma, Ident); RAngle;
     LParen; pt_proc_params = separated_list(Comma, name_length_pair); RParen;
-    result_width_opt = option(preceded(Colon, cexpr));
-    LBrace; pt_body = list(stmt); RBrace
+    result_width_opt = option(preceded(Colon, cexpr)); pt_body = block
     {{ pt_name; pt_templ_params; pt_proc_params; pt_body;
        pt_result_width =
          match result_width_opt with Some width -> width | None -> C_int 0 }}

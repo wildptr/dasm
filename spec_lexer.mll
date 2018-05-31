@@ -22,6 +22,7 @@ let keyword_map : token StringMap.t =
     "proc", K_proc;
     "template", K_template;
     "undefined", K_undefined;
+    "var", K_var;
   ] |> List.fold_left (fun map (k, v) -> StringMap.add k v map) StringMap.empty
 
 }

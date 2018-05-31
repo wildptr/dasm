@@ -17,7 +17,7 @@ type prim2 =
   | P2_below
 
 type prim3 =
-  | P3_addwithcarry
+  | P3_carry
 
 type primn =
   | Pn_concat
@@ -77,7 +77,7 @@ let pp_sep_list sep pp f = function
 let rec pp_expr f = function
   | E_lit bv -> (*fprintf f "'%a'" Bitvec.pp bv*)
     (*fprintf f "%d:%d" (Bitvec.to_int bv) (Bitvec.length bv)*)
-    fprintf f "%nu" (Bitvec.to_nativeint bv)
+    fprintf f "%nd" (Bitvec.to_nativeint bv)
   | E_var s -> pp_print_string f s
   | E_part (e, lo, hi) -> fprintf f "%a[%d:%d]" pp_expr e lo hi
   | E_prim1 (p, e) ->
@@ -101,8 +101,8 @@ let rec pp_expr f = function
     end
   | E_prim3 (p, e1, e2, e3) ->
     begin match p with
-      | P3_addwithcarry ->
-        fprintf f "add_with_carry(%a, %a, %a)" pp_expr e1 pp_expr e2 pp_expr e3
+      | P3_carry ->
+        fprintf f "carry(%a, %a, %a)" pp_expr e1 pp_expr e2 pp_expr e3
     end
   | E_primn (p, es) ->
     let op_s =

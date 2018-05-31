@@ -1,7 +1,7 @@
 type proc = {
   mutable cfg : Inst.inst Cfg.cfg;
-  mutable inst_snode : Inst.inst Cfg.stmt;
-  mutable stmt_snode : Semant.stmt Cfg.stmt;
+  mutable inst_snode : Inst.inst Cfg.ctlstruct;
+  mutable stmt_snode : Semant.stmt Cfg.ctlstruct;
 }
 
 type db = {

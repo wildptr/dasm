@@ -10,7 +10,7 @@ template proc add<N>(a:N, b:N):N
 template proc adc<N>(a:N, b:N):N
 {
 	var out:N;
-	out = a + b + zero_extend(CF, N);
+	out = a + b + (CF:N);
 	CF = carry(a, b, CF);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
@@ -30,7 +30,7 @@ template proc sub<N>(a:N, b:N):N
 template proc sbb<N>(a:N, b:N)
 {
 	var out:N;
-	out = a - b - zero_extend(CF, N);
+	out = a - b - (CF:N);
 	CF = ~carry(a, ~b, ~CF);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
@@ -147,7 +147,7 @@ proc pop32():32
 proc push_segr32(data:16)
 {
 	// NOTE: For some CPU models, upper 16 bits may be unchanged.
-	call push32(#0:16.data);
+	push32(#0:16.data);
 }
 
 template proc inc<N>(in:N)

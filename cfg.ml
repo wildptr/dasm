@@ -14,27 +14,27 @@ type 'a cfg = {
   edges : edge list;
 }
 
-type 'a stmt =
+type 'a ctlstruct =
   | Virtual
   | BB of 'a basic_block * int
-  | Seq of 'a stmt * 'a stmt
-  | Generic of int list * 'a stmt array * edge list
-  | If of 'a stmt * bool * 'a stmt * bool
-  | If_else of 'a stmt * bool * 'a stmt * 'a stmt
-  | Fork1 of 'a stmt * bool * 'a stmt * bool
-  | Fork2 of 'a stmt * bool * 'a stmt * bool * 'a stmt * bool
-  | Do_while of 'a stmt * bool
-  | While_true of 'a stmt
+  | Seq of 'a ctlstruct * 'a ctlstruct
+  | Generic of int list * 'a ctlstruct array * edge list
+  | If of 'a ctlstruct * bool * 'a ctlstruct * bool
+  | If_else of 'a ctlstruct * bool * 'a ctlstruct * 'a ctlstruct
+  | Fork1 of 'a ctlstruct * bool * 'a ctlstruct * bool
+  | Fork2 of 'a ctlstruct * bool * 'a ctlstruct * bool * 'a ctlstruct * bool
+  | Do_while of 'a ctlstruct * bool
+  | While_true of 'a ctlstruct
 
-let rec map_stmt f = function
+let rec map_ctlstruct f = function
   | Virtual -> Virtual
   | BB (b, nexit) -> BB (f b, nexit)
-  | Seq (v1, v2) -> Seq (map_stmt f v1, map_stmt f v2)
+  | Seq (v1, v2) -> Seq (map_ctlstruct f v1, map_ctlstruct f v2)
   | Generic (exits, node, edges) ->
-    Generic (exits, Array.map (map_stmt f) node, edges)
+    Generic (exits, Array.map (map_ctlstruct f) node, edges)
   | If (v1, t, v2, has_exit) ->
-    If (map_stmt f v1, t, map_stmt f v2, has_exit)
+    If (map_ctlstruct f v1, t, map_ctlstruct f v2, has_exit)
   | If_else (v1, t, v2, v3) ->
-    If_else (map_stmt f v1, t, map_stmt f v2, map_stmt f v3)
-  | Do_while (v, t) -> Do_while (map_stmt f v, t)
+    If_else (map_ctlstruct f v1, t, map_ctlstruct f v2, map_ctlstruct f v3)
+  | Do_while (v, t) -> Do_while (map_ctlstruct f v, t)
   | _ -> failwith "not implemented"

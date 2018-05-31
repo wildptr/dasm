@@ -166,7 +166,7 @@ let goto_function view va =
       let env = Env.new_env db in
       let stmt_snode =
         inst_snode |>
-        map_stmt (Elaborate.elaborate_basic_block false env)
+        map_ctlstruct (Elaborate.elaborate_basic_block false env)
       in
       let proc = Database.{ cfg; inst_snode; stmt_snode } in
       Hashtbl.add db.Database.proc_table va proc;

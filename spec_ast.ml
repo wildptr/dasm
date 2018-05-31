@@ -83,6 +83,7 @@ type astexpr =
   | Expr_apply of string * astexpr list
   | Expr_undef of cexpr
   | Expr_load of memloc
+  | Expr_extend of bool * astexpr * cexpr
 
 and memloc = astexpr * astexpr * cexpr (* seg, offset, size *)
 
@@ -117,8 +118,8 @@ let rec pp_astexpr f = function
   | Expr_apply (func_name, args) ->
     fprintf f "%s(%a)" func_name (pp_comma_separated_list pp_astexpr) args;
   | Expr_undef width -> fprintf f "undefined(%a)" pp_cexpr width
-  | Expr_load memloc ->
-    pp_memloc f memloc
+  | Expr_load memloc -> pp_memloc f memloc
+  | Expr_extend (sign, data, n) -> () (* TODO *)
 
 and pp_memloc f (seg, off, size) =
   fprintf f "[%a:%a]:%a" pp_astexpr seg pp_astexpr off pp_cexpr size
@@ -146,19 +147,25 @@ type param_list = (string * cexpr) list
 
 let pp_param f (name, width) = fprintf f "%s:%a" name pp_cexpr width
 
+type vardecl = string * cexpr
+type astblock = vardecl list * aststmt list
+
 type astproc = {
   ap_name : string;
   ap_params : param_list;
-  ap_body : aststmt list;
+  ap_body : astblock;
   ap_result_width : cexpr;
 }
+
+let pp_astblock f (decls, stmts) =
+  () (* TODO *)
 
 let pp_astproc f astproc =
   fprintf f "proc %s(%a):%a {%a}"
     astproc.ap_name
     (pp_comma_separated_list pp_param) astproc.ap_params
     pp_cexpr astproc.ap_result_width
-    (pp_list pp_aststmt) astproc.ap_body
+    pp_astblock astproc.ap_body
 
 type templ_arg =
   | TA_int of int
@@ -170,7 +177,7 @@ type proc_templ = {
   pt_name : string;
   pt_templ_params : string list;
   pt_proc_params : param_list;
-  pt_body : aststmt list;
+  pt_body : astblock;
   pt_result_width : cexpr;
 }
 
@@ -180,7 +187,7 @@ let pp_proc_templ f pt =
     (pp_comma_separated_list pp_print_string) pt.pt_templ_params
     (pp_comma_separated_list pp_param) pt.pt_proc_params
     pp_cexpr pt.pt_result_width
-    (pp_list pp_aststmt) pt.pt_body
+    pp_astblock pt.pt_body
 
 type proc_inst = {
   pi_inst_name : string;

@@ -43,7 +43,7 @@ let rec size_of_expr env = function
     end
   | E_prim3 (p, e1, e2, e3) ->
     begin match p with
-      | P3_addwithcarry -> size_of_expr env e3 + 1
+      | P3_carry -> 1
     end
   | E_primn (p, es) ->
     begin match p with
