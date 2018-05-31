@@ -238,52 +238,32 @@ let rec translate_expr st = function
   | Expr_undef c_width ->
     let width = translate_cexpr st c_width in
     E_nondet (width, 0), width (* TODO: nondet id *)
-  | Expr_repeat (data, c_n) ->
-    let data', w = translate_expr st data in
-    let n = translate_cexpr st c_n in
-    E_repeat (data', n), w*n
-  | Expr_load (size, addr) ->
-    let size' = translate_cexpr st size in
+  | Expr_load (seg, addr, size) ->
+    let seg', segw = translate_expr st seg in
+    if segw <> 16 then failwith "width of segment selector is not 16";
     let addr', w = translate_expr st addr in
-    E_load (size', addr'), w
+    let size' = translate_cexpr st size in
+    E_load (size', seg', addr'), w
 
 let translate_stmt env stmt =
   let st = env.symtab in
   let do_assign loc f w =
     begin match loc with
-      | Loc_var name ->
+      | Lhs_var name ->
         begin match try_lookup st name with
           | None -> raise (Unbound_symbol name)
           | Some (Var (r, r_width)) ->
             append_stmt env (f r)
           | _ -> raise (Invalid_assignment name)
         end
-      (*| Loc_part (name, hi, lo) ->
-        begin match try_lookup st name with
-          | None -> raise (Unbound_symbol name)
-          | Some (Var (r, r_width)) ->
-            let hi' = translate_cexpr st hi + 1 in
-            let lo' = translate_cexpr st lo in
-            assert (lo' >= 0);
-            assert (hi' <= r_width);
-            append_stmt env (f (L_part (r, lo', hi')))
-          | _ -> raise (Invalid_assignment name)
-        end*)
-      | Loc_newvar name ->
-        begin match try_lookup st name with
-          | None ->
-            env.symtab <- extend_symtab (name, Var (name, w)) st;
-            Hashtbl.add env.var_tab name w;
-            append_stmt env (f name)
-          | Some _ -> raise (Redefinition name)
-        end
+      | Lhs_mem memloc -> () (* TODO *)
     end
   in
   match stmt with
   | Stmt_set (loc, e) ->
     let e', e_width = translate_expr st e in
     do_assign loc (fun loc' -> S_set (loc', e')) e_width
-  | Stmt_call (proc_name, args, result_loc_opt) ->
+  | Stmt_call (proc_name, args) ->
     let proc =
       match lookup st proc_name with
       | Proc p -> p
@@ -306,27 +286,16 @@ let translate_stmt env stmt =
       | (arg, _) :: args'_widths' -> E_let (arg, (f args'_widths'))
       in
       f args'_widths, result_width*)
-    begin match result_loc_opt with
-      | None -> append_stmt env (S_call (proc, args, None))
-      | Some loc ->
-        let rhs_width = proc.p_result_width in
-        do_assign loc (fun loc' -> S_call (proc, args, Some loc')) rhs_width
-    end
-  | Stmt_output e ->
+    append_stmt env (S_call (proc, args, None))
+  | Stmt_return e ->
     let e', _ = translate_expr st e in
-    append_stmt env (S_output e')
+    append_stmt env (S_return e')
   (*| Stmt_load (c_size, addr, name) ->
     let size = translate_cexpr st c_size in
     let w = size*8 in
     st_ref := extend_symtab (name, Var (name, w)) st;
     let addr', _ = translate_expr st addr in
     append_stmt env (S_load (size, addr', name))*)
-  | Stmt_store (c_size, addr, data) ->
-    let size = translate_cexpr st c_size in
-    let addr', _ = translate_expr st addr in
-    let data', data_width = translate_expr st data in
-    check_width (size*8) data_width;
-    append_stmt env (S_store (size, addr', data'))
   | Stmt_jump addr -> assert false
 
 let translate_proc st proc =

@@ -14,14 +14,27 @@ type 'a cfg = {
   edges : edge list;
 }
 
-type 'a node =
+type 'a stmt =
   | Virtual
   | BB of 'a basic_block * int
-  | Seq of 'a node * 'a node
-  | Generic of int list * 'a node array * edge list
-  | If of 'a node * bool * 'a node * bool
-  | If_else of 'a node * bool * 'a node * 'a node
-  | Fork1 of 'a node * bool * 'a node * bool
-  | Fork2 of 'a node * bool * 'a node * bool * 'a node * bool
-  | Do_while of 'a node * bool
-  | While_true of 'a node
+  | Seq of 'a stmt * 'a stmt
+  | Generic of int list * 'a stmt array * edge list
+  | If of 'a stmt * bool * 'a stmt * bool
+  | If_else of 'a stmt * bool * 'a stmt * 'a stmt
+  | Fork1 of 'a stmt * bool * 'a stmt * bool
+  | Fork2 of 'a stmt * bool * 'a stmt * bool * 'a stmt * bool
+  | Do_while of 'a stmt * bool
+  | While_true of 'a stmt
+
+let rec map_stmt f = function
+  | Virtual -> Virtual
+  | BB (b, nexit) -> BB (f b, nexit)
+  | Seq (v1, v2) -> Seq (map_stmt f v1, map_stmt f v2)
+  | Generic (exits, node, edges) ->
+    Generic (exits, Array.map (map_stmt f) node, edges)
+  | If (v1, t, v2, has_exit) ->
+    If (map_stmt f v1, t, map_stmt f v2, has_exit)
+  | If_else (v1, t, v2, v3) ->
+    If_else (map_stmt f v1, t, map_stmt f v2, map_stmt f v3)
+  | Do_while (v, t) -> Do_while (map_stmt f v, t)
+  | _ -> failwith "not implemented"

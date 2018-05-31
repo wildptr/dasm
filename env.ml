@@ -53,9 +53,8 @@ let rec size_of_expr env = function
       | Pn_xor
       | Pn_or -> List.hd es |> size_of_expr env
     end
-  | E_load (size, _) -> size * 8
+  | E_load (size, _, _) -> size * 8
   | E_nondet (n, _) -> n
-  | E_repeat (e, n) -> size_of_expr env e * n
   | E_extend (_, e, n) -> n
 
 let new_env db = {

@@ -28,16 +28,18 @@ let rec uses_expr = function
     (uses_expr e3) |> S.union (uses_expr e2) |> S.union (uses_expr e1)
   | E_primn (_, es) -> uses_expr_list es
   | E_nondet _ -> S.empty
-  | E_repeat (e, _) -> uses_expr e
   | E_extend (_, e, _) -> uses_expr e
-  | E_load (_, e) -> uses_expr e
+  | E_load (_, seg, off) -> S.union (uses_expr seg) (uses_expr off)
 
 and uses_expr_list es =
   es |> map uses_expr |> fold_left S.union S.empty
 
 let uses = function
   | S_set (_, e) -> uses_expr e
-  | S_store (_, addr, data) -> S.union (uses_expr data) (uses_expr addr)
+  | S_store (_, seg, off, data) ->
+    uses_expr data |>
+    S.union (uses_expr off) |>
+    S.union (uses_expr seg)
   | S_jump (cond_opt, e, _, u) ->
     begin match cond_opt with
       | Some cond -> S.union (uses_expr cond) (uses_expr e)
@@ -233,10 +235,11 @@ let convert_to_ssa cfg =
           let e' = rename_variables rename_rhs e in
           let name' = rename_lhs name in
           S_set (name', e')
-        | S_store (size, addr, data) ->
-          let addr' = rename_variables rename_rhs addr in
+        | S_store (size, seg, off, data) ->
+          let seg' = rename_variables rename_rhs seg in
+          let off' = rename_variables rename_rhs off in
           let data' = rename_variables rename_rhs data in
-          S_store (size, addr', data')
+          S_store (size, seg', off', data')
         | S_jump (c, dst, d, u) ->
           let c' = Option.map (rename_variables rename_rhs) c in
           let dst' = rename_variables rename_rhs dst in

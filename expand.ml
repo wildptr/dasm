@@ -78,8 +78,8 @@ let rec expand_stmt env retval stmt =
     end
 *)
     append_stmt env (S_set (rename_var loc, e'))
-  | S_store (size, addr, data) ->
-    append_stmt env (S_store (size, rename addr, rename data))
+  | S_store (size, seg, addr, data) ->
+    append_stmt env (S_store (size, seg, rename addr, rename data))
   | S_jump (c, e, d, u) ->
     append_stmt env (S_jump (BatOption.map rename c, rename e, d, u))
   | S_call (proc, args, rv) ->
@@ -107,7 +107,7 @@ let rec expand_stmt env retval stmt =
     List.iter (expand_stmt env rv') proc.p_body;
     proc.p_var_tab |> Hashtbl.iter (fun name _ ->
         Hashtbl.remove env.rename_table name)
-  | S_output e ->
+  | S_return e ->
     begin match retval with
       | None -> ()
       | Some name ->

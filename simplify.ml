@@ -78,7 +78,7 @@ let rec simplify env = function
                 in
                 List.reduce op consts
               in
-              if Bitvec.to_int const = 0 then
+              if Bitvec.to_nativeint const = 0n then
                 match p with
                 | Pn_add | Pn_xor | Pn_or -> nonconsts
                 | Pn_and -> [E_lit const]
@@ -102,13 +102,11 @@ let rec simplify env = function
       | [e] -> e
       | _ -> E_primn (p, es'simpl)
     end
-  | E_load (size, addr) ->
-    let addr' = simplify env addr in
-    E_load (size, addr')
+  | E_load (size, seg, off) ->
+    let seg' = simplify env seg in
+    let off' = simplify env off in
+    E_load (size, seg', off')
   | E_nondet _ as e -> e
-  | E_repeat (e, n) ->
-    let e' = simplify env e in
-    E_repeat (e', n)
   | E_extend (sign, e, n) ->
     let e' = simplify env e in
     E_extend (sign, e', n)
@@ -117,8 +115,8 @@ let simplify_cfg env cfg =
   let n = Array.length cfg.Cfg.node in
   let changed = ref false in
   for i=0 to n-1 do
-    cfg.node.(i).stmts <-
-      cfg.node.(i).stmts |> List.map begin fun stmt ->
+    cfg.Cfg.node.(i).Cfg.stmts <-
+      cfg.Cfg.node.(i).Cfg.stmts |> List.map begin fun stmt ->
         let stmt' = map_stmt (simplify env) stmt in
         if stmt' <> stmt then changed := true;
         stmt'

@@ -34,9 +34,8 @@ type expr =
   | E_prim2 of prim2 * expr * expr
   | E_prim3 of prim3 * expr * expr * expr
   | E_primn of primn * expr list
-  | E_load of int * expr
+  | E_load of int * expr * expr
   | E_nondet of int * int
-  | E_repeat of expr * int
   | E_extend of bool * expr * int
 
 type loc = string
@@ -50,12 +49,12 @@ type jump =
 (* elaborated form of instructions *)
 type stmt =
   | S_set of loc * expr
-  | S_store of int * expr * expr
+  | S_store of int * expr * expr * expr
   | S_jump of expr option * expr * string list * expr list
   | S_phi of string * expr array
   (* the following do not occur after elaboration *)
   | S_call of proc * expr list * loc option
-  | S_output of expr
+  | S_return of expr
   | S_if of expr * stmt list
   | S_if_else of expr * stmt list * stmt list
   | S_do_while of stmt list * expr
@@ -78,7 +77,7 @@ let pp_sep_list sep pp f = function
 let rec pp_expr f = function
   | E_lit bv -> (*fprintf f "'%a'" Bitvec.pp bv*)
     (*fprintf f "%d:%d" (Bitvec.to_int bv) (Bitvec.length bv)*)
-    pp_print_int f (Bitvec.to_int bv)
+    fprintf f "%nu" (Bitvec.to_nativeint bv)
   | E_var s -> pp_print_string f s
   | E_part (e, lo, hi) -> fprintf f "%a[%d:%d]" pp_expr e lo hi
   | E_prim1 (p, e) ->
@@ -115,9 +114,9 @@ let rec pp_expr f = function
       | Pn_or -> "|"
     in
     fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") pp_expr) es
-  | E_load (size, addr) -> fprintf f "[%a]@%d" pp_expr addr size
+  | E_load (size, seg, addr) ->
+    fprintf f "%a:[%a]@%d" pp_expr seg pp_expr addr size
   | E_nondet (n, id) -> fprintf f "nondet(%d)#%d" n id
-  | E_repeat (e, n) -> fprintf f "repeat(%a, %d)" pp_expr e n
   | E_extend (sign, e, n) ->
     let op_s = if sign then "sign_extend" else "zero_extend" in
     fprintf f "%s(%a, %d)" op_s pp_expr e n
@@ -131,8 +130,8 @@ let pp_loc = pp_print_string
 let pp_stmt f = function
   | S_set (loc, e) ->
     fprintf f "%a = %a" pp_loc loc pp_expr e
-  | S_store (size, e_addr, e_data) ->
-    fprintf f "[%a]@%d = %a" pp_expr e_addr size pp_expr e_data
+  | S_store (size, seg, e_addr, e_data) ->
+    fprintf f "%a:[%a]@%d = %a" pp_expr seg pp_expr e_addr size pp_expr e_data
   | S_jump (cond_opt, e, _, _) ->
     (*let j_s =
       match j with
@@ -160,8 +159,8 @@ let pp_stmt f = function
         pp_expr f arg;
         if i < n-1 then fprintf f ", ");
     fprintf f ")";
-  | S_output e ->
-    fprintf f "output %a" pp_expr e
+  | S_return e ->
+    fprintf f "return %a" pp_expr e
   | S_if (e, _) -> fprintf f "if (%a) ..." pp_expr e
   | S_if_else (e, _, _) -> fprintf f "if (%a) ... else ..." pp_expr e
   | S_do_while (_, e) -> fprintf f "do ... while (%a)" pp_expr e
@@ -198,15 +197,14 @@ let rec subst_expr f = function
     E_prim3 (p, subst_expr f e1, subst_expr f e2, subst_expr f e3)
   | E_primn (p, es) ->
     E_primn (p, List.map (subst_expr f) es)
-  | E_load (size, addr) -> E_load (size, subst_expr f addr)
+  | E_load (size, seg, addr) -> E_load (size, seg, subst_expr f addr)
   | E_nondet _ as e -> e
-  | E_repeat (e, n) -> E_repeat (subst_expr f e, n)
   | E_extend (sign, e, n) -> E_extend (sign, subst_expr f e, n)
 
 let map_stmt f = function
   | S_set (lhs, rhs) -> S_set (lhs, f rhs)
-  | S_store (size, addr, data) ->
-    S_store (size, f addr, f data)
+  | S_store (size, seg, addr, data) ->
+    S_store (size, seg, f addr, f data)
   | S_jump (cond_opt, dest, d, u) ->
     let cond_opt' = Option.map f cond_opt in
     let dest' = f dest in

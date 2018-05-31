@@ -86,7 +86,7 @@ let rec draw_object cr (exposed:rect) x y (node:layout_node) =
 let set_cairo_font cr =
   let open Cairo in
   select_font_face cr "Monospace";
-  set_font_size cr 16.0
+  set_font_size cr 14.0
 
 let expose view ev =
   let open Cairo in
@@ -99,7 +99,7 @@ let expose view ev =
   let cr = Cairo_gtk.create view.canvas#misc#window in
   set_cairo_font cr;
 
-  set_source_rgb cr 1.0 1.0 0.75;
+  set_source_rgb cr 1.0 1.0 0.875;
   rectangle cr (float_of_int x) (float_of_int y)
     (float_of_int width) (float_of_int height);
   fill cr;
@@ -161,12 +161,12 @@ let goto_function view va =
     match BatHashtbl.find_option db.Database.proc_table va with
     | Some proc -> proc
     | None ->
-      let cfg = Control_flow.build_cfg db va (va-0x400000) in
-      let inst_snode = Control_flow.fold_cfg cfg in
+      let cfg = Build_cfg.build_cfg db va (va-0x400000) in
+      let inst_snode = Fold_cfg.fold_cfg cfg in
       let env = Env.new_env db in
       let stmt_snode =
         inst_snode |>
-        Control_flow.map_snode (Elaborate.elaborate_basic_block false env)
+        map_stmt (Elaborate.elaborate_basic_block false env)
       in
       let proc = Database.{ cfg; inst_snode; stmt_snode } in
       Hashtbl.add db.Database.proc_table va proc;
@@ -174,8 +174,8 @@ let goto_function view va =
   in
   let fe = Cairo.font_extents view.cairo in
   let conf = {
-    char_width = int_of_float fe.max_x_advance;
-    char_height = int_of_float fe.baseline
+    char_width = int_of_float fe.Cairo.max_x_advance;
+    char_height = int_of_float fe.Cairo.baseline
   } in
   let layout = layout_node conf 0 proc.inst_snode in
   let layout_width = layout.right - layout.left in

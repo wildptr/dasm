@@ -16,15 +16,10 @@ module StringMap = Map.Make(String)
 
 let keyword_map : token StringMap.t =
   [
-    "call", K_call;
     (*"if", K_if;*)
-    "let", K_let;
     "jump", K_jump;
-    "load", K_load;
-    "output", K_output;
+    "return", K_return;
     "proc", K_proc;
-    "repeat", K_repeat;
-    "store", K_store;
     "template", K_template;
     "undefined", K_undefined;
   ] |> List.fold_left (fun map (k, v) -> StringMap.add k v map) StringMap.empty
@@ -48,6 +43,7 @@ rule read = parse
       try StringMap.find s keyword_map with Not_found -> Ident s }
   | "==" { EqEq }
   (*| '$' { Dollar }*)
+  | '#' { Hash }
   | '&' { Amp }
   | '(' { LParen }
   | ')' { RParen }
@@ -62,6 +58,7 @@ rule read = parse
   | '<' { LAngle }
   | '=' { Eq }
   | '>' { RAngle }
+  (*| '@' { At }*)
   | '[' { LBrack }
   | ']' { RBrack }
   | '^' { Caret }

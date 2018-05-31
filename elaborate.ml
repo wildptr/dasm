@@ -62,38 +62,42 @@ let elaborate_mem_index (reg, scale) =
 let make_address addr = E_lit (Bitvec.of_int 32 addr)
 
 let elaborate_mem_addr m =
-  match m.base, m.index with
-  | Some base, Some index ->
-    let e_base = elaborate_reg base in
-    let e_index = elaborate_mem_index index in
-    let to_be_added =
-      if m.disp = 0 then [e_base; e_index]
+  let seg = elaborate_reg m.seg in
+  let off =
+    match m.base, m.index with
+    | Some base, Some index ->
+      let e_base = elaborate_reg base in
+      let e_index = elaborate_mem_index index in
+      let to_be_added =
+        if m.disp = 0 then [e_base; e_index]
+        else
+          let e_disp = make_address m.disp in
+          [e_base; e_index; e_disp]
+      in
+      E_primn (Pn_add, to_be_added)
+    | Some base, None ->
+      let e_base = elaborate_reg base in
+      if m.disp = 0 then e_base
       else
         let e_disp = make_address m.disp in
-        [e_base; e_index; e_disp]
-    in
-    E_primn (Pn_add, to_be_added)
-  | Some base, None ->
-    let e_base = elaborate_reg base in
-    if m.disp = 0 then e_base
-    else
-      let e_disp = make_address m.disp in
-      E_primn (Pn_add, [e_base; e_disp])
-  | None, Some index ->
-    let e_index = elaborate_mem_index index in
-    if m.disp = 0 then e_index
-    else
-      let e_disp = make_address m.disp in
-      E_primn (Pn_add, [e_index; e_disp])
-  | None, None ->
-    make_address m.disp
+        E_primn (Pn_add, [e_base; e_disp])
+    | None, Some index ->
+      let e_index = elaborate_mem_index index in
+      if m.disp = 0 then e_index
+      else
+        let e_disp = make_address m.disp in
+        E_primn (Pn_add, [e_index; e_disp])
+    | None, None ->
+      make_address m.disp
+  in
+  seg, off
 
 let elaborate_operand pc' = function
   | O_reg reg -> elaborate_reg reg
   | O_mem (mem, size) ->
     if size <= 0 then failwith "size of operand invalid";
-    let e_addr = elaborate_mem_addr mem in
-    E_load (size, e_addr)
+    let seg, off = elaborate_mem_addr mem in
+    E_load (size, seg, off)
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
     E_lit (Bitvec.of_int (size*8) imm)
@@ -105,8 +109,8 @@ let elaborate_writeback env o_dst e_data =
   | O_reg r -> append_stmt env (S_set (string_of_reg r, e_data))
   | O_mem (m, size) ->
     assert (size > 0);
-    let e_addr = elaborate_mem_addr m in
-    append_stmt env (S_store (size, e_addr, e_data))
+    let seg, off = elaborate_mem_addr m in
+    append_stmt env (S_store (size, seg, off, e_data))
   | _ -> failwith "elaborate_writeback: invalid operand type"
 
 let fnname_of_op = function
@@ -185,7 +189,7 @@ let elaborate_inst env pc inst =
         | [d; s] -> d, s
         | _ -> assert false
       in
-      let addr =
+      let _, addr =
         match src with
         | O_mem (m, _size) -> elaborate_mem_addr m
         | _ -> assert false
@@ -260,7 +264,8 @@ let elaborate_inst env pc inst =
     exit 1
 
 let elaborate_basic_block expand env bb =
-  let pc = ref bb.Cfg.start in
+  let open Cfg in
+  let pc = ref bb.start in
   bb.stmts |> List.iter begin fun inst ->
     elaborate_inst env !pc inst;
     pc := !pc + length_of inst
@@ -273,7 +278,7 @@ let elaborate_basic_block expand env bb =
 let elaborate_cfg db expand cfg =
   let env = new_env db in
   let node' = cfg.Cfg.node |> Array.map (elaborate_basic_block expand env) in
-  { cfg with node = node' }, env
+  { cfg with Cfg.node = node' }, env
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in

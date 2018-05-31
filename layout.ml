@@ -1,5 +1,4 @@
 open Batteries
-open Control_flow
 open Cfg
 
 type color =
@@ -77,7 +76,6 @@ type config = {
 }
 
 let color_of_attr attr =
-  let open Control_flow in
   match attr with
   | Edge_neutral -> Black
   | Edge_true -> Green

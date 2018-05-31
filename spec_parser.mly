@@ -8,6 +8,7 @@ open Spec_ast
 %token <Bitvec.t> Bitvec
 %token EqEq
 (*%token Dollar*)
+%token Hash
 %token Amp
 %token LParen
 %token RParen
@@ -22,6 +23,7 @@ open Spec_ast
 %token LAngle
 %token Eq
 %token RAngle
+(*%token At*)
 %token LBrack
 %token RBrack
 %token Caret
@@ -30,14 +32,9 @@ open Spec_ast
 %token RBrace
 %token Tilde
 
-%token K_call
 %token K_jump
-%token K_let
-%token K_load
-%token K_output
+%token K_return
 %token K_proc
-%token K_repeat
-%token K_store
 %token K_template
 %token K_undefined
 
@@ -82,17 +79,20 @@ primary_expr:
       else Expr_local_sym name }*)
   | bv = Bitvec
     { Expr_literal bv }
-  | LBrace; v = cexpr; Colon; w = cexpr; RBrace
+  | Hash; v = primary_cexpr; Colon; w = primary_cexpr
     { Expr_literal2 (v, w) }
   | LParen; e = expr; RParen { e }
   | func_name = Ident; LParen; args = separated_list(Comma, expr); RParen
     { Expr_apply (func_name, args) }
   | K_undefined; LParen; width = cexpr; RParen
     { Expr_undef width }
-  | K_repeat; LParen; data = expr; Comma; n = cexpr; RParen
-    { Expr_repeat (data, n) }
-  | K_load; LParen; size = cexpr; Comma; addr = expr; RParen
-    { Expr_load (size, addr) }
+  | memloc
+    { Expr_load $1 }
+
+memloc:
+  | LBrack; seg = primary_expr; Colon; off = primary_expr; RBrack; Colon;
+    size = primary_cexpr
+    { seg, off, size }
 
 index:
   | LBrack; i = cexpr; RBrack
@@ -135,31 +135,19 @@ binary_expr:
 
 expr: binary_expr {$1}
 
-loc:
-  | name = Ident
-    { Loc_var name }
-  (*| name = Ident; LBrack; hi = cexpr; Colon; lo = cexpr; RBrack
-    { Loc_part (name, hi, lo) }*)
-  | K_let; name = Ident
-    { Loc_newvar name }
+lhs:
+  | Ident
+    { Lhs_var $1 }
+  | memloc
+    { Lhs_mem $1 }
 
 stmt:
-  | loc = loc; Eq; value = expr; Semi
-    { Stmt_set (loc, value) }
-  (*| name = Ident; LBrack; hi = cexpr; Colon; lo = cexpr; RBrack; Eq; value = expr; Semi
-    { Stmt_set_part (name, hi, lo, value) }*)
-  | K_call; proc_name = Ident;
-    LParen; args = separated_list(Comma, expr); RParen; Semi
-    { Stmt_call (proc_name, args, None) }
-  | loc = loc; Eq; K_call; proc_name = Ident;
-    LParen; args = separated_list(Comma, expr); RParen; Semi
-    { Stmt_call (proc_name, args, Some loc) }
-  | K_output; value = expr; Semi
-    { Stmt_output value }
-  (*| name = Ident; Eq; K_load; size = cexpr; Comma; addr = expr; Semi
-    { Stmt_load (size, addr, name) }*)
-  | K_store; size = cexpr; Comma; addr = expr; Comma; data = expr; Semi
-    { Stmt_store (size, addr, data) }
+  | lhs = lhs; Eq; value = expr; Semi
+    { Stmt_set (lhs, value) }
+  | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen; Semi
+    { Stmt_call (proc_name, args) }
+  | K_return; value = expr; Semi
+    { Stmt_return value }
   | K_jump; addr = expr; Semi
     { Stmt_jump addr }
 
