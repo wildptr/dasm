@@ -53,11 +53,6 @@ let build_cfg db init_pc init_offset =
   let q = Queue.create () in
   Queue.add init_pc q;
   let s = { str = code; pos = 0 } in
-  let next () =
-    let c = s.str.[s.pos] in
-    s.pos <- s.pos + 1;
-    c
-  in
   while not (Queue.is_empty q) do
     let pc = Queue.pop q in
     begin match itree_find pc !start_end with
@@ -69,12 +64,13 @@ let build_cfg db init_pc init_offset =
         s.pos <- init_offset + (pc - init_pc);
         let rec loop pc =
           let config = Dasm.{ mode = Mode32bit; pc_opt = Some pc } in
-          let inst = Dasm.(disassemble config next) in
+          let inst = Dasm.(disassemble config s.str s.pos) in
+          s.pos <- s.pos + String.length inst.bytes;
           Hashtbl.add db.inst_table pc inst;
           let l = length_of inst in
           let pc' = pc+l in
           match inst.operation with
-          | I_jmp ->
+          | I_JMP ->
             begin match List.hd inst.operands with
               | O_offset ofs ->
                 Hashtbl.add db.jump_info pc Semant.J_resolved;
@@ -83,9 +79,9 @@ let build_cfg db init_pc init_offset =
                 Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', []
             end
-          | I_jmpfar -> failwith "cannot handle far jump"
-          | I_callfar -> failwith "cannot handle far call"
-          | I_cjmp ->
+          | I_JMPF -> failwith "cannot handle far jump"
+          | I_CALLF -> failwith "cannot handle far call"
+          | I_CJMP ->
             begin match List.hd inst.operands with
               | O_offset ofs ->
                 Hashtbl.add db.jump_info pc Semant.J_resolved;
@@ -94,11 +90,11 @@ let build_cfg db init_pc init_offset =
                 Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', [pc', Edge_false]
             end
-          | I_ret | I_retfar | I_retn ->
+          | I_RET | I_RETF | I_RETN ->
             Hashtbl.add db.jump_info pc Semant.J_ret;
             pc', []
           | _ ->
-            if inst.operation = I_call then
+            if inst.operation = I_CALL then
               Hashtbl.add db.jump_info pc Semant.J_call;
             if itree_find pc' !start_end = Start then
               pc', [pc', Edge_neutral]

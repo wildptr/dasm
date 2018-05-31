@@ -1,6 +1,5 @@
 open Env
 open Semant
-open Util
 
 let rec expand_stmt env retval stmt =
   let rename_var name =

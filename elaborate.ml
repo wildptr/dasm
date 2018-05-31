@@ -50,7 +50,7 @@ let elaborate_reg r =
   | R_BP -> E_part (E_var "EBP", 0, 16)
   | R_SI -> E_part (E_var "ESI", 0, 16)
   | R_DI -> E_part (E_var "EDI", 0, 16)
-  | _ -> E_var (name_of_reg r)
+  | _ -> E_var (string_of_reg r)
 
 let elaborate_mem_index (reg, scale) =
   let e_reg = elaborate_reg reg in
@@ -102,7 +102,7 @@ let elaborate_operand pc' = function
 
 let elaborate_writeback env o_dst e_data =
   match o_dst with
-  | O_reg r -> append_stmt env (S_set (name_of_reg r, e_data))
+  | O_reg r -> append_stmt env (S_set (string_of_reg r, e_data))
   | O_mem (m, size) ->
     assert (size > 0);
     let e_addr = elaborate_mem_addr m in
@@ -110,23 +110,23 @@ let elaborate_writeback env o_dst e_data =
   | _ -> failwith "elaborate_writeback: invalid operand type"
 
 let fnname_of_op = function
-  | I_adc -> "adc"
-  | I_add -> "add"
-  | I_and -> "and"
-  | I_call -> "push"
-  | I_cmp -> "sub"
-  | I_or -> "or"
-  | I_pop -> "pop"
-  | I_push -> "push"
-  | I_ret -> "pop"
-  | I_retn -> "pop"
-  | I_sar -> "sar"
-  | I_sbb -> "sbb"
-  | I_shl -> "shl"
-  | I_shr -> "shr"
-  | I_sub -> "sub"
-  | I_test -> "and"
-  | I_xor -> "xor"
+  | I_ADC -> "adc"
+  | I_ADD -> "add"
+  | I_AND -> "and"
+  | I_CALL -> "push"
+  | I_CMP -> "sub"
+  | I_OR -> "or"
+  | I_POP -> "pop"
+  | I_PUSH -> "push"
+  | I_RET -> "pop"
+  | I_RETN -> "pop"
+  | I_SAR -> "sar"
+  | I_SBB -> "sbb"
+  | I_SHL -> "shl"
+  | I_SHR -> "shr"
+  | I_SUB -> "sub"
+  | I_TEST -> "and"
+  | I_XOR -> "xor"
   | _ -> failwith "fnname_of_op: not implemented"
 
 let xxx env pc =
@@ -160,26 +160,26 @@ let elaborate_inst env pc inst =
   let pc' = pc + length_of inst in
   try
     match op with
-    | I_add | I_or | I_adc | I_sbb | I_and | I_sub | I_xor | I_shl | I_shr | I_sar ->
+    | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR | I_SHL | I_SHR | I_SAR ->
       let temp = new_temp env (8 lsl lsize) in
       let args = operands |> List.map (elaborate_operand pc') in
       append_stmt env (S_call (fn inst, args, Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
-    | I_cmp | I_push | I_test ->
+    | I_CMP | I_PUSH | I_TEST ->
       let args = operands |> List.map (elaborate_operand pc') in
       append_stmt env (S_call (fn inst, args, None))
-    | I_pop ->
+    | I_POP ->
       let temp = new_temp env (8 lsl lsize) in
       append_stmt env (S_call (fn inst, [], Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
-    | I_mov ->
+    | I_MOV ->
       let dst, src =
         match operands with
         | [d; s] -> d, s
         | _ -> assert false
       in
       elaborate_writeback env dst (elaborate_operand pc' src)
-    | I_lea ->
+    | I_LEA ->
       let dst, src =
         match operands with
         | [d; s] -> d, s
@@ -191,27 +191,27 @@ let elaborate_inst env pc inst =
         | _ -> assert false
       in
       elaborate_writeback env dst addr
-    | I_jmp | I_cjmp ->
+    | I_JMP | I_CJMP ->
       let cond_opt =
-        if op = I_cjmp then
-          Some (cond_expr (inst.variant lsr 2))
+        if op = I_CJMP then
+          Some (cond_expr (inst.variant lsr 4))
         else
           None
       in
       let d, u = xxx env pc in
       append_stmt env (S_jump (cond_opt, elaborate_operand pc' (List.hd operands), d, u))
-    | I_movzx | I_movsx ->
+    | I_MOVZX | I_MOVSX ->
       let dst, src =
         match operands with
         | [d; s] -> d, s
         | _ -> assert false
       in
-      (*let lsize_src = inst.variant lsr 2 in*)
+      (*let lsize_src = inst.variant lsr 4 in*)
       let dst_size = 8 lsl lsize in
       (*let src_size = 8 lsl lsize_src in*)
       let src' = elaborate_operand pc' src in
-      elaborate_writeback env dst (E_extend (op = I_movsx, src', dst_size))
-    | I_xchg ->
+      elaborate_writeback env dst (E_extend (op = I_MOVSX, src', dst_size))
+    | I_XCHG ->
       let dst, src =
         match operands with
         | [d; s] -> d, s
@@ -221,21 +221,21 @@ let elaborate_inst env pc inst =
       let src' = elaborate_operand pc' src in
       elaborate_writeback env dst src';
       elaborate_writeback env src dst'
-    | I_call ->
+    | I_CALL ->
       let dst' = elaborate_operand pc' (List.hd operands) in
       (* push pc *)
       append_stmt env (S_call (fn inst, [make_address pc'], None));
       (* jump dst *)
       let d, u = xxx env pc in
       append_stmt env (S_jump (None, dst', d, u))
-    | I_ret ->
+    | I_RET ->
       (* pop addr *)
       let addr = new_temp env (8 lsl lsize) in
       append_stmt env (S_call (fn inst, [], Some addr));
       (* jump addr *)
       let d, u = xxx env pc in
       append_stmt env (S_jump (None, E_var addr, d, u))
-    | I_retn ->
+    | I_RETN ->
       let inc = elaborate_operand pc' (List.hd operands) in
       (* pop addr *)
       let addr = new_temp env (8 lsl lsize) in

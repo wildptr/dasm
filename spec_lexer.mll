@@ -1,4 +1,5 @@
 {
+open Batteries
 open Lexing
 open Spec_parser
 
@@ -44,9 +45,7 @@ rule read = parse
   | '\'' (['0' '1']* as s) '\'' { Bitvec (Bitvec.of_string s) }
   | id
     { let s = Lexing.lexeme lexbuf in
-      match StringMap.find_opt s keyword_map with
-      | Some k -> k
-      | None -> Ident s }
+      try StringMap.find s keyword_map with Not_found -> Ident s }
   | "==" { EqEq }
   (*| '$' { Dollar }*)
   | '&' { Amp }
