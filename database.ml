@@ -6,9 +6,9 @@ type proc = {
 
 type db = {
   code : string;
-  inst_table : (int, Inst.inst) Hashtbl.t;
-  jump_info : (int, Semant.jump) Hashtbl.t;
-  proc_table : (int, proc) Hashtbl.t;
+  inst_table : (nativeint, Inst.inst) Hashtbl.t;
+  jump_info : (nativeint, Semant.jump) Hashtbl.t;
+  proc_table : (nativeint, proc) Hashtbl.t;
 }
 
 let create code =

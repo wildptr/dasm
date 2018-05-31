@@ -102,7 +102,7 @@ let elaborate_operand pc' = function
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
     E_lit (Bitvec.of_nativeint (size*8) imm)
-  | O_offset ofs -> make_address (Nativeint.(of_int pc' + ofs))
+  | O_offset ofs -> make_address (Nativeint.(pc' + ofs))
   | _ -> failwith "invalid operand type"
 
 let elaborate_writeback env o_dst e_data =
@@ -134,20 +134,6 @@ let fnname_of_op = function
   | I_XOR -> "xor"
   | _ -> failwith "fnname_of_op: not implemented"
 
-let xxx env pc =
-  let jump = Hashtbl.find env.db.Database.jump_info pc in
-  let d, u =
-    match jump with
-    | J_unknown -> [], (Array.to_list reg_name_table) |> List.map (fun name -> E_var name)
-    | J_resolved -> [], []
-    | J_call ->
-      ["EAX"; "ECX"; "EDX"; "ESP"],
-      ["ECX"; "EDX"; "ESP"] |> List.map (fun name -> E_var name)
-    | J_ret ->
-      [], ["EAX"; "EBX"; "ESP"; "EBP"; "ESI"; "EDI"] |> List.map (fun name -> E_var name)
-  in
-  d, u
-
 let elaborate_inst env pc inst =
   let op = operation_of inst in
   let lsize = inst.variant land 3 in (* log size in bytes *)
@@ -162,7 +148,7 @@ let elaborate_inst env pc inst =
     let fnname = Printf.sprintf "%s%d" fnname_base (1 lsl (lsize+3)) in
     lookup_predef fnname
   in
-  let pc' = pc + length_of inst in
+  let pc' = Nativeint.(pc + of_int (length_of inst)) in
   try
     match op with
     | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR | I_SHL | I_SHR | I_SAR ->
@@ -203,8 +189,8 @@ let elaborate_inst env pc inst =
         else
           None
       in
-      let d, u = xxx env pc in
-      append_stmt env (S_jump (cond_opt, elaborate_operand pc' (List.hd operands), d, u))
+      append_stmt env
+        (S_jump (cond_opt, elaborate_operand pc' (List.hd operands)))
     | I_MOVZX | I_MOVSX ->
       let dst, src =
         match operands with
@@ -230,17 +216,15 @@ let elaborate_inst env pc inst =
       let dst' = elaborate_operand pc' (List.hd operands) in
       (* push pc *)
       append_stmt env
-        (S_call (fn inst, [make_address (Nativeint.of_int pc')], None));
+        (S_call (fn inst, [make_address pc'], None));
       (* jump dst *)
-      let d, u = xxx env pc in
-      append_stmt env (S_jump (None, dst', d, u))
+      append_stmt env (S_jump (None, dst'))
     | I_RET ->
       (* pop addr *)
       let addr = new_temp env (8 lsl lsize) in
       append_stmt env (S_call (fn inst, [], Some addr));
       (* jump addr *)
-      let d, u = xxx env pc in
-      append_stmt env (S_jump (None, E_var addr, d, u))
+      append_stmt env (S_jump (None, E_var addr))
     | I_RETN ->
       let inc = elaborate_operand pc' (List.hd operands) in
       (* pop addr *)
@@ -255,8 +239,7 @@ let elaborate_inst env pc inst =
       in
       append_stmt env (S_set (sp_name, E_primn (Pn_add, [E_var sp_name; inc])));
       (* jump addr *)
-      let d, u = xxx env pc in
-      append_stmt env (S_jump (None, E_var addr, d, u))
+      append_stmt env (S_jump (None, E_var addr))
     | _ ->
       Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst;
       exit 1
@@ -270,7 +253,7 @@ let elaborate_basic_block expand env bb =
   let pc = ref bb.start in
   bb.stmts |> List.iter begin fun inst ->
     elaborate_inst env !pc inst;
-    pc := !pc + length_of inst
+    pc := Nativeint.(!pc + of_int (length_of inst))
   end;
   if expand then Expand.expand env;
   let stmts = get_stmts env in

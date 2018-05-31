@@ -39,7 +39,7 @@ and convert_cond = function
   | BB (b, _) ->
     let stmts_rev = List.rev b.stmts in
     begin match List.hd stmts_rev with
-    | S_jump (Some cond, e, _, _) -> List.rev (List.tl stmts_rev), cond
+    | S_jump (Some cond, e) -> List.rev (List.tl stmts_rev), cond
     | _ -> assert false
     end
   | Seq (v1, v2) ->

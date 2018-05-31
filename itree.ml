@@ -1,6 +1,6 @@
-type t =
+type 'a t =
   | Leaf
-  | Branch of int * int * t * t
+  | Branch of 'a * 'a * 'a t * 'a t
 
 let rec add (lo,hi) = function
   | Leaf -> Branch (lo, hi, Leaf, Leaf)

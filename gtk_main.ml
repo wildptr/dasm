@@ -1,3 +1,4 @@
+open Batteries
 open Cfg
 open Database
 open Layout
@@ -25,7 +26,7 @@ type view = {
   canvas : GMisc.drawing_area;
   text_view : GMisc.label;
   mutable layout : layout_node option;
-  mutable current_function_va : int;
+  mutable current_function_va : nativeint;
   db : Database.db;
 }
 
@@ -161,7 +162,7 @@ let goto_function view va =
     match BatHashtbl.find_option db.Database.proc_table va with
     | Some proc -> proc
     | None ->
-      let cfg = Build_cfg.build_cfg db va (va-0x400000) in
+      let cfg = Build_cfg.build_cfg db va Nativeint.(to_int (va-0x400000n)) in
       let inst_snode = Fold_cfg.fold_cfg cfg in
       let env = Env.new_env db in
       let stmt_snode =
@@ -190,7 +191,7 @@ let goto_function_prompt view () =
   let ok_button = GButton.button ~label:"OK" ~packing:dlg#action_area#add () in
   let _ =
     ok_button#connect#clicked ~callback:begin fun () ->
-      goto_function view (int_of_string textbox#text)
+      goto_function view (Nativeint.of_string textbox#text)
     end
   in
   dlg#show ()
@@ -205,10 +206,10 @@ let read_u16 s offset =
 (* works only on 64-bit platforms *)
 let read_u32 s offset =
   if String.length s < offset+4 then raise Invalid_offset;
-  (int_of_char s.[offset  ]       ) lor
-  (int_of_char s.[offset+1] lsl  8) lor
-  (int_of_char s.[offset+2] lsl 16) lor
-  (int_of_char s.[offset+3] lsl 24)
+  (                     (s.[offset  ] |> int_of_char |> Nativeint.of_int)   ) |> Nativeint.logor
+  (Nativeint.shift_left (s.[offset+1] |> int_of_char |> Nativeint.of_int)  8) |> Nativeint.logor
+  (Nativeint.shift_left (s.[offset+2] |> int_of_char |> Nativeint.of_int) 16) |> Nativeint.logor
+  (Nativeint.shift_left (s.[offset+3] |> int_of_char |> Nativeint.of_int) 24)
 
 let () =
   Printexc.record_backtrace true;
@@ -218,10 +219,7 @@ let () =
   end;
   let in_path = Sys.argv.(1) in
   Elaborate.load_spec "spec";
-  let in_chan = open_in in_path in
-  let in_chan_len = in_channel_length in_chan in
-  let code = really_input_string in_chan in_chan_len in
-  close_in in_chan;
+  let code = File.with_file_in in_path IO.read_all in
 
   let entry_point =
     try
@@ -229,9 +227,9 @@ let () =
         Format.eprintf "invalid DOS executable signature@.";
         exit 1
       end;
-      let e_lfanew = read_u32 code 0x3c in
-      let pe_signature = read_u32 code e_lfanew in
-      if pe_signature <> 0x4550 then begin
+      let e_lfanew = read_u32 code 0x3c |> Nativeint.to_int in
+      let pe_signature = String.sub code e_lfanew 4 in
+      if pe_signature <> "PE\x00\x00" then begin
         Format.eprintf "invalid PE signature@.";
         exit 1
       end;
@@ -250,8 +248,8 @@ let () =
       Format.eprintf "invalid PE file@.";
       exit 1
   in
-  Format.eprintf "AddressOfEntryPoint = 0x%x@." entry_point;
-  let init_pc = entry_point + 0x400000 (* FIXME *) in
+  Format.eprintf "AddressOfEntryPoint = 0x%nx@." entry_point;
+  let init_pc = Nativeint.(entry_point + 0x400000n) (* FIXME *) in
 (*   let init_offset = entry_point in *)
 
   let db = Database.create code in
@@ -295,7 +293,7 @@ let () =
     canvas;
     text_view;
     layout = None;
-    current_function_va = 0;
+    current_function_va = 0n;
     db;
   } in
 

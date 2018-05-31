@@ -78,7 +78,7 @@ type cpu_mode =
 
 type config = {
   mode : cpu_mode;
-  pc_opt : int option;
+  pc_opt : nativeint option;
 }
 
 let read_sib s : int * ((int * int) option) =
@@ -1185,7 +1185,7 @@ let disassemble config str pos =
     | O ->
       let offset = Nativeint.(imm1 + of_int (String.length bytes)) in
       begin match config.pc_opt with
-        | Some pc -> O_imm (Nativeint.(of_int pc + offset), 4(* FIXME *))
+        | Some pc -> O_imm (Nativeint.(pc + offset), 4(* FIXME *))
         | None -> O_offset offset
       end
     | FPU_R ->

@@ -1,6 +1,6 @@
 type 'a basic_block = {
-  start : int;
-  stop : int;
+  start : nativeint;
+  stop : nativeint;
   mutable stmts : 'a list;
 }
 

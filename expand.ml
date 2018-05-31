@@ -80,8 +80,8 @@ let rec expand_stmt env retval stmt =
     append_stmt env (S_set (rename_var loc, e'))
   | S_store (size, seg, addr, data) ->
     append_stmt env (S_store (size, seg, rename addr, rename data))
-  | S_jump (c, e, d, u) ->
-    append_stmt env (S_jump (BatOption.map rename c, rename e, d, u))
+  | S_jump (c, e) ->
+    append_stmt env (S_jump (BatOption.map rename c, rename e))
   | S_call (proc, args, rv) ->
     (* variable table *)
     proc.p_var_tab |> Hashtbl.iter (fun name width ->

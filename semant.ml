@@ -50,7 +50,7 @@ type jump =
 type stmt =
   | S_set of loc * expr
   | S_store of int * expr * expr * expr
-  | S_jump of expr option * expr * string list * expr list
+  | S_jump of expr option * expr
   | S_phi of string * expr array
   (* the following do not occur after elaboration *)
   | S_call of proc * expr list * loc option
@@ -132,7 +132,7 @@ let pp_stmt f = function
     fprintf f "%a = %a" pp_loc loc pp_expr e
   | S_store (size, seg, e_addr, e_data) ->
     fprintf f "%a:[%a]@%d = %a" pp_expr seg pp_expr e_addr size pp_expr e_data
-  | S_jump (cond_opt, e, _, _) ->
+  | S_jump (cond_opt, e) ->
     (*let j_s =
       match j with
       | J_unknown -> "(?)"
@@ -205,11 +205,10 @@ let map_stmt f = function
   | S_set (lhs, rhs) -> S_set (lhs, f rhs)
   | S_store (size, seg, addr, data) ->
     S_store (size, seg, f addr, f data)
-  | S_jump (cond_opt, dest, d, u) ->
+  | S_jump (cond_opt, dest) ->
     let cond_opt' = Option.map f cond_opt in
     let dest' = f dest in
-    let u' = List.map f u in
-    S_jump (cond_opt', dest', d, u')
+    S_jump (cond_opt', dest')
   | S_phi (lhs, rhs) -> S_phi (lhs, Array.map f rhs)
   | _ -> failwith "not implemented"
 

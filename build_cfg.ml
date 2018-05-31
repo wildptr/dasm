@@ -23,20 +23,20 @@ let build_cfg db init_pc init_offset =
         start_end := Itree.split pc !start_end;
         edges := (pc, pc, Edge_neutral) :: !edges
       | Itree.End | Itree.Nowhere ->
-        s.pos <- init_offset + (pc - init_pc);
-        let rec loop pc =
+        s.pos <- init_offset + Nativeint.(to_int (pc - init_pc));
+        let rec loop (pc:Nativeint.t) =
           let config = Dasm.{ mode = Mode32bit; pc_opt = Some pc } in
           let inst = Dasm.(disassemble config s.str s.pos) in
           s.pos <- s.pos + String.length inst.bytes;
           Hashtbl.add db.inst_table pc inst;
           let l = length_of inst in
-          let pc' = pc+l in
+          let pc' = Nativeint.(pc + of_int l) in
           match inst.operation with
           | I_JMP ->
             begin match List.hd inst.operands with
               | O_offset ofs ->
                 Hashtbl.add db.jump_info pc Semant.J_resolved;
-                pc', [pc + Nativeint.to_int ofs, Edge_neutral]
+                pc', [Nativeint.(pc + ofs), Edge_neutral]
               | _ ->
                 Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', []
@@ -47,7 +47,7 @@ let build_cfg db init_pc init_offset =
             begin match List.hd inst.operands with
               | O_offset ofs ->
                 Hashtbl.add db.jump_info pc Semant.J_resolved;
-                pc', [pc', Edge_false; pc + Nativeint.to_int ofs, Edge_true]
+                pc', [pc', Edge_false; Nativeint.(pc + ofs), Edge_true]
               | _ ->
                 Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', [pc', Edge_false]
@@ -80,7 +80,7 @@ let build_cfg db init_pc init_offset =
       let rec loop pc insts =
         let inst = Hashtbl.find db.inst_table pc in
         let insts' = inst :: insts in
-        let pc' = pc + length_of inst in
+        let pc' = Nativeint.(pc + of_int (length_of inst)) in
         if pc' = stop then insts' else loop pc' insts'
       in
       let insts = List.rev (loop start []) in

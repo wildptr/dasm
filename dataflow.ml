@@ -15,8 +15,7 @@ let defs = function
 let defs' = function
   | S_set (lhs, _) -> S.singleton lhs
   | S_phi (lhs, _) -> S.singleton lhs
-  | S_jump (_, _, d, _) -> S.of_list d
-  | _ -> S.empty
+  | _ -> S.empty (* TODO: S_jump *)
 
 let rec uses_expr = function
   | E_lit _ -> S.empty
@@ -40,11 +39,11 @@ let uses = function
     uses_expr data |>
     S.union (uses_expr off) |>
     S.union (uses_expr seg)
-  | S_jump (cond_opt, e, _, u) ->
+  | S_jump (cond_opt, e) ->
     begin match cond_opt with
       | Some cond -> S.union (uses_expr cond) (uses_expr e)
       | None -> uses_expr e
-    end |> S.union (uses_expr_list u)
+    end (* TODO: use set is incomplete *)
   | S_phi (_, rhs) -> Array.to_list rhs |> uses_expr_list
   | _ -> assert false
 
@@ -240,12 +239,10 @@ let convert_to_ssa cfg =
           let off' = rename_variables rename_rhs off in
           let data' = rename_variables rename_rhs data in
           S_store (size, seg', off', data')
-        | S_jump (c, dst, d, u) ->
+        | S_jump (c, dst) ->
           let c' = Option.map (rename_variables rename_rhs) c in
           let dst' = rename_variables rename_rhs dst in
-          let u' = map (rename_variables rename_rhs) u in
-          let d' = map rename_lhs d in
-          S_jump (c', dst', d', u')
+          S_jump (c', dst')
         | S_phi (lhs, rhs) -> S_phi (rename_lhs lhs, rhs)
         | _ -> assert false
       in
