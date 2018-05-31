@@ -202,7 +202,7 @@ let number_of_registers = 37
 type mem = {
   base : reg option;
   index : (reg * int (* scale *)) option;
-  disp : int;
+  disp : nativeint;
   seg : reg;
 }
 
@@ -217,18 +217,18 @@ let pp_mem f m =
   match m.base, m.index with
   | Some base, Some index ->
     fprintf f "[%s+%a" (string_of_reg base) pp_index index;
-    if m.disp <> 0 then fprintf f "%+d" m.disp;
+    if m.disp <> 0n then fprintf f "%+nd" m.disp;
     fprintf f "]"
   | Some base, None ->
     fprintf f "[%s" (string_of_reg base);
-    if m.disp <> 0 then fprintf f "%+d" m.disp;
+    if m.disp <> 0n then fprintf f "%+nd" m.disp;
     fprintf f "]"
   | None, Some index ->
     fprintf f "[%a" pp_index index;
-    if m.disp <> 0 then fprintf f "%+d" m.disp;
+    if m.disp <> 0n then fprintf f "%+nd" m.disp;
     fprintf f "]"
   | None, None ->
-    fprintf f "[%d]" m.disp
+    fprintf f "[%nd]" m.disp
 
 type regmem =
   | Reg of int
@@ -246,9 +246,9 @@ let format_size = function
 type operand =
   | O_reg of reg
   | O_mem of mem * int (* size in bytes; 0 means unspecified *)
-  | O_imm of int * int
-  | O_offset of int
-  | O_farptr of (int * int)
+  | O_imm of nativeint * int
+  | O_offset of nativeint
+  | O_farptr of int * nativeint
 
 let pp_operand f = function
   | O_reg r -> pp_print_string f (string_of_reg r)
@@ -257,11 +257,11 @@ let pp_operand f = function
     pp_mem f m
   | O_imm (i, size) ->
     if size > 0 then fprintf f "%s " (format_size size);
-    pp_print_int f i
+    fprintf f "%nd" i
   | O_offset disp ->
     pp_print_string f "$";
-    if disp <> 0 then fprintf f "%+d" disp
-  | O_farptr (seg, off) -> fprintf f "0x%x:0x%x" seg off
+    if disp <> 0n then fprintf f "%+nd" disp
+  | O_farptr (seg, off) -> fprintf f "0x%x:0x%nx" seg off
 
 type operation =
   | I_BAD

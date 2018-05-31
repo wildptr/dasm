@@ -1,3 +1,4 @@
+open Batteries
 open Env
 open Inst
 open Semant
@@ -59,7 +60,7 @@ let elaborate_mem_index (reg, scale) =
     let e_scale = E_lit (Bitvec.of_int 2 scale) in
     E_prim2 (P2_shiftleft, e_reg, e_scale)
 
-let make_address addr = E_lit (Bitvec.of_int 32 addr)
+let make_address addr = E_lit (Bitvec.of_nativeint 32 addr)
 
 let elaborate_mem_addr m =
   let seg = elaborate_reg m.seg in
@@ -69,7 +70,7 @@ let elaborate_mem_addr m =
       let e_base = elaborate_reg base in
       let e_index = elaborate_mem_index index in
       let to_be_added =
-        if m.disp = 0 then [e_base; e_index]
+        if m.disp = 0n then [e_base; e_index]
         else
           let e_disp = make_address m.disp in
           [e_base; e_index; e_disp]
@@ -77,13 +78,13 @@ let elaborate_mem_addr m =
       E_primn (Pn_add, to_be_added)
     | Some base, None ->
       let e_base = elaborate_reg base in
-      if m.disp = 0 then e_base
+      if m.disp = 0n then e_base
       else
         let e_disp = make_address m.disp in
         E_primn (Pn_add, [e_base; e_disp])
     | None, Some index ->
       let e_index = elaborate_mem_index index in
-      if m.disp = 0 then e_index
+      if m.disp = 0n then e_index
       else
         let e_disp = make_address m.disp in
         E_primn (Pn_add, [e_index; e_disp])
@@ -100,8 +101,8 @@ let elaborate_operand pc' = function
     E_load (size, seg, off)
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
-    E_lit (Bitvec.of_int (size*8) imm)
-  | O_offset ofs -> make_address (pc'+ofs)
+    E_lit (Bitvec.of_nativeint (size*8) imm)
+  | O_offset ofs -> make_address (Nativeint.(of_int pc' + ofs))
   | _ -> failwith "invalid operand type"
 
 let elaborate_writeback env o_dst e_data =
@@ -228,7 +229,8 @@ let elaborate_inst env pc inst =
     | I_CALL ->
       let dst' = elaborate_operand pc' (List.hd operands) in
       (* push pc *)
-      append_stmt env (S_call (fn inst, [make_address pc'], None));
+      append_stmt env
+        (S_call (fn inst, [make_address (Nativeint.of_int pc')], None));
       (* jump dst *)
       let d, u = xxx env pc in
       append_stmt env (S_jump (None, dst', d, u))

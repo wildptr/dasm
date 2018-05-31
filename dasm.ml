@@ -98,14 +98,18 @@ let read_imm n s =
   let rec f n' acc =
     if n' = n
     then
-      if acc land (1 lsl (n*8-1)) = 0
-      then acc
-      else acc - (1 lsl (n*8)) (* sign-extend immediate *)
+      let shamt = n*8-1 in
+      let mask = Nativeint.shift_left 1n shamt in
+      if Nativeint.logand acc mask = 0n then
+        acc
+      else
+        Nativeint.(acc - (shift_left mask 1)) (* sign-extend immediate *)
     else
       let b = int_of_char (s ()) in
-      f (n'+1) (acc lor (b lsl (n'*8)))
+      let shamt = n'*8 in
+      f (n'+1) Nativeint.(logor acc (shift_left (of_int b) shamt))
   in
-  f 0 0
+  f 0 0n
 
 (* the int in return value is opcode extension field i.e. ModRM[5:3] *)
 let read_regmem16 s seg_opt : int * regmem =
@@ -143,7 +147,7 @@ let read_regmem16 s seg_opt : int * regmem =
         else
           let base, index = decode_base_index r in
           let seg = decode_seg r in
-          Mem { base = Some base; index; disp = 0; seg }
+          Mem { base = Some base; index; disp = 0n; seg }
       | 1 | 2 ->
         let base, index = decode_base_index r in
         let disp = read_imm m s in
@@ -191,7 +195,7 @@ let read_regmem32 s seg_opt : int * regmem =
             else
               let base = Some (int_to_reg regset sib_b) in
               let seg = decode_seg sib_b in
-              Mem { base; index; disp = 0; seg }
+              Mem { base; index; disp = 0n; seg }
           | 5 ->
             let disp = read_imm 4 s in
             let seg = seg_opt |> Option.default R_DS in
@@ -199,7 +203,7 @@ let read_regmem32 s seg_opt : int * regmem =
           | _ ->
             let base = Some (int_to_reg regset r) in
             let seg = decode_seg r in
-            Mem { base; index = None; disp = 0; seg }
+            Mem { base; index = None; disp = 0n; seg }
         end
       | 1 | 2 ->
         let disp_size = if m = 1 then 1 else 4 in
@@ -584,8 +588,8 @@ let optable_basic = [|
   (* cd *) { op = E_uni I_INT;      var= 0;  fmt = E_uni [I] };
   (* ce *) { op = E_uni I_INTO;     var= 0;  fmt = E_uni [] };
   (* cf *) { op = E_uni I_IRET;     var=15;  fmt = E_uni [] };
-  (* d0 *) { op =       opgroup_c0; var= 0;  fmt = E_uni [RM; X (O_imm (1, 1))] };
-  (* d1 *) { op =       opgroup_c0; var=15;  fmt = E_uni [RM; X (O_imm (1, 1))] };
+  (* d0 *) { op =       opgroup_c0; var= 0;  fmt = E_uni [RM; X (O_imm (1n, 1))] };
+  (* d1 *) { op =       opgroup_c0; var=15;  fmt = E_uni [RM; X (O_imm (1n, 1))] };
   (* d2 *) { op =       opgroup_c0; var= 0;  fmt = E_uni [RM; X (O_reg R_CL)] };
   (* d3 *) { op =       opgroup_c0; var=15;  fmt = E_uni [RM; X (O_reg R_CL)] };
   (* d4 *) { op = E_uni I_AAM;      var= 0;  fmt = E_uni [I] };
@@ -1110,10 +1114,10 @@ let disassemble config str pos =
   in
   let imm1, imm2 =
     match fmt' land 7 with
-    | 0 -> 0, 0
-    | 1 -> read_imm 1 s, 0
-    | 2 -> read_imm data_size s, 0
-    | 3 -> read_imm 2 s, 0
+    | 0 -> 0n, 0n
+    | 1 -> read_imm 1 s, 0n
+    | 2 -> read_imm data_size s, 0n
+    | 3 -> read_imm 2 s, 0n
     | 4 ->
       let imm1 = read_imm 2 s in
       let imm2 = read_imm 1 s in
@@ -1122,7 +1126,7 @@ let disassemble config str pos =
       let imm1 = read_imm 2 s in
       let imm2 = read_imm data_size s in
       imm1, imm2
-    | 6 -> 0, 0
+    | 6 -> 0n, 0n
     | _ -> assert false
   in
   let op, var, argfmt =
@@ -1179,9 +1183,9 @@ let disassemble config str pos =
     | I -> O_imm (imm1, size)
     | I2 -> O_imm (imm2, size)
     | O ->
-      let offset = imm1 + String.length bytes in
+      let offset = Nativeint.(imm1 + of_int (String.length bytes)) in
       begin match config.pc_opt with
-        | Some pc -> O_imm (pc + offset, 4(* FIXME *))
+        | Some pc -> O_imm (Nativeint.(of_int pc + offset), 4(* FIXME *))
         | None -> O_offset offset
       end
     | FPU_R ->

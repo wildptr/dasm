@@ -36,7 +36,7 @@ let build_cfg db init_pc init_offset =
             begin match List.hd inst.operands with
               | O_offset ofs ->
                 Hashtbl.add db.jump_info pc Semant.J_resolved;
-                pc', [pc+ofs, Edge_neutral]
+                pc', [pc + Nativeint.to_int ofs, Edge_neutral]
               | _ ->
                 Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', []
@@ -47,7 +47,7 @@ let build_cfg db init_pc init_offset =
             begin match List.hd inst.operands with
               | O_offset ofs ->
                 Hashtbl.add db.jump_info pc Semant.J_resolved;
-                pc', [pc', Edge_false; pc+ofs, Edge_true]
+                pc', [pc', Edge_false; pc + Nativeint.to_int ofs, Edge_true]
               | _ ->
                 Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', [pc', Edge_false]
