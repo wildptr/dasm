@@ -1,2 +1,2 @@
-<*>: use_menhir, package(batteries), debug
-<*>: package(lablgtk2), package(cairo2), package(cairo2.lablgtk2)
+<*>: package(batteries), use_menhir, debug
+<gtk_main.*>: package(lablgtk2), package(cairo2), package(cairo2.lablgtk2)
