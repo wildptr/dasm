@@ -4,10 +4,16 @@ type proc = {
   mutable stmt_snode : Semant.stmt Cfg.ctlstruct;
 }
 
+type jump =
+  | J_unknown
+  | J_resolved
+  | J_call
+  | J_ret
+
 type db = {
   code : string;
   inst_table : (nativeint, Inst.inst) Hashtbl.t;
-  jump_info : (nativeint, Semant.jump) Hashtbl.t;
+  jump_info : (nativeint, jump) Hashtbl.t;
   proc_table : (nativeint, proc) Hashtbl.t;
 }
 

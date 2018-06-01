@@ -35,13 +35,13 @@ let build_cfg db init_pc init_offset =
           | I_JMP ->
             begin match List.hd inst.operands with
               | O_offset ofs ->
-                Hashtbl.add db.jump_info pc Semant.J_resolved;
+                Hashtbl.add db.jump_info pc J_resolved;
                 pc', [Nativeint.(pc + ofs), Edge_neutral]
               | O_imm (imm, _) ->
-                Hashtbl.add db.jump_info pc Semant.J_resolved;
+                Hashtbl.add db.jump_info pc J_resolved;
                 pc', [imm, Edge_neutral]
               | _ ->
-                Hashtbl.add db.jump_info pc Semant.J_unknown;
+                Hashtbl.add db.jump_info pc J_unknown;
                 pc', []
             end
           | I_JMPF -> failwith "cannot handle far jump"
@@ -49,21 +49,21 @@ let build_cfg db init_pc init_offset =
           | I_CJMP ->
             begin match List.hd inst.operands with
               | O_offset ofs ->
-                Hashtbl.add db.jump_info pc Semant.J_resolved;
+                Hashtbl.add db.jump_info pc J_resolved;
                 pc', [pc', Edge_false; Nativeint.(pc + ofs), Edge_true]
               | O_imm (imm, _) ->
-                Hashtbl.add db.jump_info pc Semant.J_resolved;
+                Hashtbl.add db.jump_info pc J_resolved;
                 pc', [pc', Edge_false; imm, Edge_true]
               | _ ->
-                Hashtbl.add db.jump_info pc Semant.J_unknown;
+                Hashtbl.add db.jump_info pc J_unknown;
                 pc', [pc', Edge_false]
             end
           | I_RET | I_RETF | I_RETN ->
-            Hashtbl.add db.jump_info pc Semant.J_ret;
+            Hashtbl.add db.jump_info pc J_ret;
             pc', []
           | _ ->
             if inst.operation = I_CALL then
-              Hashtbl.add db.jump_info pc Semant.J_call;
+              Hashtbl.add db.jump_info pc J_call;
             if Itree.find pc' !start_end = Itree.Start then
               pc', [pc', Edge_neutral]
             else

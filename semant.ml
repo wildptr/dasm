@@ -40,12 +40,6 @@ type expr =
 
 type loc = string
 
-type jump =
-  | J_unknown
-  | J_resolved
-  | J_call
-  | J_ret
-
 (* elaborated form of instructions *)
 type stmt =
   | S_set of loc * expr
@@ -75,9 +69,7 @@ let pp_sep_list sep pp f = function
     List.iter (fprintf f "%s%a" sep pp) tl
 
 let rec pp_expr f = function
-  | E_lit bv -> (*fprintf f "'%a'" Bitvec.pp bv*)
-    (*fprintf f "%d:%d" (Bitvec.to_int bv) (Bitvec.length bv)*)
-    fprintf f "%nd" (Bitvec.to_nativeint bv)
+  | E_lit bv -> fprintf f "%nd" (Bitvec.to_nativeint bv) (* width is lost *)
   | E_var s -> pp_print_string f s
   | E_part (e, lo, hi) -> fprintf f "%a[%d:%d]" pp_expr e lo hi
   | E_prim1 (p, e) ->
@@ -121,10 +113,6 @@ let rec pp_expr f = function
     let op_s = if sign then "sign_extend" else "zero_extend" in
     fprintf f "%s(%a, %d)" op_s pp_expr e n
 
-(*let pp_loc f = function
-  | L_var name -> pp_print_string f name
-  | L_part (name, lo, hi) -> fprintf f "%s[%d:%d]" name lo hi*)
-
 let pp_loc = pp_print_string
 
 let pp_stmt f = function
@@ -133,14 +121,6 @@ let pp_stmt f = function
   | S_store (size, seg, e_addr, e_data) ->
     fprintf f "%a:[%a]@%d = %a" pp_expr seg pp_expr e_addr size pp_expr e_data
   | S_jump (cond_opt, e) ->
-    (*let j_s =
-      match j with
-      | J_unknown -> "(?)"
-      | J_resolved -> ""
-      | J_call -> "(call)"
-      | J_ret -> "(ret)"
-    in
-    fprintf f "jump%s %a" j_s pp_expr e;*)
     begin match cond_opt with
       | Some cond -> fprintf f "if (%a) " pp_expr cond
       | None -> ()
@@ -174,9 +154,7 @@ let pp_proc f proc =
       fprintf f "%s" name;
       if i < n_param-1 then fprintf f ",@ ");
   fprintf f "):%d@]@ " proc.p_result_width;
-  (* print env *)
-  (*fprintf f "%a@ " pp_env proc.p_env;*)
-  (* print body*)
+  (* print body *)
   fprintf f "{@ ";
   fprintf f "  @[<v>";
   let n_stmt = List.length proc.p_body in
