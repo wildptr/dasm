@@ -23,7 +23,7 @@ let build_cfg db init_pc =
       | Itree.Middle ->
         span := Itree.split pc !span;
         edges := (pc, pc, Edge_neutral) :: !edges
-      | Itree.End | Itree.Nowhere ->
+      | Itree.Nowhere ->
         s.pos <- translate_va db pc;
         let rec loop (pc:Nativeint.t) =
           let config = Dasm.{ mode = Mode32bit; pc_opt = Some pc } in

@@ -1,5 +1,5 @@
 type 'a t
-type find_result = Nowhere | Start | Middle | End
+type find_result = Nowhere | Start | Middle
 
 val add : 'a * 'a -> 'a t -> 'a t
 val find : 'a -> 'a t -> find_result

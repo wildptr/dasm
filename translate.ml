@@ -36,15 +36,22 @@ let new_env symtab =
 
 let append_stmt env stmt = env.stmts_rev <- stmt :: env.stmts_rev
 
+let new_temp env width =
+  let n = Hashtbl.length env.var_tab in
+  let id = Printf.sprintf "$%d" n in
+  Hashtbl.add env.var_tab id width;
+  id
+
 let prim_of_unary_op = function
   | Not -> P1_not
+  | Neg -> P1_neg
   | Reduce_and -> P1_foldand
   | Reduce_xor -> P1_foldxor
   | Reduce_or -> P1_foldor
 
 let width_of_unary_op (op, w) =
   match op with
-  | Not -> w
+  | Not | Neg -> w
   | Reduce_and | Reduce_xor | Reduce_or -> 1
 
 let width_of_binary_op (op, w1, w2) =
@@ -140,7 +147,9 @@ let rec translate_cexpr st = function
     in
     f e'
 
-let rec translate_expr st = function
+let rec translate_expr env expr =
+  let st = env.symtab in
+  match expr with
   | Expr_sym s ->
     begin match lookup st s with
       | Var (name, w) -> E_var name, w
@@ -153,7 +162,7 @@ let rec translate_expr st = function
     let w = translate_cexpr st c_w in
     E_lit (Bitvec.of_int w v), w
   | Expr_index (e, i) ->
-    let e', w = translate_expr st e in
+    let e', w = translate_expr env e in
     begin match i with
       | Index_bit c_b ->
         let b = translate_cexpr st c_b in
@@ -170,7 +179,7 @@ let rec translate_expr st = function
     let handle_builtin func_name =
       let f1 prim =
         let args', arg_widths =
-          List.split (args |> List.map (translate_expr st))
+          List.split (args |> List.map (translate_expr env))
         in
         let w = List.hd arg_widths in
         arg_widths |> List.iter (check_width w);
@@ -182,8 +191,8 @@ let rec translate_expr st = function
           | [a1;a2] -> a1, a2
           | _ -> raise (Wrong_arity (func_name, 2))
         in
-        let a1', w1 = translate_expr st a1 in
-        let a2', _ = translate_expr st a2 in
+        let a1', w1 = translate_expr env a1 in
+        let a2', _ = translate_expr env a2 in
         E_prim2 (prim, a1', a2'), w1
       in
       let f_pred prim =
@@ -192,8 +201,8 @@ let rec translate_expr st = function
           | [a1;a2] -> a1, a2
           | _ -> raise (Wrong_arity (func_name, 2))
         in
-        let a1', w1 = translate_expr st a1 in
-        let a2', w2 = translate_expr st a2 in
+        let a1', w1 = translate_expr env a1 in
+        let a2', w2 = translate_expr env a2 in
         check_width w1 w2;
         E_prim2 (prim, a1', a2'), 1
       in
@@ -204,9 +213,9 @@ let rec translate_expr st = function
           | [a1;a2;a3] -> a1, a2, a3
           | _ -> raise (Wrong_arity (func_name, 3))
         in
-        let a1', w1 = translate_expr st a1 in
-        let a2', w2 = translate_expr st a2 in
-        let a3', w3 = translate_expr st a3 in
+        let a1', w1 = translate_expr env a1 in
+        let a2', w2 = translate_expr env a2 in
+        let a3', w3 = translate_expr env a3 in
         check_width w1 w2;
         check_width w3 1;
         E_prim3 (P3_carry, a1', a2', a3'), 1
@@ -223,14 +232,19 @@ let rec translate_expr st = function
     begin match try_lookup st func_name with
       | None -> handle_builtin func_name
       | Some (Prim func_name) -> handle_builtin func_name
+      | Some (Proc proc) ->
+        let w = proc.p_result_width in
+        let temp = new_temp env w in
+        translate_call env proc args (Some temp);
+        E_var temp, w
       | _ -> raise (Unknown_primitive func_name)
     end
   | Expr_unary (op, e) ->
-    let e', w = translate_expr st e in
+    let e', w = translate_expr env e in
     E_prim1 (prim_of_unary_op op, e'), width_of_unary_op (op, w)
   | Expr_binary (op, e1, e2) ->
-    let e1', w1 = translate_expr st e1 in
-    let e2', w2 = translate_expr st e2 in
+    let e1', w1 = translate_expr env e1 in
+    let e2', w2 = translate_expr env e2 in
     let e' = match op with
       | Concat -> E_primn (Pn_concat, [e1';e2'])
       | Add -> E_primn (Pn_add, [e1';e2'])
@@ -245,22 +259,39 @@ let rec translate_expr st = function
     let width = translate_cexpr st c_width in
     E_nondet (width, 0), width (* TODO: nondet id *)
   | Expr_load memloc ->
-    let seg', off', w = translate_memloc st memloc in
+    let seg', off', w = translate_memloc env memloc in
     E_load (w lsr 3, seg', off'), w
   | Expr_extend (sign, data, size) ->
-    let data', _ = translate_expr st data in
+    let data', _ = translate_expr env data in
     let size' = translate_cexpr st size in
     E_extend (sign, data', size'), size'
 
-and translate_memloc st (seg, off, size) =
-  let seg', segw = translate_expr st seg in
+and translate_call env proc args result_opt =
+  let args, arg_widths =
+    List.split (List.map (translate_expr env) args)
+  in
+  let n_param = List.length proc.p_param_names in
+  let n_arg = List.length args in
+  if n_param <> n_arg then raise (Wrong_arity ("???", n_param)); (* TODO *)
+  (* check arg width *)
+  List.combine proc.p_param_names arg_widths |> List.iter
+    (fun (param_name, arg_width) ->
+       let param_width = Hashtbl.find proc.p_var_tab param_name in
+       check_width param_width arg_width);
+  (* function that translates arguments *)
+  append_stmt env (S_call (proc, args, result_opt))
+
+and translate_memloc env (seg, off, size) =
+  let seg', segw = translate_expr env seg in
   check_width segw 16;
-  let off', offw = translate_expr st off in
+  let off', offw = translate_expr env off in
   (* TODO: check offset width *)
-  let w = translate_cexpr st size in
+  let w = translate_cexpr env.symtab size in
   seg', off', w
 
-let translate_stmt st emit stmt =
+let translate_stmt env stmt =
+  let st = env.symtab in
+  let emit = append_stmt env in
   let do_assign loc (data, w) =
     begin match loc with
       | Lhs_var name ->
@@ -271,7 +302,7 @@ let translate_stmt st emit stmt =
           | _ -> raise (Invalid_assignment name)
         end
       | Lhs_mem memloc ->
-        let seg, off, mw = translate_memloc st memloc in
+        let seg, off, mw = translate_memloc env memloc in
         check_width mw w;
         if w land 7 <> 0 then
           failwith "width of memory location is not multiple of 8";
@@ -280,28 +311,16 @@ let translate_stmt st emit stmt =
   in
   match stmt with
   | Stmt_set (loc, e) ->
-    do_assign loc (translate_expr st e)
+    do_assign loc (translate_expr env e)
   | Stmt_call (proc_name, args) ->
     let proc =
       match lookup st proc_name with
       | Proc p -> p
       | _ -> failwith ("not a Proc value: "^proc_name)
     in
-    let args, arg_widths =
-      List.split (List.map (translate_expr st) args)
-    in
-    let n_param = List.length proc.p_param_names in
-    let n_arg = List.length args in
-    if n_param <> n_arg then raise (Wrong_arity (proc_name, n_param));
-    (* check arg width *)
-    List.combine proc.p_param_names arg_widths |> List.iter
-      (fun (param_name, arg_width) ->
-         let param_width = Hashtbl.find proc.p_var_tab param_name in
-         check_width param_width arg_width);
-    (* function that translates arguments *)
-    emit (S_call (proc, args, None))
+    translate_call env proc args None
   | Stmt_return e ->
-    let e', _ = translate_expr st e in
+    let e', _ = translate_expr env e in
     emit (S_return e')
   | Stmt_jump addr -> assert false
 
@@ -320,7 +339,7 @@ let translate_proc st proc =
   vardecls |> List.iter register_var;
   let param_names = proc.ap_params |> List.map fst in
   let result_width = translate_cexpr st proc.ap_result_width in
-  stmts |> List.iter (translate_stmt proc_env.symtab (append_stmt proc_env));
+  stmts |> List.iter (translate_stmt proc_env);
   (*Printf.printf "%s: %d statements\n" proc.ap_name (List.length proc_env.stmts_rev);*)
   { p_name = proc.ap_name;
     p_body = List.rev proc_env.stmts_rev;

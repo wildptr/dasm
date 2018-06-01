@@ -120,6 +120,10 @@ let fnname_of_op = function
   | I_AND -> "and"
   | I_CALL -> "push"
   | I_CMP -> "sub"
+  | I_DEC -> "dec"
+  | I_INC -> "inc"
+  | I_NEG -> "neg"
+  | I_NOT -> "not"
   | I_OR -> "or"
   | I_POP -> "pop"
   | I_PUSH -> "push"
@@ -136,7 +140,7 @@ let fnname_of_op = function
 
 let elaborate_inst env pc inst =
   let op = operation_of inst in
-  let lsize = inst.variant land 3 in (* log size in bytes *)
+  let lsize = inst.variant land 15 in (* log size in bytes *)
   let operands = operands_of inst in
   let fn inst =
     let fnname_base =
@@ -151,7 +155,7 @@ let elaborate_inst env pc inst =
   let pc' = Nativeint.(pc + of_int (length_of inst)) in
   try
     match op with
-    | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR | I_SHL | I_SHR | I_SAR ->
+    | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
       let temp = new_temp env (8 lsl lsize) in
       let args = operands |> List.map (elaborate_operand pc') in
       append_stmt env (S_call (fn inst, args, Some temp));
@@ -191,6 +195,15 @@ let elaborate_inst env pc inst =
       in
       append_stmt env
         (S_jump (cond_opt, elaborate_operand pc' (List.hd operands)))
+    | I_SET ->
+      let dst =
+        match operands with
+        | [dst] -> dst
+        | _ -> assert false
+      in
+      let cond = cond_expr (inst.variant lsr 4) in
+      let data = E_extend (false, cond, 8) in
+      elaborate_writeback env dst data
     | I_MOVZX | I_MOVSX ->
       let dst, src =
         match operands with
@@ -240,9 +253,19 @@ let elaborate_inst env pc inst =
       append_stmt env (S_set (sp_name, E_primn (Pn_add, [E_var sp_name; inc])));
       (* jump addr *)
       append_stmt env (S_jump (None, E_var addr))
+    | I_LEAVE ->
+      (* mov sp,bp; pop bp *)
+      let sp, bp =
+        match lsize with
+        | 1 -> "SP", "BP"
+        | 2 -> "ESP", "EBP"
+        | _ -> assert false
+      in
+      append_stmt env (S_set (sp, E_var bp));
+      let pop = Printf.sprintf "pop%d" (1 lsl (lsize+3)) |> lookup_predef in
+      append_stmt env (S_call (pop, [], Some bp));
     | _ ->
-      Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst;
-      exit 1
+      Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst
   with Failure msg ->
     (* internal error *)
     Format.printf "%s: %a@." msg Inst.pp inst;

@@ -46,12 +46,14 @@ let pp_index f = function
 
 type unary_op =
   | Not
+  | Neg
   | Reduce_and
   | Reduce_xor
   | Reduce_or
 
 let string_of_unary_op = function
   | Not -> "~"
+  | Neg -> "-"
   | Reduce_and -> "&"
   | Reduce_xor -> "^"
   | Reduce_or -> "|"

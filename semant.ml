@@ -3,6 +3,7 @@ open Format
 
 type prim1 =
   | P1_not
+  | P1_neg
   | P1_foldand
   | P1_foldxor
   | P1_foldor
@@ -76,6 +77,7 @@ let rec pp_expr f = function
     let op_s =
       match p with
       | P1_not -> "~"
+      | P1_neg -> "-"
       | P1_foldand -> "&"
       | P1_foldxor -> "^"
       | P1_foldor -> "|"

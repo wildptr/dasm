@@ -33,5 +33,8 @@ let translate_va db va =
 let get_proc db va =
   Hashtbl.find db.proc_table va
 
+let set_proc db va proc =
+  Hashtbl.add db.proc_table va proc
+
 let has_proc db va =
   Hashtbl.mem db.proc_table va

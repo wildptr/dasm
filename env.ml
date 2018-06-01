@@ -26,7 +26,7 @@ let rec size_of_expr env = function
   | E_part (e, lo, hi) -> hi-lo
   | E_prim1 (p, e) ->
     begin match p with
-      | P1_not -> size_of_expr env e
+      | P1_not | P1_neg -> size_of_expr env e
       | P1_foldand
       | P1_foldxor
       | P1_foldor -> 1

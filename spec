@@ -45,7 +45,7 @@ template proc log_op<N, OP>(a:N, b:N):N
 	//PF = ~^out[7:0];
 	//AF = undefined(1);
 	ZF = out == #0:N;
-	SF = out[N-1];
+	SF = less(out, #0:N);
 	OF = '0';
 	return out;
 }
@@ -59,7 +59,7 @@ template proc shl<N, M>(x:N, n:M):N
 	//AF = undefined(1);
 	CF = undefined(1);
 	ZF = out == #0:N;
-	SF = out[N-1];
+	SF = less(out, #0:N);
 	OF = undefined(1);
 	return out;
 }
@@ -72,7 +72,7 @@ template proc shr<N, M>(x:N, n:M):N
 	//AF = undefined(1);
 	CF = undefined(1);
 	ZF = out == #0:N;
-	SF = out[N-1];
+	SF = less(out, #0:N);
 	OF = undefined(1);
 	return out;
 }
@@ -85,7 +85,7 @@ template proc sar<N, M>(x:N, n:M):N
 	//PF = ~^out[7:0];
 	//AF = undefined(1);
 	ZF = out == #0:N;
-	SF = out[N-1];
+	SF = less(out, #0:N);
 	OF = undefined(1);
 	return out;
 }
@@ -157,7 +157,7 @@ template proc inc<N>(in:N)
 	//PF = ~^out[7:0];
 	//AF = in[4] ^ out[4];
 	ZF = out == #0:N;
-	SF = out[N-1];
+	SF = less(out, #0:N);
 	//OF = sum1[N] ^ out[N-1] ^ in[N-1];
 	OF = undefined(1);
 }
@@ -167,7 +167,7 @@ template proc dec<N>(in:N)
 	var out:N;
 	out = in - #1:N;
 	ZF = out == #0:N;
-	SF = out[N-1];
+	SF = less(out, #0:N);
 	OF = undefined(1);
 }
 
@@ -178,3 +178,33 @@ proc inc32 = inc<32>;
 proc dec8  = dec< 8>;
 proc dec16 = dec<16>;
 proc dec32 = dec<32>;
+
+template proc neg<N>(in:N):N
+{
+	CF = below(#0:N, in);
+	ZF = #0:N == in;
+	SF = less(-in, #0:N);
+	OF = SF ^ less(#0:N, in);
+	return -in;
+}
+
+proc neg8  = neg< 8>;
+proc neg16 = neg<16>;
+proc neg32 = neg<32>;
+
+template proc not<N>(in:N):N
+{
+	var out:N;
+	out = ~in;
+	CF = '0';
+	//PF = ~^out[7:0];
+	//AF = undefined(1);
+	ZF = out == #0:N;
+	SF = less(out, #0:N);
+	OF = '0';
+	return out;
+}
+
+proc not8  = not< 8>;
+proc not16 = not<16>;
+proc not32 = not<32>;

@@ -9,7 +9,7 @@ let rec add (lo,hi) = function
     else if hi' <= lo then Branch (lo', hi', left, add (lo,hi) right)
     else assert false
 
-type find_result = Nowhere | Start | Middle | End
+type find_result = Nowhere | Start | Middle
 
 let rec find x = function
   | Leaf -> Nowhere
@@ -17,7 +17,6 @@ let rec find x = function
     if x < lo then find x left
     else if x = lo then Start
     else if x < hi then Middle
-    else if x = hi then End
     else find x right
 
 let rec split x = function

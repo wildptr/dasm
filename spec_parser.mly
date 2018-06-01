@@ -120,6 +120,7 @@ unary_op:
   | Amp { Reduce_and }
   | Caret { Reduce_xor }
   | Bar { Reduce_or }
+  | Minus { Neg }
 
 prefix_expr:
   | postfix_expr {$1}
