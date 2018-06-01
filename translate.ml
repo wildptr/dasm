@@ -244,34 +244,43 @@ let rec translate_expr st = function
   | Expr_undef c_width ->
     let width = translate_cexpr st c_width in
     E_nondet (width, 0), width (* TODO: nondet id *)
-  | Expr_load (seg, addr, size) ->
-    let seg', segw = translate_expr st seg in
-    if segw <> 16 then failwith "width of segment selector is not 16";
-    let addr', w = translate_expr st addr in
-    let size' = translate_cexpr st size in
-    E_load (size', seg', addr'), w
+  | Expr_load memloc ->
+    let seg', off', w = translate_memloc st memloc in
+    E_load (w lsr 3, seg', off'), w
   | Expr_extend (sign, data, size) ->
     let data', _ = translate_expr st data in
     let size' = translate_cexpr st size in
     E_extend (sign, data', size'), size'
 
+and translate_memloc st (seg, off, size) =
+  let seg', segw = translate_expr st seg in
+  check_width segw 16;
+  let off', offw = translate_expr st off in
+  (* TODO: check offset width *)
+  let w = translate_cexpr st size in
+  seg', off', w
+
 let translate_stmt st emit stmt =
-  let do_assign loc f w =
+  let do_assign loc (data, w) =
     begin match loc with
       | Lhs_var name ->
         begin match try_lookup st name with
           | None -> raise (Unbound_symbol name)
           | Some (Var (r, r_width)) ->
-            emit (f r)
+            emit (S_set (r, data))
           | _ -> raise (Invalid_assignment name)
         end
-      | Lhs_mem memloc -> () (* TODO *)
+      | Lhs_mem memloc ->
+        let seg, off, mw = translate_memloc st memloc in
+        check_width mw w;
+        if w land 7 <> 0 then
+          failwith "width of memory location is not multiple of 8";
+        emit (S_store (w lsr 3, seg, off, data))
     end
   in
   match stmt with
   | Stmt_set (loc, e) ->
-    let e', e_width = translate_expr st e in
-    do_assign loc (fun loc' -> S_set (loc', e')) e_width
+    do_assign loc (translate_expr st e)
   | Stmt_call (proc_name, args) ->
     let proc =
       match lookup st proc_name with
