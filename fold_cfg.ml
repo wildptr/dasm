@@ -1,6 +1,7 @@
 open Batteries
 open Cfg
 open Control_flow
+open Printf
 
 exception Break
 
@@ -141,11 +142,11 @@ let fold_cfg cfg =
           tbl.(src), tbl.(dst), attr
         end
       in
-      Format.eprintf "generic [";
-      nodes |> List.iter (Format.eprintf " %d");
-      Format.eprintf " ] -> [";
-      exits_list |> List.iter (Format.eprintf " %d");
-      Format.eprintf " ]@.";
+      printf "generic [";
+      nodes |> List.iter (printf " %d");
+      printf " ] -> [";
+      exits_list |> List.iter (printf " %d");
+      printf " ]\n";
       node.(entry) <- Generic (exits_list |> List.map (Array.get tbl), node', edges);
       succ.(entry) <- exits_list;
       succ_attr.(entry) <- exits_list |> List.map (fun _ -> Edge_neutral);
@@ -178,19 +179,19 @@ let fold_cfg cfg =
 
   (*let try_fold_seq entry body =
     try
-      (*Format.eprintf "try_fold_seq %d %d@." entry body;
-      Format.eprintf "succ[entry] =";
-      succ.(entry) |> List.iter (Format.eprintf " %d");
-      Format.eprintf "@.pred[body] =";
-      pred.(body) |> List.iter (Format.eprintf " %d");
-      Format.eprintf "@.";*)
+      (*printf "try_fold_seq %d %d\n" entry body;
+      printf "succ[entry] =";
+      succ.(entry) |> List.iter (printf " %d");
+      printf "\npred[body] =";
+      pred.(body) |> List.iter (printf " %d");
+      printf "\n";*)
       if succ.(entry) <> [body] then raise Break;
       pred.(body) |> List.iter begin fun i ->
         if i <> entry && not (dominates body i) then raise Break
       end;
       fold_generic body;
       let new_node = Seq (node.(entry), node.(body)) in
-      Format.eprintf "seq (%d,%d)@." entry body;
+      printf "seq (%d,%d)\n" entry body;
       node.(entry) <- new_node;
       let exits_list = succ.(body) in
       succ.(entry) <- exits_list;
@@ -206,9 +207,9 @@ let fold_cfg cfg =
       if succ.(entry) <> [body] || pred.(body) <> [entry] then raise Break;
       let new_node = Seq (node.(entry), node.(body)) in
       let exits_list = succ.(body) in
-      Format.eprintf "seq (%d,%d) -> [" entry body;
-      exits_list |> List.iter (Format.eprintf " %d");
-      Format.eprintf " ]@.";
+      printf "seq (%d,%d) -> [" entry body;
+      exits_list |> List.iter (printf " %d");
+      printf " ]\n";
       node.(entry) <- new_node;
       succ.(entry) <- exits_list;
       succ_attr.(entry) <- succ_attr.(body);
@@ -251,7 +252,7 @@ let fold_cfg cfg =
       let has_exit = !has_exit in
       fold_generic body;
       let new_node = If (node.(entry), t, node.(body), has_exit) in
-      Format.eprintf "if (%d,%b,%d,%b) -> %d@." entry t body has_exit exit;
+      printf "if (%d,%b,%d,%b) -> %d\n" entry t body has_exit exit;
       node.(entry) <- new_node;
       succ.(entry) <- [exit];
       succ_attr.(entry) <- [Edge_neutral];
@@ -287,7 +288,7 @@ let fold_cfg cfg =
       let body2_exits = S.of_list !body2_exits in
       let all_exits = S.union body1_exits body2_exits in
       if S.cardinal all_exits > 1 then begin
-(*         Format.eprintf "multiple exits found@."; *)
+(*         printf "multiple exits found\n"; *)
         raise Break
       end;
       let body1_has_exit = S.cardinal body1_exits = 1 in
@@ -303,7 +304,7 @@ let fold_cfg cfg =
         If_else (node.(entry), t, node.(body1), node.(body2))
       in
       node.(entry) <- new_node;
-      Format.eprintf "if-else (%d,%b,%d,%d) -> %d@." entry t body1 body2 exit;
+      printf "if-else (%d,%b,%d,%d) -> %d\n" entry t body1 body2 exit;
       succ.(entry) <- [exit];
       succ_attr.(entry) <- [Edge_neutral];
       fix_pred entry (S.union nodes_in_body1 nodes_in_body2) exit;
@@ -341,18 +342,18 @@ let fold_cfg cfg =
         else
           nodes_in entry
       in
-(*       Format.eprintf "do-while candidate: (%d,%d,%d)@." entry fork exit; *)
+(*       printf "do-while candidate: (%d,%d,%d)\n" entry fork exit; *)
       nodes_in_body |> S.iter begin fun i ->
         succ.(i) |> List.iter begin fun j ->
           if j <> exit && not (S.mem j nodes_in_body) then begin
-(*             Format.eprintf "%d -> %d out of body@." i j; *)
+(*             printf "%d -> %d out of body\n" i j; *)
             raise Break
           end
         end
       end;
       let t = get_edge_attr fork entry = Edge_true in
       if entry = fork then begin
-        Format.eprintf "do-while (%d,%b) -> %d@." entry t exit;
+        printf "do-while (%d,%b) -> %d\n" entry t exit;
         let new_node = Do_while (node.(entry), t) in
         node.(entry) <- new_node;
         (* just remove the backward edge *)
@@ -384,7 +385,7 @@ let fold_cfg cfg =
       (* if entry=t1 && body=t2 then exit_t else exit_f *)
       let t1 = get_edge_attr entry body = Edge_true in
       let t2 = get_edge_attr body exit_t = Edge_true in
-      Format.eprintf "fork1 (%d,%b,%d,%b) -> t=%d f=%d@." entry t1 body t2 exit_t exit_f;
+      printf "fork1 (%d,%b,%d,%b) -> t=%d f=%d\n" entry t1 body t2 exit_t exit_f;
       let new_node = Fork1 (node.(entry), t1, node.(body), t2) in
       node.(entry) <- new_node;
       let exits = [exit_t; exit_f] in

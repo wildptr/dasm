@@ -7,23 +7,24 @@ type string_iter = {
   mutable pos : int;
 }
 
-let build_cfg db init_pc init_offset =
+let build_cfg db init_pc =
+  Printf.printf "building CFG for %nx\n" init_pc;
   let open Database in
   let code = db.code in
-  let start_end = ref Itree.empty in
+  let span = ref Itree.empty in
   let edges = ref [] in (* from end of basic block to start of basic block *)
   let q = Queue.create () in
   Queue.add init_pc q;
   let s = { str = code; pos = 0 } in
   while not (Queue.is_empty q) do
     let pc = Queue.pop q in
-    begin match Itree.find pc !start_end with
+    begin match Itree.find pc !span with
       | Itree.Start -> ()
       | Itree.Middle ->
-        start_end := Itree.split pc !start_end;
+        span := Itree.split pc !span;
         edges := (pc, pc, Edge_neutral) :: !edges
       | Itree.End | Itree.Nowhere ->
-        s.pos <- init_offset + Nativeint.(to_int (pc - init_pc));
+        s.pos <- translate_va db pc;
         let rec loop (pc:Nativeint.t) =
           let config = Dasm.{ mode = Mode32bit; pc_opt = Some pc } in
           let inst = Dasm.(disassemble config s.str s.pos) in
@@ -64,13 +65,13 @@ let build_cfg db init_pc init_offset =
           | _ ->
             if inst.operation = I_CALL then
               Hashtbl.add db.jump_info pc J_call;
-            if Itree.find pc' !start_end = Itree.Start then
+            if Itree.find pc' !span = Itree.Start then
               pc', [pc', Edge_neutral]
             else
               loop pc'
         in
         let pc', dests = loop pc in
-        start_end := Itree.add (pc,pc') !start_end;
+        span := Itree.add (pc,pc') !span;
         dests |> List.iter begin fun (dest, attr) ->
           edges := (pc', dest, attr) :: !edges;
           (* If dest is strictly between start(b) and end(b) for some basic
@@ -80,7 +81,8 @@ let build_cfg db init_pc init_offset =
         end
     end
   done;
-  let start_end_list = Itree.to_list !start_end in
+  let span = !span in 
+  let start_end_list = Itree.to_list span in
   let basic_blocks =
     start_end_list |> List.map begin fun (start, stop) ->
       let rec loop pc insts =
@@ -114,4 +116,11 @@ let build_cfg db init_pc init_offset =
     succ.(i) <- List.rev succ.(i);
     pred.(i) <- List.rev pred.(i)
   done;
-  { node = Array.of_list basic_blocks; succ; pred; edges }
+  let cfg = { node = Array.of_list basic_blocks; succ; pred; edges } in
+  let inst_cs = Fold_cfg.fold_cfg cfg in
+  let env = Env.new_env db in
+  let stmt_cs =
+    inst_cs |> map_ctlstruct (Elaborate.elaborate_basic_block false env)
+  in
+  let il = Pseudocode.convert stmt_cs in
+  { cfg; inst_cs; stmt_cs; span; il }

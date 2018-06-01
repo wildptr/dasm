@@ -115,8 +115,8 @@ let expose view ev =
   true
 
 let show_pseudocode view () =
-  let proc = Hashtbl.find view.db.Database.proc_table view.current_function_va in
-  let stmts = Pseudocode.convert proc.stmt_snode in
+  let proc = Database.get_proc view.db view.current_function_va in
+  let stmts = proc.il in
   let buf = Buffer.create 0 in
   let open Format in
   let fmtr = formatter_of_buffer buf in
@@ -162,22 +162,16 @@ let goto_function view va =
     match Hashtbl.find_option db.Database.proc_table va with
     | Some proc -> proc
     | None ->
-      let cfg = Build_cfg.build_cfg db va Nativeint.(to_int (va-0x400000n)) in
-      let inst_snode = Fold_cfg.fold_cfg cfg in
-      let env = Env.new_env db in
-      let stmt_snode =
-        inst_snode |>
-        map_ctlstruct (Elaborate.elaborate_basic_block false env)
-      in
-      let proc = Database.{ cfg; inst_snode; stmt_snode } in
+      let proc = Build_cfg.build_cfg db va Nativeint.(to_int (va-0x400000n)) in
       Hashtbl.add db.Database.proc_table va proc;
       proc
   in
-  let fe = Cairo.font_extents view.cairo in
-  let conf = {
-    char_width = int_of_float fe.Cairo.max_x_advance;
-    char_height = int_of_float fe.Cairo.baseline
-  } in
+  let conf =
+    let open Cairo in
+    let fe = font_extents view.cairo in
+      { char_width = int_of_float fe.max_x_advance;
+        char_height = int_of_float fe.baseline }
+  in
   let layout = layout_node conf 0 proc.inst_snode in
   let layout_width = layout.right - layout.left in
   view.canvas#misc#set_size_request ~width:(layout_width+layout_margin*2)
@@ -196,62 +190,17 @@ let goto_function_prompt view () =
   in
   dlg#show ()
 
-exception Invalid_offset
-
-let read_u16 s offset =
-  if String.length s < offset+2 then raise Invalid_offset;
-  (int_of_char s.[offset  ]       ) lor
-  (int_of_char s.[offset+1] lsl  8)
-
-let read_u32 s offset =
-  let module I = Int32 in
-  if String.length s < offset+4 then raise Invalid_offset;
-  (             (s.[offset  ] |> int_of_char |> I.of_int)   ) |> I.logor
-  (I.shift_left (s.[offset+1] |> int_of_char |> I.of_int)  8) |> I.logor
-  (I.shift_left (s.[offset+2] |> int_of_char |> I.of_int) 16) |> I.logor
-  (I.shift_left (s.[offset+3] |> int_of_char |> I.of_int) 24)
-
 let () =
   Printexc.record_backtrace true;
   if Array.length Sys.argv <= 1 then begin
-    Format.eprintf "@.";
+    Printf.eprintf "incorrect usage\n";
     exit 1
   end;
   let in_path = Sys.argv.(1) in
+
   Elaborate.load_spec "spec";
-  let code = File.with_file_in in_path IO.read_all in
-
-  let entry_point =
-    try
-      if not (String.starts_with code "MZ") then begin
-        Format.eprintf "invalid DOS executable signature@.";
-        exit 1
-      end;
-      let e_lfanew = read_u32 code 0x3c |> Int32.to_int in
-      let pe_signature = String.sub code e_lfanew 4 in
-      if pe_signature <> "PE\x00\x00" then begin
-        Format.eprintf "invalid PE signature@.";
-        exit 1
-      end;
-      let coff_header_offset = e_lfanew + 4 in
-      let size_of_opt_header = read_u16 code (coff_header_offset + 16) in
-      Format.eprintf "SizeOfOptionalHeader = %d@." size_of_opt_header;
-      let opt_header_offset = coff_header_offset + 20 in
-      let opt_header_magic = read_u16 code opt_header_offset in
-      Format.eprintf "Magic = 0x%x@." opt_header_magic;
-      if opt_header_magic <> 0x10b then begin
-        Format.eprintf "not a PE32 file@.";
-        exit 1
-      end;
-      read_u32 code (opt_header_offset + 16) |> Nativeint.of_int32
-    with Invalid_offset ->
-      Format.eprintf "invalid PE file@.";
-      exit 1
-  in
-  Format.eprintf "AddressOfEntryPoint = 0x%nx@." entry_point;
+  let Pe.{ code; entry_point } = Pe.load in_path in
   let init_pc = Nativeint.(entry_point + 0x400000n) (* FIXME *) in
-(*   let init_offset = entry_point in *)
-
   let db = Database.create code in
 
   let _ = GtkMain.Main.init () in
