@@ -24,7 +24,7 @@ let point_in_rect (x,y) (rect:rect) =
 type view = {
   cairo : Cairo.context;
   canvas : GMisc.drawing_area;
-  text_view : GMisc.label;
+  text_view : GText.view;
   mutable layout : layout_node option;
   mutable current_function_va : nativeint;
   db : Database.db;
@@ -141,7 +141,7 @@ let show_pseudocode view () =
   in
   stmts |> List.iter (print_stmt "");
   let text = Buffer.contents buf in
-  view.text_view#set_text text
+  view.text_view#buffer#set_text text
 
 let show_ssa view () =
   let db = view.db in
@@ -256,7 +256,7 @@ let () =
 
   let _ = GtkMain.Main.init () in
 
-  let window = GWindow.window ~width:512 ~height:512
+  let window = GWindow.window ~width:640 ~height:480
       ~title:"dasm" () in
   let _ = window#connect#destroy ~callback:Main.quit in
 
@@ -268,20 +268,17 @@ let () =
   let button2 = GButton.button ~label:"SSA" ~packing:toolbar#add () in
   let button3 = GButton.button ~label:"Go to function" ~packing:toolbar#add () in
 
-  let nb = GPack.notebook ~packing:vbox#add () in
-
-  let label1 = GMisc.label ~text:"CFG" () in
-  let label2 = GMisc.label ~text:"Pseudocode" () in
+  let hbox = GPack.hbox ~packing:vbox#add () in
 
   let sw1 = GBin.scrolled_window ~hpolicy:`AUTOMATIC ~vpolicy:`AUTOMATIC
-      ~packing:(fun w -> ignore @@ nb#append_page ~tab_label:label1#coerce w) () in
+      ~packing:hbox#add () in
 
   let sw2 = GBin.scrolled_window ~hpolicy:`AUTOMATIC ~vpolicy:`AUTOMATIC
-      ~packing:(fun w -> ignore @@ nb#append_page ~tab_label:label2#coerce w) () in
+      ~packing:hbox#add () in
 
   let canvas = GMisc.drawing_area ~packing:sw1#add_with_viewport () in
 
-  let text_view = GMisc.label ~packing:sw2#add_with_viewport () in
+  let text_view = GText.view ~packing:sw2#add_with_viewport () in
 
   window#show ();
 
