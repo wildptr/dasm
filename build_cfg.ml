@@ -37,6 +37,9 @@ let build_cfg db init_pc init_offset =
               | O_offset ofs ->
                 Hashtbl.add db.jump_info pc Semant.J_resolved;
                 pc', [Nativeint.(pc + ofs), Edge_neutral]
+              | O_imm (imm, _) ->
+                Hashtbl.add db.jump_info pc Semant.J_resolved;
+                pc', [imm, Edge_neutral]
               | _ ->
                 Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', []
@@ -48,6 +51,9 @@ let build_cfg db init_pc init_offset =
               | O_offset ofs ->
                 Hashtbl.add db.jump_info pc Semant.J_resolved;
                 pc', [pc', Edge_false; Nativeint.(pc + ofs), Edge_true]
+              | O_imm (imm, _) ->
+                Hashtbl.add db.jump_info pc Semant.J_resolved;
+                pc', [pc', Edge_false; imm, Edge_true]
               | _ ->
                 Hashtbl.add db.jump_info pc Semant.J_unknown;
                 pc', [pc', Edge_false]
