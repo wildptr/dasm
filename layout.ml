@@ -111,8 +111,8 @@ let rec layout_node conf nentry = function
       Array.init nexit (fun i -> i*line_spacing-(nexit-1)*line_spacing/2)
     in
     { left; right; height; entry; exit; shape = Layout_box { text } }
-  | Generic (exits, snode, edges) ->
-    layout_node_generic conf nentry exits snode edges
+  | Generic (exits, cs, edges) ->
+    layout_generic conf nentry exits cs edges
   | If (a, t, b, b_has_exit) ->
     let a', a_is_bb = layout_fork conf nentry t a in
     let b' = layout_node conf 1 b in
@@ -313,11 +313,11 @@ and layout_seq conf a' b' =
   { left; right; height; entry = a'.entry; exit = b'.exit;
     shape = Layout_composite { nodes; connections } }
 
-and layout_node_generic conf nentry exits snode edges =
-  let n = Array.length snode in
-  let snode' =
+and layout_generic conf nentry exits cs edges =
+  let n = Array.length cs in
+  let cs' =
     Array.init (n+nentry) begin fun i ->
-      if i < n then snode.(i) else Virtual
+      if i < n then cs.(i) else Virtual
     end
   in
   let n' = n + nentry in
@@ -332,7 +332,7 @@ and layout_node_generic conf nentry exits snode edges =
   let node_layout =
     let npred = Array.make n' 0 in
     edges' |> List.iter (fun (_, dst, _) -> npred.(dst) <- npred.(dst) + 1);
-    snode' |> Array.mapi (fun i node -> layout_node conf npred.(i) node)
+    cs' |> Array.mapi (fun i node -> layout_node conf npred.(i) node)
   in
   let node_col = Array.make n' 0 in
   let node_rank = Array.make n' 0 in

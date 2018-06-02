@@ -172,7 +172,12 @@ let goto_function view va =
       { char_width = int_of_float fe.max_x_advance;
         char_height = int_of_float fe.baseline }
   in
-  let layout = layout_node conf 0 proc.inst_cs in
+  let layout =
+    try layout_node conf 0 proc.inst_cs
+    with e ->
+      Printexc.to_string e |> print_endline;
+      { left=0; right=0; height=0; entry=[||]; exit=[||]; shape=Layout_virtual }
+  in
   let layout_width = layout.right - layout.left in
   view.canvas#misc#set_size_request ~width:(layout_width+layout_margin*2)
     ~height:(layout.height+layout_margin*2) ();
