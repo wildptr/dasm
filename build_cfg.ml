@@ -117,7 +117,7 @@ let build_cfg db init_pc =
     pred.(i) <- List.rev pred.(i)
   done;
   let cfg = { node = Array.of_list basic_blocks; succ; pred; edges } in
-  let inst_cs = Fold_cfg.fold_cfg cfg in
+  let inst_cs = Fold_cfg.fold_cfg ~debug:false cfg in
   let env = Env.new_env db in
   let stmt_cs =
     inst_cs |> map_ctlstruct (Elaborate.elaborate_basic_block false env)

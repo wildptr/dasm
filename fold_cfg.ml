@@ -9,7 +9,7 @@ let rec root parent i =
   let p = parent.(i) in
   if p < 0 then i else root parent p
 
-let fold_cfg cfg =
+let fold_cfg ~debug cfg =
   let n = Array.length cfg.node in
   let parent = compute_idom cfg.succ cfg.pred in
   let children = Array.make n [] in
@@ -150,11 +150,13 @@ let fold_cfg cfg =
           tbl.(src), tbl.(dst), attr
         end
       in
-      printf "generic entry=%d [" entry;
-      nodes |> List.iter (printf " %d");
-      printf " ] -> [";
-      exits_list |> List.iter (printf " %d");
-      printf " ]\n";
+      if debug then begin
+        printf "generic entry=%d [" entry;
+        nodes |> List.iter (printf " %d");
+        printf " ] -> [";
+        exits_list |> List.iter (printf " %d");
+        printf " ]\n";
+      end;
       node.(entry) <- Generic (exits_list |> List.map (Array.get tbl), node', edges);
       succ.(entry) |> List.iter (remove_edge entry);
       exits_list |> List.iter (add_edge entry);
@@ -163,7 +165,7 @@ let fold_cfg cfg =
       end;
       children.(entry) <- []
     end;
-    check_consistency ()
+    if debug then check_consistency ()
   in
 
   let is_fork i =
@@ -207,16 +209,18 @@ let fold_cfg cfg =
       if succ.(entry) <> [body] || pred.(body) <> [entry] then raise Break;
       let new_node = Seq (node.(entry), node.(body)) in
       let exits_list = succ.(body) in
-      printf "seq (%d,%d) -> [" entry body;
-      exits_list |> List.iter (printf " %d");
-      printf " ]\n";
+      if debug then begin
+        printf "seq (%d,%d) -> [" entry body;
+        exits_list |> List.iter (printf " %d");
+        printf " ]\n";
+      end;
       node.(entry) <- new_node;
       succ.(entry) <- exits_list;
       succ_attr.(entry) <- succ_attr.(body);
       exits_list |> List.iter (fix_pred entry (S.singleton body));
       children.(entry) <- children.(body);
       children.(body) |> List.iter (fun i -> parent.(i) <- entry);
-      check_consistency ();
+      if debug then check_consistency ();
       true
     with Break -> false
   in
@@ -261,13 +265,15 @@ let fold_cfg cfg =
       let has_exit = !has_exit in
       fold_generic body;
       let new_node = If (node.(entry), t, node.(body), has_exit) in
-      printf "if (%d,%b,%d,%b) -> %d\n" entry t body has_exit exit;
+      if debug then begin
+        printf "if (%d,%b,%d,%b) -> %d\n" entry t body has_exit exit
+      end;
       node.(entry) <- new_node;
       succ.(entry) <- [exit];
       succ_attr.(entry) <- [Edge_neutral];
       fix_pred entry body_nodes exit;
       children.(entry) <- List.remove children.(entry) body;
-      check_consistency ();
+      if debug then check_consistency ();
       true
     with Break -> false
   in
@@ -304,12 +310,14 @@ let fold_cfg cfg =
         If_else (node.(entry), t, node.(body1), node.(body2))
       in
       node.(entry) <- new_node;
-      printf "if-else (%d,%b,%d,%d) -> %d\n" entry t body1 body2 exit;
+      if debug then begin
+        printf "if-else (%d,%b,%d,%d) -> %d\n" entry t body1 body2 exit
+      end;
       succ.(entry) |> List.iter (remove_edge entry);
       add_edge entry exit;
       children.(entry) <-
         children.(entry) |> List.filter (fun i -> i <> body1 && i <> body2);
-      check_consistency ();
+      if debug then check_consistency ();
       true
     with Break -> false
   in
@@ -363,7 +371,7 @@ let fold_cfg cfg =
       end else begin
         fold_generic' entry (if exit_dominated then Some exit else None)
       end;
-      check_consistency ();
+      if debug then check_consistency ();
       true
     with Break -> false
   in *)
@@ -394,7 +402,7 @@ let fold_cfg cfg =
       exits |> List.iter (fix_pred entry (S.singleton body));
       children.(entry) <- List.remove children.(entry) body @ children.(body);
       children.(body) |> List.iter (fun i -> parent.(i) <- entry);
-      check_consistency ();
+      if debug then check_consistency ();
       true
     with Break -> false
   in*)
