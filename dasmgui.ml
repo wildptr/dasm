@@ -162,7 +162,7 @@ let goto_function view va =
     match Hashtbl.find_option db.Database.proc_table va with
     | Some proc -> proc
     | None ->
-      let proc = Build_cfg.build_cfg db va Nativeint.(to_int (va-0x400000n)) in
+      let proc = Build_cfg.build_cfg db va in
       Hashtbl.add db.Database.proc_table va proc;
       proc
   in
@@ -172,7 +172,7 @@ let goto_function view va =
       { char_width = int_of_float fe.max_x_advance;
         char_height = int_of_float fe.baseline }
   in
-  let layout = layout_node conf 0 proc.inst_snode in
+  let layout = layout_node conf 0 proc.inst_cs in
   let layout_width = layout.right - layout.left in
   view.canvas#misc#set_size_request ~width:(layout_width+layout_margin*2)
     ~height:(layout.height+layout_margin*2) ();
@@ -199,7 +199,9 @@ let () =
   let in_path = Sys.argv.(1) in
 
   Elaborate.load_spec "spec";
-  let Pe.{ code; entry_point } = Pe.load in_path in
+  let pe = Pe.load in_path in
+  let code = pe.Pe.code in
+  let entry_point = pe.Pe.entry_point in
   let init_pc = Nativeint.(entry_point + 0x400000n) (* FIXME *) in
   let db = Database.create code in
 
