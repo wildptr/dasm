@@ -3,7 +3,10 @@ open Batteries
 let rec command_loop () =
   print_string "> ";
   flush stdout;
-  let cmd = input_line stdin in
+  let cmd =
+    try input_line stdin
+    with End_of_file -> exit 0
+  in
   Printf.printf "command: %s\n" cmd;
   command_loop ()
 

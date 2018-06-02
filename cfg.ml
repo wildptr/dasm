@@ -14,6 +14,15 @@ type 'a cfg = {
   edges : edge list;
 }
 
+let print_cfg cfg =
+  let n = Array.length cfg.node in
+  for i=0 to n-1 do
+    let open Printf in
+    printf "%d -> [" i;
+    cfg.succ.(i) |> List.iter (printf " %d");
+    printf " ]\n"
+  done
+
 type 'a ctlstruct =
   | Virtual
   | BB of 'a basic_block * int

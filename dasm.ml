@@ -265,7 +265,7 @@ let inst_format_table_0f =
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
    \x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\x02\
    \x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\x10\
-   \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x10\
+   \x00\x00\x00\x00\x11\x10\x00\x00\x00\x00\x00\x00\x11\x10\x00\x10\
    \x00\x00\x00\x00\x00\x00\x10\x10\x00\x00\x00\x00\x00\x00\x10\x10\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
    \x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\
@@ -514,8 +514,8 @@ let optable_basic = [|
   (* 83 *) { op =       opgroup_80; var=15;  fmt = E_uni [RM;I] };
   (* 84 *) { op = E_uni I_TEST;     var= 0;  fmt = E_uni [RM;I] };
   (* 85 *) { op = E_uni I_TEST;     var=15;  fmt = E_uni [RM;I] };
-  (* 86 *) { op = E_uni I_XCHG;     var= 0;  fmt = E_uni [RM;I] };
-  (* 87 *) { op = E_uni I_XCHG;     var=15;  fmt = E_uni [RM;I] };
+  (* 86 *) { op = E_uni I_XCHG;     var= 0;  fmt = E_uni [RM;R] };
+  (* 87 *) { op = E_uni I_XCHG;     var=15;  fmt = E_uni [RM;R] };
   (* 88 *) { op = E_uni I_MOV;      var= 0;  fmt = E_uni [RM;R] };
   (* 89 *) { op = E_uni I_MOV;      var=15;  fmt = E_uni [RM;R] };
   (* 8a *) { op = E_uni I_MOV;      var= 0;  fmt = E_uni [R;RM] };
@@ -688,9 +688,9 @@ let optable_0f = [|
   (* 2e *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* 2f *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* 30 *) { op = E_inv;            var= 0;  fmt = E_inv };
-  (* 31 *) { op = E_inv;            var= 0;  fmt = E_inv };
-  (* 32 *) { op = E_inv;            var= 0;  fmt = E_inv };
-  (* 33 *) { op = E_inv;            var= 0;  fmt = E_inv };
+  (* 31 *) { op = E_uni I_RDTSC;    var= 0;  fmt = E_uni [] };
+  (* 32 *) { op = E_uni I_RDMSR;    var= 0;  fmt = E_uni [] };
+  (* 33 *) { op = E_uni I_RDPMC;    var= 0;  fmt = E_uni [] };
   (* 34 *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* 35 *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* 36 *) { op = E_inv;            var= 0;  fmt = E_inv };
@@ -801,18 +801,18 @@ let optable_0f = [|
   (* 9f *) { op = E_uni I_SET;      var=0xf0;fmt = E_uni [RM] };
   (* a0 *) { op = E_uni I_PUSH;     var=15;  fmt = E_uni [X (O_reg R_FS)] };
   (* a1 *) { op = E_uni I_POP;      var=15;  fmt = E_uni [X (O_reg R_FS)] };
-  (* a2 *) { op = E_inv;            var= 0;  fmt = E_inv };
+  (* a2 *) { op = E_uni I_CPUID;    var= 0;  fmt = E_uni [] };
   (* a3 *) { op = E_inv;            var= 0;  fmt = E_inv };
-  (* a4 *) { op = E_inv;            var= 0;  fmt = E_inv };
-  (* a5 *) { op = E_inv;            var= 0;  fmt = E_inv };
+  (* a4 *) { op = E_uni I_SHLD;     var=15;  fmt = E_uni [RM;R;X (O_imm (1n,1))] };
+  (* a5 *) { op = E_uni I_SHLD;     var=15;  fmt = E_uni [RM;R;X (O_reg R_CL)] };
   (* a6 *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* a7 *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* a8 *) { op = E_uni I_PUSH;     var=15;  fmt = E_uni [X (O_reg R_GS)] };
   (* a9 *) { op = E_uni I_POP;      var=15;  fmt = E_uni [X (O_reg R_GS)] };
   (* aa *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* ab *) { op = E_inv;            var= 0;  fmt = E_inv };
-  (* ac *) { op = E_inv;            var= 0;  fmt = E_inv };
-  (* ad *) { op = E_inv;            var= 0;  fmt = E_inv };
+  (* ac *) { op = E_uni I_SHRD;     var=15;  fmt = E_uni [RM;R;X (O_imm (1n,1))] };
+  (* ad *) { op = E_uni I_SHRD;     var=15;  fmt = E_uni [RM;R;X (O_reg R_CL)] };
   (* ae *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* af *) { op = E_uni I_IMUL;     var=15;  fmt = E_uni [R;RM] };
   (* b0 *) { op = E_inv;            var= 0;  fmt = E_inv };
@@ -1134,7 +1134,13 @@ let disassemble config str pos =
     | Opcode_1byte ->
       format_of_inst optable_basic config.mode prefix b x
     | Opcode_2byte ->
-      format_of_inst optable_0f config.mode prefix b x
+      begin
+        try
+          format_of_inst optable_0f config.mode prefix b x
+        with Invalid_instruction ->
+          Printf.printf "0f %02x %x\n" b x;
+          raise Invalid_instruction
+      end
     | Opcode_fpu ->
       let index1 = b lsl 3 lor x in
       let op, argfmt, op_r = fpu_optable.(index1) in

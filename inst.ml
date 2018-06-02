@@ -284,6 +284,7 @@ type operation =
   | I_CMC
   | I_CMP
   | I_CMPS
+  | I_CPUID
   | I_CWD
   | I_DAA
   | I_DAS
@@ -426,6 +427,9 @@ type operation =
   | I_PUSHF
   | I_RCL
   | I_RCR
+  | I_RDMSR
+  | I_RDPMC
+  | I_RDTSC
   | I_RET
   | I_RETF
   | I_RETN
@@ -438,7 +442,9 @@ type operation =
   | I_SCAS
   | I_SET
   | I_SHL
+  | I_SHLD
   | I_SHR
+  | I_SHRD
   | I_STC
   | I_STD
   | I_STI
@@ -508,6 +514,7 @@ let mnemonic_of inst =
   | I_CMC -> "CMC"
   | I_CMP -> "CMP"
   | I_CMPS -> "CMPS" ^ suffix_of_size inst.variant
+  | I_CPUID -> "CPUID"
   | I_CWD -> "CWD"
   | I_DAA -> "DAA"
   | I_DAS -> "DAS"
@@ -650,6 +657,9 @@ let mnemonic_of inst =
   | I_PUSHF -> "PUSHF"
   | I_RCL -> "RCL"
   | I_RCR -> "RCR"
+  | I_RDMSR -> "RDMSR"
+  | I_RDPMC -> "RDPMC"
+  | I_RDTSC -> "RDTSC"
   | I_RET -> "RET"
   | I_RETF-> "RET FAR"
   | I_RETN -> "RETN"
@@ -662,7 +672,9 @@ let mnemonic_of inst =
   | I_SCAS -> "SCAS" ^ suffix_of_size inst.variant
   | I_SET -> "SET"^cond_code.(inst.variant lsr 4)
   | I_SHL -> "SHL"
+  | I_SHLD -> "SHLD"
   | I_SHR -> "SHR"
+  | I_SHRD -> "SHRD"
   | I_STC -> "STC"
   | I_STD -> "STD"
   | I_STI -> "STI"
