@@ -214,7 +214,7 @@ let rec expand_stmt env pc retval stmt =
         | _ -> assert false
       end
     in
-    List.iter (expand_stmt env pc rv') proc.p_body;
+    List.iter (expand_stmt env pc' rv') proc.p_body;
     proc.p_var_tab |> Hashtbl.iter begin fun name _ ->
       Hashtbl.remove env.rename_table name
     end
