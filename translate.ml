@@ -28,7 +28,7 @@ type symtab = value Map.String.t
 type env = {
   mutable symtab : symtab;
   var_tab : (string, int) Hashtbl.t;
-  mutable stmts_rev : stmt list;
+  mutable stmts_rev : var stmt list;
 }
 
 let new_env symtab =

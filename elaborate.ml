@@ -139,15 +139,14 @@ let fnname_of_op = function
   | I_XOR -> "xor"
   | _ -> failwith "fnname_of_op: not implemented"
 
-let rec expand_stmt env retval stmt =
-  let pc = ref 0n in (* initial value should never be used... *)
+let rec expand_stmt env pc retval stmt =
   let rename_var = function
     | V_local name ->
       begin
         try Hashtbl.find env.rename_table name
         with Not_found -> failwith ("unbound local variable: "^name)
       end
-    | V_pc -> E_lit (Bitvec.of_nativeint 32 !pc)
+    | V_pc -> E_lit (Bitvec.of_nativeint 32 pc)
     | v -> E_var v
   in
   let rename e = subst_expr rename_var e in
@@ -179,7 +178,7 @@ let rec expand_stmt env retval stmt =
       let open Format in
       printf "procedure: %s@." proc.p_name;
       printf "arguments:@.";
-      args |> List.iter (printf "%a@." pp_expr);
+      args |> List.iter (printf "%a@." (pp_expr' pp_var));
       failwith "wrong arity"
     end;
     let param_arr = proc.p_param_names |> Array.of_list in
@@ -215,7 +214,7 @@ let rec expand_stmt env retval stmt =
         | _ -> assert false
       end
     in
-    List.iter (expand_stmt env rv') proc.p_body;
+    List.iter (expand_stmt env pc rv') proc.p_body;
     proc.p_var_tab |> Hashtbl.iter begin fun name _ ->
       Hashtbl.remove env.rename_table name
     end
@@ -225,9 +224,6 @@ let rec expand_stmt env retval stmt =
       | Some name ->
         emit env (S_set (name, rename e))
     end
-  | S_label va as s ->
-    pc := va;
-    emit env s
   | _ -> assert false
 
 let elaborate_inst env pc inst =
@@ -320,7 +316,7 @@ let elaborate_inst env pc inst =
     | _ ->
       Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst
   end;
-  List.rev !inst_stmts |> List.iter (expand_stmt env None)
+  List.rev !inst_stmts |> List.iter (expand_stmt env pc None)
 
 let elaborate_basic_block env bb =
   let open Cfg in
@@ -334,9 +330,12 @@ let elaborate_basic_block env bb =
   { bb with stmts }
 
 let elaborate_cfg db cfg =
+  let open Cfg in
   let env = Env.create db in
-  let node' = cfg.Cfg.node |> Array.map (elaborate_basic_block env) in
-  { cfg with Cfg.node = node' }, env
+  let node = cfg.node |> Array.map (elaborate_basic_block env) in
+  let succ = Array.copy cfg.succ in
+  let pred = Array.copy cfg.pred in
+  { node; succ; pred; edges = cfg.edges }, env
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in

@@ -9,8 +9,6 @@ type reg =
   | R_XMM0 | R_XMM1 | R_XMM2 | R_XMM3 | R_XMM4 | R_XMM5 | R_XMM6 | R_XMM7
   | R_CF | R_PF | R_AF | R_ZF | R_SF | R_DF | R_OF
 
-(* TODO: clean up utility functions related to register names *)
-
 let string_of_reg = function
   | R_AL -> "AL"
   | R_CL -> "CL"
@@ -114,90 +112,7 @@ let lookup_reg name =
   | "DS" -> R_DS
   | "FS" -> R_FS
   | "GS" -> R_GS
-  | _ -> failwith ("lookup_reg: not implemented: " ^ name)
-
-let index_of_reg reg =
-  match reg with
-  | R_AL -> 0
-  | R_CL -> 1
-  | R_DL -> 2
-  | R_BL -> 3
-  | R_AH -> 4
-  | R_CH -> 5
-  | R_DH -> 6
-  | R_BH -> 7
-  | R_AX -> 8
-  | R_CX -> 9
-  | R_DX -> 10
-  | R_BX -> 11
-  | R_SP -> 12
-  | R_BP -> 13
-  | R_SI -> 14
-  | R_DI -> 15
-  | R_EAX -> 16
-  | R_ECX -> 17
-  | R_EDX -> 18
-  | R_EBX -> 19
-  | R_ESP -> 20
-  | R_EBP -> 21
-  | R_ESI -> 22
-  | R_EDI -> 23
-  | R_CF -> 24
-  | R_PF -> 25
-  | R_AF -> 26
-  | R_ZF -> 27
-  | R_SF -> 28
-  | R_DF -> 29
-  | R_OF -> 30
-  | R_ES -> 31
-  | R_CS -> 32
-  | R_SS -> 33
-  | R_DS -> 34
-  | R_FS -> 35
-  | R_GS -> 36
-  | _ -> failwith ("index_of_reg: not implemented: " ^ string_of_reg reg)
-
-let reg_name_table = [|
-  "AL";
-  "CL";
-  "DL";
-  "BL";
-  "AH";
-  "CH";
-  "DH";
-  "BH";
-  "AX";
-  "CX";
-  "DX";
-  "BX";
-  "SI";
-  "DI";
-  "SP";
-  "BP";
-  "EAX";
-  "ECX";
-  "EDX";
-  "EBX";
-  "ESP";
-  "EBP";
-  "ESI";
-  "EDI";
-  "CF";
-  "PF";
-  "AF";
-  "ZF";
-  "SF";
-  "DF";
-  "OF";
-  "ES";
-  "CS";
-  "SS";
-  "DS";
-  "FS";
-  "GS";
-|]
-
-let number_of_registers = 37
+  | _ -> failwith ("lookup_reg: " ^ name)
 
 type mem = {
   base : reg option;

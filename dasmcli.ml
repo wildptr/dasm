@@ -47,35 +47,46 @@ let cmd_scan args =
   let va = List.hd args |> parse_hex in
   Analyze.scan db va
 
-let cmd_pcode args =
-  let va = List.hd args |> parse_hex in
-  let proc = Database.get_proc db va in
-  let stmts = proc.Database.il in
+let string_of_pcode pp_v stmts =
   let buf = Buffer.create 0 in
   let open Format in
-  let fmtr = formatter_of_buffer buf in
+  let f = formatter_of_buffer buf in
   let open Semant in
   let rec print_stmt indent stmt =
     match stmt with
     | S_if (cond, body) ->
-      fprintf fmtr "%sif (%a) {@." indent pp_expr cond;
+      fprintf f "%sif (%a) {@." indent (pp_expr' pp_v) cond;
       body |> List.iter (print_stmt (indent^"  "));
-      fprintf fmtr "%s}@." indent
+      fprintf f "%s}@." indent
     | S_if_else (cond, body_t, body_f) ->
-      fprintf fmtr "%sif (%a) {@." indent pp_expr cond;
+      fprintf f "%sif (%a) {@." indent (pp_expr' pp_v) cond;
       body_t |> List.iter (print_stmt (indent^"  "));
-      fprintf fmtr "%s} else {@." indent;
+      fprintf f "%s} else {@." indent;
       body_f |> List.iter (print_stmt (indent^"  "));
-      fprintf fmtr "%s}@." indent
+      fprintf f "%s}@." indent
     | S_do_while (body, cond) ->
-      fprintf fmtr "%sdo {@." indent;
+      fprintf f "%sdo {@." indent;
       body |> List.iter (print_stmt (indent^"  "));
-      fprintf fmtr "%s} while (%a)@." indent pp_expr cond
-    | _ -> fprintf fmtr "%s%a@." indent pp_stmt stmt
+      fprintf f "%s} while (%a)@." indent (pp_expr' pp_v) cond
+    | _ -> fprintf f "%s%a@." indent (pp_stmt' pp_v) stmt
   in
   stmts |> List.iter (print_stmt "");
-  let text = Buffer.contents buf in
-  print_string text
+  Buffer.contents buf
+
+let cmd_pcode args =
+  let va = List.hd args |> parse_hex in
+  let proc = Database.get_proc db va in
+  let stmts = proc.Database.il in
+  print_string (string_of_pcode Semant.pp_var stmts)
+
+let cmd_ssa args =
+  let va = List.hd args |> parse_hex in
+  let proc = Database.get_proc db va in
+  let cfg, env = Elaborate.elaborate_cfg db proc.cfg in
+  let cfg' = Dataflow.convert_to_ssa (cfg, env) in
+  let cs = Fold_cfg.fold_cfg ~debug:false cfg' in
+  let il = Pseudocode.convert cs in
+  print_string (string_of_pcode Semant.pp_ssa_var il)
 
 let cmd_load args =
   let path = List.hd args in
@@ -88,6 +99,7 @@ let cmd_table = [
   "analyze", cmd_analyze;
   "load", cmd_load;
   "pcode", cmd_pcode;
+  "ssa", cmd_ssa;
   "scan", cmd_scan;
 ] |> List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
 

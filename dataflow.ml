@@ -3,23 +3,29 @@ open Cfg
 open List
 open Semant
 
-module S = Set.String
+module S = Set.Int
 
-let all_register_names = S.of_array Inst.reg_name_table
+let number_of_registers = 56
 
-let defs = function
+let var_to_uid = function
+  | V_global name -> Inst.lookup_reg name |> Obj.magic
+  | V_temp i -> number_of_registers + i
+  | _ -> failwith "var_to_uid: invalid variable"
+
+let uid_to_var uid =
+  if uid < number_of_registers then
+    V_global (Inst.string_of_reg (Obj.magic uid))
+  else
+    V_temp (uid - number_of_registers)
+
+let def_of_stmt = function
   | S_set (lhs, _) -> Some lhs
   | S_phi (lhs, _) -> Some lhs
   | _ -> None
 
-let defs' = function
-  | S_set (lhs, _) -> S.singleton lhs
-  | S_phi (lhs, _) -> S.singleton lhs
-  | _ -> S.empty (* TODO: S_jump *)
-
 let rec uses_expr = function
   | E_lit _ -> S.empty
-  | E_var name -> S.singleton name
+  | E_var var -> S.singleton (var_to_uid var)
   | E_part (e, _, _) -> uses_expr e
   | E_prim1 (_, e) -> uses_expr e
   | E_prim2 (_, e1, e2) -> S.union (uses_expr e1) (uses_expr e2)
@@ -51,17 +57,13 @@ let count_uses cfg =
   let use_count = Hashtbl.create 0 in
   let n = Array.length cfg.node in
   for i=0 to n-1 do
-(*     Format.eprintf "=== Basic block %d ===@." i; *)
     cfg.node.(i).stmts |> iter begin fun stmt ->
-(*       Format.eprintf "%a uses [" pp_stmt stmt; *)
       uses stmt |> S.iter begin fun name ->
-(*         Format.eprintf " %s" name; *)
         if Hashtbl.mem use_count name then
           Hashtbl.replace use_count name (Hashtbl.find use_count name + 1)
         else
           Hashtbl.add use_count name 1
       end;
-(*       Format.eprintf " ]@." *)
     end
   done;
   fun name ->
@@ -111,6 +113,7 @@ let auto_subst cfg =
     true
   end
 
+(*
 let remove_dead_code cfg =
   let n = Array.length cfg.node in
   let changed = ref false in
@@ -122,7 +125,7 @@ let remove_dead_code cfg =
           match stmt with
           | S_jump _ | S_store _ -> true
           | _ ->
-            begin match defs stmt with
+            begin match def_of_stmt stmt with
               | Some name -> use_count name > 0
               | None -> true
             end
@@ -133,23 +136,18 @@ let remove_dead_code cfg =
     end
   done;
   !changed
+*)
 
-let get_rmid name = Inst.index_of_reg (Inst.lookup_reg name)
-
-let get_rm_name rmid = Inst.reg_name_table.(rmid)
-
-let compute_defs cfg =
+let compute_defs (cfg : var stmt cfg) n_var =
   let size = Array.length cfg.node in
-  let defs = Array.make Inst.number_of_registers Set.Int.empty in
+  let defs = Array.make n_var Set.Int.empty in
   for i=0 to size-1 do
     cfg.node.(i).stmts |> iter begin fun stmt ->
-      defs' stmt |> S.iter begin fun name ->
-        begin match name.[0] with
-          | 'A'..'Z' ->
-            let rmid = get_rmid name in
-            defs.(rmid) <- Set.Int.add i defs.(rmid)
-          | _ -> ()
-        end
+      def_of_stmt stmt |> begin function
+        | Some var ->
+          let uid = var_to_uid var in
+          defs.(uid) <- Set.Int.add i defs.(uid)
+        | None -> ()
       end
     end
   done;
@@ -157,10 +155,14 @@ let compute_defs cfg =
 
 exception Break
 
-let convert_to_ssa cfg =
-  (* place phi functions *)
+let convert_to_ssa (cfg, env) =
   let size = Array.length cfg.node in
-  let idom = Control_flow.compute_idom cfg.succ cfg.pred in
+  (* fields of the resulting CFG *)
+  let node = cfg.node |> Array.map (fun bb -> { bb with stmts = [] }) in
+  let succ = Array.copy cfg.succ in
+  let pred = Array.copy cfg.pred in
+  (* place phi functions *)
+  let idom = Control_flow.compute_idom succ pred in
   let children = Array.make size [] in
   let df = Array.make size [] in
   let rec dominates x y =
@@ -175,7 +177,7 @@ let convert_to_ssa cfg =
   end;
   let rec compute_df n =
     let s = ref [] in
-    cfg.succ.(n) |> iter (fun y -> if idom.(y) <> n then s := y :: !s);
+    succ.(n) |> iter (fun y -> if idom.(y) <> n then s := y :: !s);
     children.(n) |> iter begin fun c ->
       compute_df c;
       df.(c) |> iter (fun w -> if not (dominates n w) then s := w :: !s)
@@ -183,48 +185,46 @@ let convert_to_ssa cfg =
     df.(n) <- !s
   in
   compute_df 0;
-  let defs = compute_defs cfg in
-  for rmid = 0 to Inst.number_of_registers - 1 do
+  let n_var = number_of_registers + (Env.temp_count env) in
+  let defs = compute_defs cfg n_var in
+  for uid = 0 to n_var - 1 do
     let phi_inserted_at = Array.make size false in
-    let worklist = Queue.create () in
-    defs.(rmid) |> Set.Int.iter (fun defsite -> Queue.add defsite worklist);
-    while not (Queue.is_empty worklist) do
-      let n = Queue.pop worklist in
+    let q = Queue.create () in
+    defs.(uid) |> Set.Int.iter (fun defsite -> Queue.add defsite q);
+    while not (Queue.is_empty q) do
+      let n = Queue.pop q in
       df.(n) |> iter begin fun y ->
         if not phi_inserted_at.(y) then begin
-          let n_pred = length cfg.pred.(y) in
-          let phi =
-            S_phi (get_rm_name rmid, Array.make n_pred (E_var (get_rm_name rmid)))
-          in
-          cfg.node.(y).stmts <- phi :: cfg.node.(y).stmts;
+          let n_pred = length pred.(y) in
+          let lhs = uid_to_var uid in
+          (* RHS is never used *)
+          let phi = S_phi (lhs, Array.make n_pred (E_var lhs)) in
+          (* actually insert phi function *)
+          begin match cfg.node.(y).stmts with
+            | label :: rest -> cfg.node.(y).stmts <- label :: phi :: rest;
+            | _ -> failwith "empty basic block"
+          end;
           phi_inserted_at.(y) <- true;
-          if not (Set.Int.mem y defs.(rmid)) then Queue.push y worklist
+          if not (Set.Int.mem y defs.(uid)) then Queue.push y q
         end
       end
     done
   done;
   (* rename variables *)
-  let count = Array.make Inst.number_of_registers 0 in
-  let stack = Array.make Inst.number_of_registers [0] in
-  let rename_rhs name =
-    match name.[0] with
-    | 'A'..'Z' ->
-      let rmid = get_rmid name in
-      let i = hd stack.(rmid) in
-      name ^ "_" ^ string_of_int i
-    | _ -> name
+  let count = Array.make n_var 0 in
+  let stack = Array.make n_var [0] in
+  let rename_rhs var =
+    let uid = var_to_uid var in
+    let i = hd stack.(uid) in
+    var, i
   in
   let rec rename n =
-    (*Format.(fprintf err_formatter "[%d]@." n);*)
-    let rename_lhs name =
-      match name.[0] with
-      | 'A'..'Z' ->
-        let rmid = get_rmid name in
-        let i = count.(rmid) + 1 in
-        count.(rmid) <- i;
-        stack.(rmid) <- i :: stack.(rmid);
-        name ^ "_" ^ string_of_int i
-      | _ -> name
+    let rename_lhs var =
+      let uid = var_to_uid var in
+      let i = count.(uid) + 1 in
+      count.(uid) <- i;
+      stack.(uid) <- i :: stack.(uid);
+      var, i
     in
     let new_stmts = ref [] in
     cfg.node.(n).stmts |> iter begin fun stmt ->
@@ -243,41 +243,36 @@ let convert_to_ssa cfg =
           let c' = Option.map (rename_variables rename_rhs) c in
           let dst' = rename_variables rename_rhs dst in
           S_jump (c', dst')
-        | S_phi (lhs, rhs) -> S_phi (rename_lhs lhs, rhs)
+        | S_phi (lhs, rhs) ->
+          let lhs' = rename_lhs lhs in
+          let n = Array.length rhs in
+          S_phi (lhs', Array.make n (E_var lhs'))
+        | S_label _ as s -> s
         | _ -> assert false
       in
-      (*Format.(fprintf err_formatter "%a -> %a@." pp_stmt stmt pp_stmt new_stmt);*)
       new_stmts := new_stmt :: !new_stmts
     end;
     let old_stmts = cfg.node.(n).stmts in
-    cfg.node.(n).stmts <- rev !new_stmts;
+    node.(n).stmts <- rev !new_stmts;
     (* rename variables in RHS of phi-functions *)
-    cfg.succ.(n) |> iter begin fun y ->
+    succ.(n) |> iter begin fun y ->
       (* n is the j-th predecessor of y *)
-      let j =
-        match index_of n cfg.pred.(y) with
-        | Some i -> i
-        | None -> assert false
-      in
-      begin
-        try
-          cfg.node.(y).stmts |> iter begin function
-            | S_phi (_, rhs) -> rhs.(j) <- rename_variables rename_rhs rhs.(j)
-            | _ -> raise Break
-          end;
-        with Break -> ()
+      let j = index_of n pred.(y) |> Option.get in
+      node.(y).stmts |> iter begin function
+        | S_phi (lhs, rhs) ->
+          rhs.(j) <- rename_variables rename_rhs (E_var (fst lhs))
+        | _ -> ()
       end
     end;
     children.(n) |> iter rename;
     old_stmts |> iter begin fun stmt ->
-      defs' stmt |> S.iter begin fun name ->
-        begin match name.[0] with
-          | 'A'..'Z' ->
-            let rmid = get_rmid name in
-            stack.(rmid) <- tl stack.(rmid)
-          | _ -> ()
-        end
+      def_of_stmt stmt |> begin function
+        | Some var ->
+          let uid = var_to_uid var in
+          stack.(uid) <- tl stack.(uid)
+        | None -> ()
       end
     end
   in
-  rename 0
+  rename 0;
+  { node; succ; pred; edges = cfg.edges }

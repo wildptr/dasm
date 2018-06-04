@@ -4,8 +4,8 @@ open Semant
 type env = {
   local_tab : (string, int) Hashtbl.t;
   temp_tab : (int, int) Hashtbl.t;
-  mutable stmts_rev : stmt list;
-  rename_table : (string, expr) Hashtbl.t;
+  mutable stmts_rev : var stmt list;
+  rename_table : (string, var expr) Hashtbl.t;
   mutable next_nondet_id : int;
   db : Database.db;
 }
@@ -74,8 +74,11 @@ let create db =
     db;
   }
 
+let temp_count env =
+  Hashtbl.length env.temp_tab
+
 let new_temp env width =
-  let n = Hashtbl.length env.temp_tab in
+  let n = temp_count env in
   let var = V_temp n in
   Hashtbl.add env.temp_tab n width;
   var

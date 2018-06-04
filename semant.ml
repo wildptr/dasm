@@ -33,36 +33,42 @@ type var =
   | V_local of string
   | V_pc
 
-type expr =
+type ssa_var = var * int
+(*
+  | SV_global of string * int
+  | SV_temp of int
+*)
+
+type 'a expr =
   | E_lit of Bitvec.t
-  | E_var of var
-  | E_part of expr * int * int
-  | E_prim1 of prim1 * expr
-  | E_prim2 of prim2 * expr * expr
-  | E_prim3 of prim3 * expr * expr * expr
-  | E_primn of primn * expr list
-  | E_load of int * expr * expr
+  | E_var of 'a
+  | E_part of 'a expr * int * int
+  | E_prim1 of prim1 * 'a expr
+  | E_prim2 of prim2 * 'a expr * 'a expr
+  | E_prim3 of prim3 * 'a expr * 'a expr * 'a expr
+  | E_primn of primn * 'a expr list
+  | E_load of int * 'a expr * 'a expr
   | E_nondet of int * int
-  | E_extend of bool * expr * int
+  | E_extend of bool * 'a expr * int
 
 (* elaborated form of instructions *)
-type stmt =
-  | S_set of var * expr
-  | S_store of int * expr * expr * expr
-  | S_jump of expr option * expr
-  | S_phi of string * expr array
+type 'a stmt =
+  | S_set of 'a * 'a expr
+  | S_store of int * 'a expr * 'a expr * 'a expr
+  | S_jump of 'a expr option * 'a expr
+  | S_phi of 'a * 'a expr array
   | S_label of nativeint (* program counter *)
   (* the following do not occur after elaboration *)
-  | S_call of proc * expr list * var option
-  | S_return of expr
-  | S_if of expr * stmt list
-  | S_if_else of expr * stmt list * stmt list
-  | S_do_while of stmt list * expr
+  | S_call of proc * 'a expr list * 'a option
+  | S_return of 'a expr
+  | S_if of 'a expr * 'a stmt list
+  | S_if_else of 'a expr * 'a stmt list * 'a stmt list
+  | S_do_while of 'a stmt list * 'a expr
 
 and proc = {
   (* for pretty printing *)
   p_name : string;
-  p_body : stmt list;
+  p_body : var stmt list;
   p_param_names : string list;
   p_result_width : int;
   p_var_tab : (string, int) Hashtbl.t;
@@ -80,10 +86,17 @@ let pp_var f = function
   | V_local s -> pp_print_string f s
   | V_pc -> pp_print_string f "PC"
 
-let rec pp_expr f = function
+let pp_ssa_var f (var, i) =
+  fprintf f "%a#%d" pp_var var i
+(*
+  | SV_global (s, i) -> fprintf f "%s#%d" s i
+  | SV_temp i -> fprintf f "$%d" i
+*)
+
+let rec pp_expr' pp_v f = function
   | E_lit bv -> fprintf f "%nd" (Bitvec.to_nativeint bv) (* width is lost *)
-  | E_var var -> pp_var f var
-  | E_part (e, lo, hi) -> fprintf f "%a[%d:%d]" pp_expr e lo hi
+  | E_var var -> pp_v f var
+  | E_part (e, lo, hi) -> fprintf f "%a[%d:%d]" (pp_expr' pp_v) e lo hi
   | E_prim1 (p, e) ->
     let op_s =
       match p with
@@ -93,21 +106,21 @@ let rec pp_expr f = function
       | P1_foldxor -> "^"
       | P1_foldor -> "|"
     in
-    fprintf f "(%s%a)" op_s pp_expr e
+    fprintf f "(%s%a)" op_s (pp_expr' pp_v) e
   | E_prim2 (p, e1, e2) ->
     begin match p with
-      | P2_sub -> fprintf f "(%a - %a)" pp_expr e1 pp_expr e2
-      | P2_eq ->  fprintf f "(%a == %a)" pp_expr e1 pp_expr e2
-      | P2_shiftleft -> fprintf f "shift_left(%a, %a)" pp_expr e1 pp_expr e2
-      | P2_logshiftright -> fprintf f "log_shift_right(%a, %a)" pp_expr e1 pp_expr e2
-      | P2_arishiftright -> fprintf f "ari_shift_right(%a, %a)" pp_expr e1 pp_expr e2
-      | P2_less -> fprintf f "(%a <s %a)" pp_expr e1 pp_expr e2
-      | P2_below -> fprintf f "(%a <u %a)" pp_expr e1 pp_expr e2
+      | P2_sub -> fprintf f "(%a - %a)" (pp_expr' pp_v) e1 (pp_expr' pp_v) e2
+      | P2_eq ->  fprintf f "(%a == %a)" (pp_expr' pp_v) e1 (pp_expr' pp_v) e2
+      | P2_shiftleft -> fprintf f "shift_left(%a, %a)" (pp_expr' pp_v) e1 (pp_expr' pp_v) e2
+      | P2_logshiftright -> fprintf f "log_shift_right(%a, %a)" (pp_expr' pp_v) e1 (pp_expr' pp_v) e2
+      | P2_arishiftright -> fprintf f "ari_shift_right(%a, %a)" (pp_expr' pp_v) e1 (pp_expr' pp_v) e2
+      | P2_less -> fprintf f "(%a <s %a)" (pp_expr' pp_v) e1 (pp_expr' pp_v) e2
+      | P2_below -> fprintf f "(%a <u %a)" (pp_expr' pp_v) e1 (pp_expr' pp_v) e2
     end
   | E_prim3 (p, e1, e2, e3) ->
     begin match p with
       | P3_carry ->
-        fprintf f "carry(%a, %a, %a)" pp_expr e1 pp_expr e2 pp_expr e3
+        fprintf f "carry(%a, %a, %a)" (pp_expr' pp_v) e1 (pp_expr' pp_v) e2 (pp_expr' pp_v) e3
     end
   | E_primn (p, es) ->
     let op_s =
@@ -118,44 +131,44 @@ let rec pp_expr f = function
       | Pn_xor -> "^"
       | Pn_or -> "|"
     in
-    fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") pp_expr) es
+    fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") (pp_expr' pp_v)) es
   | E_load (size, seg, addr) ->
-    fprintf f "%a:[%a]@%d" pp_expr seg pp_expr addr size
+    fprintf f "%a:[%a]@%d" (pp_expr' pp_v) seg (pp_expr' pp_v) addr size
   | E_nondet (n, id) -> fprintf f "nondet(%d)#%d" n id
   | E_extend (sign, e, n) ->
     let op_s = if sign then "sign_extend" else "zero_extend" in
-    fprintf f "%s(%a, %d)" op_s pp_expr e n
+    fprintf f "%s(%a, %d)" op_s (pp_expr' pp_v) e n
 
-let pp_stmt f = function
+let pp_stmt' pp_v f = function
   | S_set (var, e) ->
-    fprintf f "%a = %a" pp_var var pp_expr e
+    fprintf f "%a = %a" pp_v var (pp_expr' pp_v) e
   | S_store (size, seg, e_addr, e_data) ->
-    fprintf f "%a:[%a]@%d = %a" pp_expr seg pp_expr e_addr size pp_expr e_data
+    fprintf f "%a:[%a]@%d = %a" (pp_expr' pp_v) seg (pp_expr' pp_v) e_addr size (pp_expr' pp_v) e_data
   | S_jump (cond_opt, e) ->
     begin match cond_opt with
-      | Some cond -> fprintf f "if (%a) " pp_expr cond
+      | Some cond -> fprintf f "if (%a) " (pp_expr' pp_v) cond
       | None -> ()
     end;
-    fprintf f "goto %a" pp_expr e
+    fprintf f "goto %a" (pp_expr' pp_v) e
   | S_phi (lhs, rhs) ->
-    fprintf f "%s = phi(%a)" lhs (pp_sep_list ", " pp_expr) (Array.to_list rhs)
+    fprintf f "%a = phi(%a)" pp_v lhs (pp_sep_list ", " (pp_expr' pp_v)) (Array.to_list rhs)
   | S_label pc -> fprintf f "%nd:" pc
   | S_call (proc, args, result_opt) ->
     begin match result_opt with
       | None -> ()
-      | Some var -> fprintf f "%a = " pp_var var
+      | Some var -> fprintf f "%a = " pp_v var
     end;
     fprintf f "%s(" proc.p_name;
     let n = List.length args in
     args |> List.iteri (fun i arg ->
-        pp_expr f arg;
+        (pp_expr' pp_v) f arg;
         if i < n-1 then fprintf f ", ");
     fprintf f ")";
   | S_return e ->
-    fprintf f "return %a" pp_expr e
-  | S_if (e, _) -> fprintf f "if (%a) ..." pp_expr e
-  | S_if_else (e, _, _) -> fprintf f "if (%a) ... else ..." pp_expr e
-  | S_do_while (_, e) -> fprintf f "do ... while (%a)" pp_expr e
+    fprintf f "return %a" (pp_expr' pp_v) e
+  | S_if (e, _) -> fprintf f "if (%a) ..." (pp_expr' pp_v) e
+  | S_if_else (e, _, _) -> fprintf f "if (%a) ... else ..." (pp_expr' pp_v) e
+  | S_do_while (_, e) -> fprintf f "do ... while (%a)" (pp_expr' pp_v) e
 
 let pp_proc f proc =
   let n_param = List.length proc.p_param_names in
@@ -171,7 +184,7 @@ let pp_proc f proc =
   fprintf f "  @[<v>";
   let n_stmt = List.length proc.p_body in
   proc.p_body |> List.iteri (fun i stmt ->
-      fprintf f "%a" pp_stmt stmt;
+      fprintf f "%a" (pp_stmt' pp_var) stmt;
       if i < n_stmt-1 then fprintf f "@ ");
   fprintf f "@]@ ";
   fprintf f "}@]"
@@ -187,7 +200,7 @@ let rec subst_expr f = function
     E_prim3 (p, subst_expr f e1, subst_expr f e2, subst_expr f e3)
   | E_primn (p, es) ->
     E_primn (p, List.map (subst_expr f) es)
-  | E_load (size, seg, addr) -> E_load (size, seg, subst_expr f addr)
+  | E_load (size, seg, addr) -> E_load (size, subst_expr f seg, subst_expr f addr)
   | E_nondet _ as e -> e
   | E_extend (sign, e, n) -> E_extend (sign, subst_expr f e, n)
 
