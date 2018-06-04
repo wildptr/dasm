@@ -3,13 +3,13 @@ open Env
 open Inst
 open Semant
 
-let eCF = E_var "CF"
-let ePF = E_var "PF"
-let eAF = E_var "AF"
-let eZF = E_var "ZF"
-let eSF = E_var "SF"
-let eDF = E_var "DF"
-let eOF = E_var "OF"
+let eCF = E_var (V_global "CF")
+let ePF = E_var (V_global "PF")
+let eAF = E_var (V_global "AF")
+let eZF = E_var (V_global "ZF")
+let eSF = E_var (V_global "SF")
+let eDF = E_var (V_global "DF")
+let eOF = E_var (V_global "OF")
 
 let predef_table : (string, proc) Hashtbl.t = Hashtbl.create 0
 
@@ -35,23 +35,23 @@ let cond_expr code =
 
 let elaborate_reg r =
   match r with
-  | R_AL -> E_part (E_var "EAX", 0, 8)
-  | R_CL -> E_part (E_var "ECX", 0, 8)
-  | R_DL -> E_part (E_var "EDX", 0, 8)
-  | R_BL -> E_part (E_var "EBX", 0, 8)
-  | R_AH -> E_part (E_var "EAX", 8, 16)
-  | R_CH -> E_part (E_var "ECX", 8, 16)
-  | R_DH -> E_part (E_var "EDX", 8, 16)
-  | R_BH -> E_part (E_var "EBX", 8, 16)
-  | R_AX -> E_part (E_var "EAX", 0, 16)
-  | R_CX -> E_part (E_var "ECX", 0, 16)
-  | R_DX -> E_part (E_var "EDX", 0, 16)
-  | R_BX -> E_part (E_var "EBX", 0, 16)
-  | R_SP -> E_part (E_var "ESP", 0, 16)
-  | R_BP -> E_part (E_var "EBP", 0, 16)
-  | R_SI -> E_part (E_var "ESI", 0, 16)
-  | R_DI -> E_part (E_var "EDI", 0, 16)
-  | _ -> E_var (string_of_reg r)
+  | R_AL -> E_part (E_var (V_global "EAX"), 0, 8)
+  | R_CL -> E_part (E_var (V_global "ECX"), 0, 8)
+  | R_DL -> E_part (E_var (V_global "EDX"), 0, 8)
+  | R_BL -> E_part (E_var (V_global "EBX"), 0, 8)
+  | R_AH -> E_part (E_var (V_global "EAX"), 8, 16)
+  | R_CH -> E_part (E_var (V_global "ECX"), 8, 16)
+  | R_DH -> E_part (E_var (V_global "EDX"), 8, 16)
+  | R_BH -> E_part (E_var (V_global "EBX"), 8, 16)
+  | R_AX -> E_part (E_var (V_global "EAX"), 0, 16)
+  | R_CX -> E_part (E_var (V_global "ECX"), 0, 16)
+  | R_DX -> E_part (E_var (V_global "EDX"), 0, 16)
+  | R_BX -> E_part (E_var (V_global "EBX"), 0, 16)
+  | R_SP -> E_part (E_var (V_global "ESP"), 0, 16)
+  | R_BP -> E_part (E_var (V_global "EBP"), 0, 16)
+  | R_SI -> E_part (E_var (V_global "ESI"), 0, 16)
+  | R_DI -> E_part (E_var (V_global "EDI"), 0, 16)
+  | _ -> E_var (V_global (string_of_reg r))
 
 let elaborate_mem_index (reg, scale) =
   let e_reg = elaborate_reg reg in
@@ -107,7 +107,7 @@ let elaborate_operand pc' = function
 
 let elaborate_writeback env o_dst e_data =
   match o_dst with
-  | O_reg r -> emit env (S_set (string_of_reg r, e_data))
+  | O_reg r -> emit env (S_set (V_global (string_of_reg r), e_data))
   | O_mem (m, size) ->
     assert (size > 0);
     let seg, off = elaborate_mem_addr m in
@@ -153,6 +153,7 @@ let elaborate_inst env pc inst =
     let fnname = Printf.sprintf "%s%d" fnname_base (1 lsl (lsize+3)) in
     lookup_predef fnname
   in
+  emit env (S_label pc);
   let pc' = Nativeint.(pc + of_int (length_of inst)) in
   try
     match op with
@@ -162,17 +163,13 @@ let elaborate_inst env pc inst =
       let args = operands |> List.map (elaborate_operand pc') in
       emit env (S_call (fn inst, args, Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
-    | I_CMP | I_PUSH | I_TEST | I_RET | I_RETN | I_LEAVE ->
+    | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
       let args = operands |> List.map (elaborate_operand pc') in
       emit env (S_call (fn inst, args, None))
     | I_POP ->
       let temp = new_temp env (8 lsl lsize) in
       emit env (S_call (fn inst, [], Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
-    | I_CALL ->
-      let args = operands |> List.map (elaborate_operand pc') in
-      let arg_pc = E_lit (Bitvec.of_nativeint (8 lsl lsize) pc') in
-      emit env (S_call (fn inst, arg_pc :: args, None))
     | I_MOV ->
       let dst, src =
         match operands with

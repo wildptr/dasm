@@ -12,18 +12,17 @@ let next_line lexbuf =
       pos_bol = lexbuf.lex_curr_pos;
       pos_lnum = pos.pos_lnum + 1 }
 
-module StringMap = Map.Make(String)
-
-let keyword_map : token StringMap.t =
+let keyword_map : token Map.String.t =
   [
     (*"if", K_if;*)
     "jump", K_jump;
     "return", K_return;
+    "pc", K_pc;
     "proc", K_proc;
     "template", K_template;
     "undefined", K_undefined;
     "var", K_var;
-  ] |> List.fold_left (fun map (k, v) -> StringMap.add k v map) StringMap.empty
+  ] |> List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
 
 }
 
@@ -41,7 +40,7 @@ rule read = parse
   | '\'' (['0' '1']* as s) '\'' { Bitvec (Bitvec.of_string s) }
   | id
     { let s = Lexing.lexeme lexbuf in
-      try StringMap.find s keyword_map with Not_found -> Ident s }
+      try Map.String.find s keyword_map with Not_found -> Ident s }
   | "==" { EqEq }
   (*| '$' { Dollar }*)
   | '#' { Hash }

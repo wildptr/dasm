@@ -45,3 +45,6 @@ let load_image db path =
 
 let get_code db =
   (Option.get db.image).Pe.code
+
+let get_jump_info db va =
+  Hashtbl.find db.jump_info va

@@ -86,6 +86,7 @@ type astexpr =
   | Expr_undef of cexpr
   | Expr_load of memloc
   | Expr_extend of bool * astexpr * cexpr
+  | Expr_pc
 
 and memloc = astexpr * astexpr * cexpr (* seg, offset, size *)
 
@@ -122,6 +123,7 @@ let rec pp_astexpr f = function
   | Expr_undef width -> fprintf f "undefined(%a)" pp_cexpr width
   | Expr_load memloc -> pp_memloc f memloc
   | Expr_extend (sign, data, n) -> () (* TODO *)
+  | Expr_pc -> pp_print_string f "pc"
 
 and pp_memloc f (seg, off, size) =
   fprintf f "[%a:%a]:%a" pp_astexpr seg pp_astexpr off pp_cexpr size

@@ -1,3 +1,4 @@
+open Batteries
 open Format
 open Semant
 open Spec_ast
@@ -15,14 +16,14 @@ let check_width w1 w2 =
   if w1 <> w2 then raise (Width_mismatch (w1, w2)) else ()
 
 type value =
-  | Var of string * int (* name, width *)
+  | Var of var * int
   | Proc of proc
   | Templ of proc_templ
   | IConst of int
   | BVConst of Bitvec.t
   | Prim of string
 
-type symtab = value BatMap.String.t
+type symtab = value Map.String.t
 
 type env = {
   mutable symtab : symtab;
@@ -38,7 +39,7 @@ let append_stmt env stmt = env.stmts_rev <- stmt :: env.stmts_rev
 
 let new_temp env width =
   let n = Hashtbl.length env.var_tab in
-  let id = Printf.sprintf "$%d" n in
+  let id = Printf.sprintf "_%d" n in
   Hashtbl.add env.var_tab id width;
   id
 
@@ -103,15 +104,15 @@ let init_symtab = [
   "DF",  1;
   "OF",  1;
 ] |> List.fold_left (fun map (name, w) ->
-    BatMap.String.add name (Var (name, w)) map) BatMap.String.empty
+    Map.String.add name (Var (V_global name, w)) map) Map.String.empty
 
 let extend_symtab (name, value) st =
-  if BatMap.String.mem name st
+  if Map.String.mem name st
   then raise (Redefinition name)
-  else BatMap.String.add name value st
+  else Map.String.add name value st
 
 let try_lookup st name =
-  try Some (BatMap.String.find name st) with Not_found -> None
+  try Some (Map.String.find name st) with Not_found -> None
 
 let lookup st name =
   match try_lookup st name with
@@ -152,7 +153,7 @@ let rec translate_expr env expr =
   match expr with
   | Expr_sym s ->
     begin match lookup st s with
-      | Var (name, w) -> E_var name, w
+      | Var (var, w) -> E_var var, w
       | BVConst bv -> E_lit bv, Bitvec.length bv
       | _ -> failwith ("not a Var or BVConst value: "^s)
     end
@@ -234,7 +235,7 @@ let rec translate_expr env expr =
       | Some (Prim func_name) -> handle_builtin func_name
       | Some (Proc proc) ->
         let w = proc.p_result_width in
-        let temp = new_temp env w in
+        let temp = V_local (new_temp env w) in
         translate_call env proc args (Some temp);
         E_var temp, w
       | _ -> raise (Unknown_primitive func_name)
@@ -265,6 +266,7 @@ let rec translate_expr env expr =
     let data', _ = translate_expr env data in
     let size' = translate_cexpr st size in
     E_extend (sign, data', size'), size'
+  | Expr_pc -> E_var V_pc, 32 (* TODO *)
 
 and translate_call env proc args result_opt =
   let args, arg_widths =
@@ -332,7 +334,7 @@ let translate_proc st proc =
   let register_var (name, c_width) =
     let width = translate_cexpr proc_env.symtab c_width in
     proc_env.symtab <-
-      extend_symtab (name, Var (name, width))
+      extend_symtab (name, Var (V_local name, width))
         proc_env.symtab;
     Hashtbl.add proc_env.var_tab name width
   in
@@ -387,8 +389,8 @@ let translate_ast ast =
   end (* init: *) init_symtab
 
 let pp_value f = function
-  | Var (name, w) ->
-    fprintf f "Var %s:%d" name w
+  | Var (var, w) ->
+    fprintf f "Var %a:%d" pp_var var w
   | Proc p ->
     fprintf f "Proc %a" pp_proc p
   | Templ _ ->
@@ -402,6 +404,6 @@ let pp_value f = function
 
 let pp_symtab f st =
   fprintf f "@[<v>";
-  st |> BatMap.String.iter (fun key data ->
+  st |> Map.String.iter (fun key data ->
       fprintf f "%s: %a@ " key pp_value data);
   fprintf f "@]"

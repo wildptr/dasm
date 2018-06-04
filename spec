@@ -209,7 +209,7 @@ proc not8  = not< 8>;
 proc not16 = not<16>;
 proc not32 = not<32>;
 
-proc call32(pc:32, dst:32)
+proc call32(dst:32)
 {
 	push32(pc);
 	jump dst;
@@ -217,6 +217,12 @@ proc call32(pc:32, dst:32)
 
 proc ret32()
 {
+	jump pop32();
+}
+
+proc retn32(n:16)
+{
+	ESP = ESP + (n:32);
 	jump pop32();
 }
 

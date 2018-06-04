@@ -34,6 +34,7 @@ open Spec_ast
 
 %token K_jump
 %token K_return
+%token K_pc
 %token K_proc
 %token K_template
 %token K_undefined
@@ -98,6 +99,7 @@ primary_expr:
     { Expr_load $1 }
   | LParen; e = primary_expr; Colon; w = primary_cexpr; RParen
     { Expr_extend (false, e, w) }
+  | K_pc { Expr_pc }
 
 memloc:
   | LBrack; seg = primary_expr; Colon; off = primary_expr; RBrack; Colon;

@@ -2,26 +2,30 @@ open Batteries
 open Semant
 
 type env = {
-  var_tab : (string, int) Hashtbl.t;
+  local_tab : (string, int) Hashtbl.t;
+  temp_tab : (int, int) Hashtbl.t;
   mutable stmts_rev : stmt list;
-  rename_table : (string, string) Hashtbl.t;
+  rename_table : (string, expr) Hashtbl.t;
   mutable next_nondet_id : int;
   db : Database.db;
 }
 
 let rec size_of_expr env = function
   | E_lit b -> Bitvec.length b
-  | E_var name ->
-    begin match name.[0] with
-      | 'A'..'Z' ->
+  | E_var var ->
+    begin match var with
+      | V_global name ->
         let name' =
           match String.index_opt name '_' with
           | Some i -> String.sub name 0 i
           | None -> name
         in
         Inst.(lookup_reg name' |> size_of_reg)
-      | _ ->
-        Hashtbl.find env.var_tab name
+      | V_local name ->
+        Hashtbl.find env.local_tab name
+      | V_temp i ->
+        Hashtbl.find env.temp_tab i
+      | V_pc -> 32 (* TODO *)
     end
   | E_part (e, lo, hi) -> hi-lo
   | E_prim1 (p, e) ->
@@ -62,7 +66,8 @@ let emit env stmt =
 
 let create db =
   {
-    var_tab = Hashtbl.create 0;
+    local_tab = Hashtbl.create 0;
+    temp_tab = Hashtbl.create 0;
     stmts_rev = [];
     rename_table = Hashtbl.create 0;
     next_nondet_id = 0;
@@ -70,10 +75,10 @@ let create db =
   }
 
 let new_temp env width =
-  let n = Hashtbl.length env.var_tab in
-  let id = Printf.sprintf "$%d" n in
-  Hashtbl.add env.var_tab id width;
-  id
+  let n = Hashtbl.length env.temp_tab in
+  let var = V_temp n in
+  Hashtbl.add env.temp_tab n width;
+  var
 
 let get_stmts env =
   List.rev env.stmts_rev

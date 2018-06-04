@@ -27,9 +27,15 @@ type primn =
   | Pn_xor
   | Pn_or
 
+type var =
+  | V_global of string
+  | V_temp of int
+  | V_local of string
+  | V_pc
+
 type expr =
   | E_lit of Bitvec.t
-  | E_var of string
+  | E_var of var
   | E_part of expr * int * int
   | E_prim1 of prim1 * expr
   | E_prim2 of prim2 * expr * expr
@@ -39,16 +45,15 @@ type expr =
   | E_nondet of int * int
   | E_extend of bool * expr * int
 
-type loc = string
-
 (* elaborated form of instructions *)
 type stmt =
-  | S_set of loc * expr
+  | S_set of var * expr
   | S_store of int * expr * expr * expr
   | S_jump of expr option * expr
   | S_phi of string * expr array
+  | S_label of nativeint (* program counter *)
   (* the following do not occur after elaboration *)
-  | S_call of proc * expr list * loc option
+  | S_call of proc * expr list * var option
   | S_return of expr
   | S_if of expr * stmt list
   | S_if_else of expr * stmt list * stmt list
@@ -69,9 +74,15 @@ let pp_sep_list sep pp f = function
     fprintf f "%a" pp hd;
     List.iter (fprintf f "%s%a" sep pp) tl
 
+let pp_var f = function
+  | V_global s -> pp_print_string f s
+  | V_temp i -> fprintf f "$%d" i
+  | V_local s -> pp_print_string f s
+  | V_pc -> pp_print_string f "PC"
+
 let rec pp_expr f = function
   | E_lit bv -> fprintf f "%nd" (Bitvec.to_nativeint bv) (* width is lost *)
-  | E_var s -> pp_print_string f s
+  | E_var var -> pp_var f var
   | E_part (e, lo, hi) -> fprintf f "%a[%d:%d]" pp_expr e lo hi
   | E_prim1 (p, e) ->
     let op_s =
@@ -115,11 +126,9 @@ let rec pp_expr f = function
     let op_s = if sign then "sign_extend" else "zero_extend" in
     fprintf f "%s(%a, %d)" op_s pp_expr e n
 
-let pp_loc = pp_print_string
-
 let pp_stmt f = function
-  | S_set (loc, e) ->
-    fprintf f "%a = %a" pp_loc loc pp_expr e
+  | S_set (var, e) ->
+    fprintf f "%a = %a" pp_var var pp_expr e
   | S_store (size, seg, e_addr, e_data) ->
     fprintf f "%a:[%a]@%d = %a" pp_expr seg pp_expr e_addr size pp_expr e_data
   | S_jump (cond_opt, e) ->
@@ -130,10 +139,11 @@ let pp_stmt f = function
     fprintf f "goto %a" pp_expr e
   | S_phi (lhs, rhs) ->
     fprintf f "%s = phi(%a)" lhs (pp_sep_list ", " pp_expr) (Array.to_list rhs)
+  | S_label pc -> fprintf f "%nd:" pc
   | S_call (proc, args, result_opt) ->
     begin match result_opt with
       | None -> ()
-      | Some loc -> fprintf f "%a = " pp_loc loc
+      | Some var -> fprintf f "%a = " pp_var var
     end;
     fprintf f "%s(" proc.p_name;
     let n = List.length args in
@@ -190,7 +200,8 @@ let map_stmt f = function
     let dest' = f dest in
     S_jump (cond_opt', dest')
   | S_phi (lhs, rhs) -> S_phi (lhs, Array.map f rhs)
-  | _ -> failwith "not implemented"
+  | S_label _ as s -> s
+  | _ -> failwith "map_stmt: not implemented"
 
 let subst_stmt f stmt = map_stmt (subst_expr f) stmt
 
