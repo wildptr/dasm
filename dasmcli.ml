@@ -117,13 +117,16 @@ let cmd_table = [
 let () =
   Printexc.record_backtrace true;
   Elaborate.load_spec "spec";
+  let interactive = Unix.(isatty stdout) in
   let rec loop () =
-    print_string "> ";
-    flush stdout;
+    if interactive then begin
+      print_string "> ";
+      flush stdout;
+    end;
     let cmd =
       try input_line stdin
       with End_of_file ->
-        print_endline "exit";
+        if interactive then print_endline "exit";
         exit 0
     in
     begin
