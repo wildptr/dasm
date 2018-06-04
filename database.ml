@@ -15,17 +15,17 @@ type jump =
   | J_ret
 
 type db = {
-  code : string;
+  mutable image : Pe.pe option;
   inst_table : (nativeint, Inst.inst) Hashtbl.t;
   jump_info : (nativeint, jump) Hashtbl.t;
   proc_table : (nativeint, proc) Hashtbl.t;
 }
 
-let create code =
+let create () =
   let inst_table = Hashtbl.create 0 in
   let jump_info = Hashtbl.create 0 in
   let proc_table = Hashtbl.create 0 in
-  { code; inst_table; jump_info; proc_table }
+  { image = None ; inst_table; jump_info; proc_table }
 
 let translate_va db va =
   Nativeint.(to_int (va - 0x400000n)) (*TODO *)
@@ -38,3 +38,10 @@ let set_proc db va proc =
 
 let has_proc db va =
   Hashtbl.mem db.proc_table va
+
+let load_image db path =
+  let pe = Pe.load path in
+  db.image <- Some pe
+
+let get_code db =
+  (Option.get db.image).Pe.code

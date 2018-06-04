@@ -10,7 +10,7 @@ type string_iter = {
 let build_cfg db init_pc =
   Printf.printf "building CFG for %nx\n" init_pc;
   let open Database in
-  let code = db.code in
+  let code = get_code db in
   let span = ref Itree.empty in
   let edges = ref [] in (* from end of basic block to start of basic block *)
   let q = Queue.create () in
