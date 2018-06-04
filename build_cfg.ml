@@ -120,7 +120,7 @@ let build_cfg db init_pc =
   let inst_cs = Fold_cfg.fold_cfg ~debug:false cfg in
   let env = Env.create db in
   let stmt_cs =
-    inst_cs |> map_ctlstruct (Elaborate.elaborate_basic_block true env)
+    inst_cs |> map_ctlstruct (Elaborate.elaborate_basic_block env)
   in
   let il = Pseudocode.convert stmt_cs in
   { cfg; inst_cs; stmt_cs; span; il }
