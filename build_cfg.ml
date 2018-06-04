@@ -118,9 +118,9 @@ let build_cfg db init_pc =
   done;
   let cfg = { node = Array.of_list basic_blocks; succ; pred; edges } in
   let inst_cs = Fold_cfg.fold_cfg ~debug:false cfg in
-  let env = Env.new_env db in
+  let env = Env.create db in
   let stmt_cs =
-    inst_cs |> map_ctlstruct (Elaborate.elaborate_basic_block false env)
+    inst_cs |> map_ctlstruct (Elaborate.elaborate_basic_block true env)
   in
   let il = Pseudocode.convert stmt_cs in
   { cfg; inst_cs; stmt_cs; span; il }

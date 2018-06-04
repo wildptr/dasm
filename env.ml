@@ -57,22 +57,23 @@ let rec size_of_expr env = function
   | E_nondet (n, _) -> n
   | E_extend (_, e, n) -> n
 
-let new_env db = {
-  var_tab = Hashtbl.create 0;
-  stmts_rev = [];
-  rename_table = Hashtbl.create 0;
-  next_nondet_id = 0;
-  db
-}
+let emit env stmt =
+  env.stmts_rev <- stmt :: env.stmts_rev
+
+let create db =
+  {
+    var_tab = Hashtbl.create 0;
+    stmts_rev = [];
+    rename_table = Hashtbl.create 0;
+    next_nondet_id = 0;
+    db;
+  }
 
 let new_temp env width =
   let n = Hashtbl.length env.var_tab in
   let id = Printf.sprintf "$%d" n in
   Hashtbl.add env.var_tab id width;
   id
-
-let append_stmt env stmt =
-  env.stmts_rev <- stmt :: env.stmts_rev
 
 let get_stmts env =
   List.rev env.stmts_rev

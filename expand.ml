@@ -32,7 +32,7 @@ let rec expand_stmt env retval stmt =
           | _ -> Other
         in
         if reg_type = Other then
-          append_stmt env (S_set (Inst.name_of_reg r, e'))
+          emit env (S_set (Inst.name_of_reg r, e'))
         else begin
           let ol, oh, ox, eox =
             match r with
@@ -49,39 +49,39 @@ let rec expand_stmt env retval stmt =
           let bits16_32 = E_part (E_var eox, 16, 32) in
           match reg_type with
           | EOX ->
-            append_stmt env (S_set (eox, e'));
-            append_stmt env (S_set (ox, E_part (E_var eox, 0, 16)));
-            append_stmt env (S_set (oh, E_part (E_var eox, 8, 16)));
-            append_stmt env (S_set (ol, E_part (E_var eox, 0, 8)));
+            emit env (S_set (eox, e'));
+            emit env (S_set (ox, E_part (E_var eox, 0, 16)));
+            emit env (S_set (oh, E_part (E_var eox, 8, 16)));
+            emit env (S_set (ol, E_part (E_var eox, 0, 8)));
           | OX ->
-            append_stmt env (S_set (ox, e'));
-            append_stmt env (S_set (eox, E_primn (Pn_concat, [bits16_32; E_var ox])));
-            append_stmt env (S_set (oh, E_part (E_var ox, 8, 16)));
-            append_stmt env (S_set (ol, E_part (E_var ox, 0, 8)));
+            emit env (S_set (ox, e'));
+            emit env (S_set (eox, E_primn (Pn_concat, [bits16_32; E_var ox])));
+            emit env (S_set (oh, E_part (E_var ox, 8, 16)));
+            emit env (S_set (ol, E_part (E_var ox, 0, 8)));
           | OH ->
-            append_stmt env (S_set (oh, e'));
-            append_stmt env (S_set (ox, E_primn (Pn_concat, [E_var oh; E_var ol])));
-            append_stmt env (S_set (eox, E_primn (Pn_concat, [bits16_32; E_var ox])));
+            emit env (S_set (oh, e'));
+            emit env (S_set (ox, E_primn (Pn_concat, [E_var oh; E_var ol])));
+            emit env (S_set (eox, E_primn (Pn_concat, [bits16_32; E_var ox])));
           | OL ->
-            append_stmt env (S_set (ol, e'));
-            append_stmt env (S_set (ox, E_primn (Pn_concat, [E_var oh; E_var ol])));
-            append_stmt env (S_set (eox, E_primn (Pn_concat, [bits16_32; E_var ox])));
+            emit env (S_set (ol, e'));
+            emit env (S_set (ox, E_primn (Pn_concat, [E_var oh; E_var ol])));
+            emit env (S_set (eox, E_primn (Pn_concat, [bits16_32; E_var ox])));
           | EOO ->
-            append_stmt env (S_set (eox, e'));
-            append_stmt env (S_set (ox, E_part (E_var eox, 0, 16)))
+            emit env (S_set (eox, e'));
+            emit env (S_set (ox, E_part (E_var eox, 0, 16)))
           | OO ->
-            append_stmt env (S_set (ox, e'));
-            append_stmt env (S_set (eox, E_primn (Pn_concat, [bits16_32; E_var ox])))
+            emit env (S_set (ox, e'));
+            emit env (S_set (eox, E_primn (Pn_concat, [bits16_32; E_var ox])))
           | _ -> assert false
         end
-      | _ -> append_stmt env (S_set (rename_var loc, e'))
+      | _ -> emit env (S_set (rename_var loc, e'))
     end
 *)
-    append_stmt env (S_set (rename_var loc, e'))
+    emit env (S_set (rename_var loc, e'))
   | S_store (size, seg, addr, data) ->
-    append_stmt env (S_store (size, seg, rename addr, rename data))
+    emit env (S_store (size, seg, rename addr, rename data))
   | S_jump (c, e) ->
-    append_stmt env (S_jump (BatOption.map rename c, rename e))
+    emit env (S_jump (BatOption.map rename c, rename e))
   | S_call (proc, args, rv) ->
     (* variable table *)
     proc.p_var_tab |> Hashtbl.iter (fun name width ->
@@ -89,9 +89,18 @@ let rec expand_stmt env retval stmt =
         Hashtbl.add env.rename_table name name');
     (* pass arguments *)
     (* TODO: check arity & widths *)
-    List.combine args proc.p_param_names |> List.iter
-      (fun (arg, param_name) ->
-         append_stmt env (S_set (rename_var param_name, arg)));
+    begin
+      try
+        List.combine args proc.p_param_names |> List.iter
+          (fun (arg, param_name) ->
+             emit env (S_set (rename_var param_name, arg)));
+      with e ->
+        let open Format in
+        printf "procedure: %s@." proc.p_name;
+        printf "arguments:@.";
+        args |> List.iter (printf "%a@." pp_expr);
+        raise e
+    end;
     let rv' =
       match rv with
       | None -> None
@@ -111,7 +120,7 @@ let rec expand_stmt env retval stmt =
     begin match retval with
       | None -> ()
       | Some name ->
-        append_stmt env (S_set (name, rename e))
+        emit env (S_set (name, rename e))
     end
   | _ -> assert false
 

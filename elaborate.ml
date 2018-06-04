@@ -107,11 +107,11 @@ let elaborate_operand pc' = function
 
 let elaborate_writeback env o_dst e_data =
   match o_dst with
-  | O_reg r -> append_stmt env (S_set (string_of_reg r, e_data))
+  | O_reg r -> emit env (S_set (string_of_reg r, e_data))
   | O_mem (m, size) ->
     assert (size > 0);
     let seg, off = elaborate_mem_addr m in
-    append_stmt env (S_store (size, seg, off, e_data))
+    emit env (S_store (size, seg, off, e_data))
   | _ -> failwith "elaborate_writeback: invalid operand type"
 
 let fnname_of_op = function
@@ -160,19 +160,19 @@ let elaborate_inst env pc inst =
     | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
       let temp = new_temp env (8 lsl lsize) in
       let args = operands |> List.map (elaborate_operand pc') in
-      append_stmt env (S_call (fn inst, args, Some temp));
+      emit env (S_call (fn inst, args, Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
     | I_CMP | I_PUSH | I_TEST | I_RET | I_RETN | I_LEAVE ->
       let args = operands |> List.map (elaborate_operand pc') in
-      append_stmt env (S_call (fn inst, args, None))
+      emit env (S_call (fn inst, args, None))
     | I_POP ->
       let temp = new_temp env (8 lsl lsize) in
-      append_stmt env (S_call (fn inst, [], Some temp));
+      emit env (S_call (fn inst, [], Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
     | I_CALL ->
       let args = operands |> List.map (elaborate_operand pc') in
       let arg_pc = E_lit (Bitvec.of_nativeint (8 lsl lsize) pc') in
-      append_stmt env (S_call (fn inst, arg_pc :: args, None))
+      emit env (S_call (fn inst, arg_pc :: args, None))
     | I_MOV ->
       let dst, src =
         match operands with
@@ -210,7 +210,7 @@ let elaborate_inst env pc inst =
         else
           None
       in
-      append_stmt env
+      emit env
         (S_jump (cond_opt, elaborate_operand pc' (List.hd operands)))
     | I_SET ->
       let dst =
@@ -251,7 +251,7 @@ let elaborate_basic_block expand env bb =
   { bb with stmts }
 
 let elaborate_cfg db expand cfg =
-  let env = new_env db in
+  let env = Env.create db in
   let node' = cfg.Cfg.node |> Array.map (elaborate_basic_block expand env) in
   { cfg with Cfg.node = node' }, env
 
@@ -284,7 +284,7 @@ let load_spec filepath =
         Spec_ast.pp_astexpr e w b;
       exit 1
   in
-  symtab |> BatMap.String.iter begin fun key data ->
+  symtab |> Map.String.iter begin fun key data ->
     match data with
     | Translate.Proc proc -> Hashtbl.add predef_table key proc
     | _ -> ()

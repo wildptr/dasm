@@ -84,14 +84,12 @@ let cmd_load args =
 let unknown_cmd _ =
   print_endline "unknown command"
 
-module StringMap = Map.Make(String)
-
 let cmd_table = [
   "analyze", cmd_analyze;
   "load", cmd_load;
   "pcode", cmd_pcode;
   "scan", cmd_scan;
-] |> List.fold_left (fun m (k, v) -> StringMap.add k v m) StringMap.empty
+] |> List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
 
 let () =
   Printexc.record_backtrace true;
@@ -101,7 +99,9 @@ let () =
     flush stdout;
     let cmd =
       try input_line stdin
-      with End_of_file -> exit 0
+      with End_of_file ->
+        print_endline "exit";
+        exit 0
     in
     begin
       try
@@ -110,12 +110,14 @@ let () =
         | [] -> ()
         | cmd::args ->
           let handler =
-            try StringMap.find cmd cmd_table
+            try Map.String.find cmd cmd_table
             with Not_found -> unknown_cmd
           in
           begin
             try handler args
-            with e -> Printexc.to_string e |> print_endline
+            with e ->
+              Printf.printf "internal error: %s\n" (Printexc.to_string e);
+              Printexc.print_backtrace stdout
           end
       with SyntaxError -> print_endline "syntax error"
     end;

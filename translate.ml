@@ -322,7 +322,9 @@ let translate_stmt env stmt =
   | Stmt_return e ->
     let e', _ = translate_expr env e in
     emit (S_return e')
-  | Stmt_jump addr -> assert false
+  | Stmt_jump addr ->
+    let addr', _ = translate_expr env addr in
+    emit (S_jump (None, addr'))
 
 let translate_proc st proc =
   (* construct static environment to translate function body in *)
