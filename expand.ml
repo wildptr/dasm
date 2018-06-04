@@ -1,3 +1,4 @@
+open Batteries
 open Env
 open Semant
 
@@ -81,19 +82,20 @@ let rec expand_stmt env retval stmt =
   | S_store (size, seg, addr, data) ->
     emit env (S_store (size, seg, rename addr, rename data))
   | S_jump (c, e) ->
-    emit env (S_jump (BatOption.map rename c, rename e))
+    emit env (S_jump (Option.map rename c, rename e))
   | S_call (proc, args, rv) ->
-    (* variable table *)
-    proc.p_var_tab |> Hashtbl.iter (fun name width ->
-        let name' = new_temp env width in
-        Hashtbl.add env.rename_table name name');
+    (* variable table; for parameters and locals *)
+    proc.p_var_tab |> Hashtbl.iter begin fun name width ->
+      let name' = new_temp env width in
+      Hashtbl.add env.rename_table name name'
+    end;
     (* pass arguments *)
     (* TODO: check arity & widths *)
     begin
       try
         List.combine args proc.p_param_names |> List.iter
           (fun (arg, param_name) ->
-             emit env (S_set (rename_var param_name, arg)));
+             emit env (S_set (rename_var param_name, rename arg)))
       with e ->
         let open Format in
         printf "procedure: %s@." proc.p_name;
@@ -101,21 +103,11 @@ let rec expand_stmt env retval stmt =
         args |> List.iter (printf "%a@." pp_expr);
         raise e
     end;
-    let rv' =
-      match rv with
-      | None -> None
-      | Some loc ->
-        let loc' =
-          (*match loc with
-          | L_var id -> L_var (f id)
-          | L_part (id, lo, hi) -> L_part (f id, lo, hi)*)
-          rename_var loc
-        in
-        Some loc'
-    in
+    let rv' = rv |> Option.map rename_var in
     List.iter (expand_stmt env rv') proc.p_body;
-    proc.p_var_tab |> Hashtbl.iter (fun name _ ->
-        Hashtbl.remove env.rename_table name)
+    proc.p_var_tab |> Hashtbl.iter begin fun name _ ->
+      Hashtbl.remove env.rename_table name
+    end
   | S_return e ->
     begin match retval with
       | None -> ()
