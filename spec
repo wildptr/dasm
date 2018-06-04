@@ -208,3 +208,20 @@ template proc not<N>(in:N):N
 proc not8  = not< 8>;
 proc not16 = not<16>;
 proc not32 = not<32>;
+
+proc call32(pc:32, dst:32)
+{
+	push32(pc);
+	jump dst;
+}
+
+proc ret32()
+{
+	jump pop32();
+}
+
+proc leave32()
+{
+	ESP = EBP;
+	EBP = pop32();
+}

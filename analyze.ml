@@ -1,3 +1,4 @@
+open Batteries
 open Semant
 
 let rec scan db va =

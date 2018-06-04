@@ -118,17 +118,18 @@ let fnname_of_op = function
   | I_ADC -> "adc"
   | I_ADD -> "add"
   | I_AND -> "and"
-  | I_CALL -> "push"
+  | I_CALL -> "call"
   | I_CMP -> "sub"
   | I_DEC -> "dec"
   | I_INC -> "inc"
+  | I_LEAVE -> "leave"
   | I_NEG -> "neg"
   | I_NOT -> "not"
   | I_OR -> "or"
   | I_POP -> "pop"
   | I_PUSH -> "push"
-  | I_RET -> "pop"
-  | I_RETN -> "pop"
+  | I_RET -> "ret"
+  | I_RETN -> "retn"
   | I_SAR -> "sar"
   | I_SBB -> "sbb"
   | I_SHL -> "shl"
@@ -155,18 +156,23 @@ let elaborate_inst env pc inst =
   let pc' = Nativeint.(pc + of_int (length_of inst)) in
   try
     match op with
-    | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
+    | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR
+    | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
       let temp = new_temp env (8 lsl lsize) in
       let args = operands |> List.map (elaborate_operand pc') in
       append_stmt env (S_call (fn inst, args, Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
-    | I_CMP | I_PUSH | I_TEST ->
+    | I_CMP | I_PUSH | I_TEST | I_RET | I_RETN | I_LEAVE ->
       let args = operands |> List.map (elaborate_operand pc') in
       append_stmt env (S_call (fn inst, args, None))
     | I_POP ->
       let temp = new_temp env (8 lsl lsize) in
       append_stmt env (S_call (fn inst, [], Some temp));
       elaborate_writeback env (List.hd operands) (E_var temp)
+    | I_CALL ->
+      let args = operands |> List.map (elaborate_operand pc') in
+      let arg_pc = E_lit (Bitvec.of_nativeint (8 lsl lsize) pc') in
+      append_stmt env (S_call (fn inst, arg_pc :: args, None))
     | I_MOV ->
       let dst, src =
         match operands with
@@ -174,6 +180,17 @@ let elaborate_inst env pc inst =
         | _ -> assert false
       in
       elaborate_writeback env dst (elaborate_operand pc' src)
+    | I_MOVZX | I_MOVSX ->
+      let dst, src =
+        match operands with
+        | [d; s] -> d, s
+        | _ -> assert false
+      in
+      (*let lsize_src = inst.variant lsr 4 in*)
+      let dst_size = 8 lsl lsize in
+      (*let src_size = 8 lsl lsize_src in*)
+      let src' = elaborate_operand pc' src in
+      elaborate_writeback env dst (E_extend (op = I_MOVSX, src', dst_size))
     | I_LEA ->
       let dst, src =
         match operands with
@@ -204,17 +221,6 @@ let elaborate_inst env pc inst =
       let cond = cond_expr (inst.variant lsr 4) in
       let data = E_extend (false, cond, 8) in
       elaborate_writeback env dst data
-    | I_MOVZX | I_MOVSX ->
-      let dst, src =
-        match operands with
-        | [d; s] -> d, s
-        | _ -> assert false
-      in
-      (*let lsize_src = inst.variant lsr 4 in*)
-      let dst_size = 8 lsl lsize in
-      (*let src_size = 8 lsl lsize_src in*)
-      let src' = elaborate_operand pc' src in
-      elaborate_writeback env dst (E_extend (op = I_MOVSX, src', dst_size))
     | I_XCHG ->
       let dst, src =
         match operands with
@@ -225,45 +231,6 @@ let elaborate_inst env pc inst =
       let src' = elaborate_operand pc' src in
       elaborate_writeback env dst src';
       elaborate_writeback env src dst'
-    | I_CALL ->
-      let dst' = elaborate_operand pc' (List.hd operands) in
-      (* push pc *)
-      append_stmt env
-        (S_call (fn inst, [make_address pc'], None));
-      (* jump dst *)
-      append_stmt env (S_jump (None, dst'))
-    | I_RET ->
-      (* pop addr *)
-      let addr = new_temp env (8 lsl lsize) in
-      append_stmt env (S_call (fn inst, [], Some addr));
-      (* jump addr *)
-      append_stmt env (S_jump (None, E_var addr))
-    | I_RETN ->
-      let inc = elaborate_operand pc' (List.hd operands) in
-      (* pop addr *)
-      let addr = new_temp env (8 lsl lsize) in
-      append_stmt env (S_call (fn inst, [], Some addr));
-      (* increment SP *)
-      let sp_name =
-        match lsize with
-        | 1 -> "SP"
-        | 2 -> "ESP"
-        | _ -> assert false
-      in
-      append_stmt env (S_set (sp_name, E_primn (Pn_add, [E_var sp_name; inc])));
-      (* jump addr *)
-      append_stmt env (S_jump (None, E_var addr))
-    | I_LEAVE ->
-      (* mov sp,bp; pop bp *)
-      let sp, bp =
-        match lsize with
-        | 1 -> "SP", "BP"
-        | 2 -> "ESP", "EBP"
-        | _ -> assert false
-      in
-      append_stmt env (S_set (sp, E_var bp));
-      let pop = Printf.sprintf "pop%d" (1 lsl (lsize+3)) |> lookup_predef in
-      append_stmt env (S_call (pop, [], Some bp));
     | _ ->
       Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst
   with Failure msg ->
