@@ -10,10 +10,28 @@ type env = {
   db : Database.db;
 }
 
-let rec size_of_expr env = function
+let size_of_var env = function
+  | V_global name ->
+    let name' =
+      match String.index_opt name '_' with
+      | Some i -> String.sub name 0 i
+      | None -> name
+    in
+    Inst.(lookup_reg name' |> size_of_reg)
+  | V_local name ->
+    Hashtbl.find env.local_tab name
+  | V_temp i ->
+    Hashtbl.find env.temp_tab i
+  | V_pc -> 32 (* TODO *)
+
+let size_of_ssa_var env (var, _) = size_of_var env var
+
+let rec size_of_expr env size_of_var expr =
+  let recurse e = size_of_expr env size_of_var e in
+  match expr with
   | E_lit b -> Bitvec.length b
-  | E_var var ->
-    begin match var with
+  | E_var var -> size_of_var env var
+    (*begin match var with
       | V_global name ->
         let name' =
           match String.index_opt name '_' with
@@ -26,11 +44,11 @@ let rec size_of_expr env = function
       | V_temp i ->
         Hashtbl.find env.temp_tab i
       | V_pc -> 32 (* TODO *)
-    end
+    end*)
   | E_part (e, lo, hi) -> hi-lo
   | E_prim1 (p, e) ->
     begin match p with
-      | P1_not | P1_neg -> size_of_expr env e
+      | P1_not | P1_neg -> recurse e
       | P1_foldand
       | P1_foldxor
       | P1_foldor -> 1
@@ -40,7 +58,7 @@ let rec size_of_expr env = function
       | P2_sub
       | P2_shiftleft
       | P2_logshiftright
-      | P2_arishiftright -> size_of_expr env e1
+      | P2_arishiftright -> recurse e1
       | P2_eq
       | P2_less
       | P2_below -> 1
@@ -51,11 +69,11 @@ let rec size_of_expr env = function
     end
   | E_primn (p, es) ->
     begin match p with
-      | Pn_concat -> es |> List.map (size_of_expr env) |> List.sum
+      | Pn_concat -> es |> List.map recurse |> List.sum
       | Pn_add
       | Pn_and
       | Pn_xor
-      | Pn_or -> List.hd es |> size_of_expr env
+      | Pn_or -> List.hd es |> recurse
     end
   | E_load (size, _, _) -> size * 8
   | E_nondet (n, _) -> n

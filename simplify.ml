@@ -93,7 +93,7 @@ let rec simplify env = function
       | e1 :: e2 :: rest when e1 = e2 && (p = Pn_and || p = Pn_or) ->
         e2 :: simpl rest
       | e1 :: e2 :: rest when e1 = e2 && p = Pn_xor ->
-        E_lit (Bitvec.zero (size_of_expr env e1)) :: simpl rest
+        E_lit (Bitvec.zero (size_of_expr env size_of_ssa_var e1)) :: simpl rest
       | e :: rest -> e :: simpl rest
       | [] -> []
     in

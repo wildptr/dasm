@@ -84,6 +84,17 @@ let cmd_ssa args =
   let proc = Database.get_proc db va in
   let cfg, env = Elaborate.elaborate_cfg db proc.cfg in
   let cfg' = Dataflow.convert_to_ssa (cfg, env) in
+  let changed = ref false in
+  let rec loop () =
+    if Dataflow.auto_subst cfg' then changed := true;
+    if Simplify.simplify_cfg env cfg' then changed := true;
+    if Dataflow.remove_dead_code cfg' then changed := true;
+    if !changed then begin
+      changed := false;
+      loop ()
+    end
+  in
+  loop ();
   let cs = Fold_cfg.fold_cfg ~debug:false cfg' in
   let il = Pseudocode.convert cs in
   print_string (string_of_pcode Semant.pp_ssa_var il)

@@ -207,7 +207,7 @@ let rec subst_expr f = function
 let map_stmt f = function
   | S_set (lhs, rhs) -> S_set (lhs, f rhs)
   | S_store (size, seg, addr, data) ->
-    S_store (size, seg, f addr, f data)
+    S_store (size, f seg, f addr, f data)
   | S_jump (cond_opt, dest) ->
     let cond_opt' = Option.map f cond_opt in
     let dest' = f dest in

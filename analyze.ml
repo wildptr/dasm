@@ -11,15 +11,16 @@ let rec scan db va =
       | S_label va -> pc := va
       | S_jump (cond_opt, dst) ->
         begin match Database.get_jump_info db !pc with
-          | Database.J_call -> is_leaf := false
+          | Database.J_call ->
+            is_leaf := false;
+            begin match dst with
+              | E_lit bv ->
+                let dst_va = Bitvec.to_nativeint bv in
+                scan db dst_va
+              | _ -> ()
+            end
           | _ -> ()
         end;
-        begin match dst with
-          | E_lit bv ->
-            let dst_va = Bitvec.to_nativeint bv in
-            scan db dst_va
-          | _ -> ()
-        end
       | _ -> ()
     end;
     if !is_leaf then begin
