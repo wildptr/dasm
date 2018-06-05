@@ -191,13 +191,17 @@ let rec expand_stmt env pc retval stmt =
       proc.p_param_names |> List.mapi (fun i name -> name, i) |>
       List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
     in
+    let temps = ref [] in
     proc.p_var_tab |> Hashtbl.iter begin fun name width ->
-      let arg_temp =
+      let arg =
         match Map.String.Exceptionless.find name param_index_map with
         | Some i when arg_is_const.(i) -> fst arg_arr.(i)
-        | _ -> E_var (new_temp env width)
+        | _ ->
+          let temp = acquire_temp env width in
+          temps := temp :: !temps;
+          E_var temp
       in
-      Hashtbl.add env.rename_table name arg_temp
+      Hashtbl.add env.rename_table name arg
     end;
     (* pass arguments *)
     for i=0 to n_arg-1 do
@@ -222,7 +226,8 @@ let rec expand_stmt env pc retval stmt =
     List.iter (expand_stmt env pc rv') proc.p_body;
     proc.p_var_tab |> Hashtbl.iter begin fun name _ ->
       Hashtbl.remove env.rename_table name
-    end
+    end;
+    !temps |> List.iter (release_temp env)
   | S_return e ->
     begin match retval with
       | None -> ()
@@ -251,17 +256,19 @@ let elaborate_inst env pc inst =
     match op with
     | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR
     | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
-      let temp = new_temp env size in
+      let temp = acquire_temp env size in
       let args = operands |> List.map (elaborate_operand pc') in
       emit' (S_call (fn inst, args, Some temp));
-      elaborate_writeback emit' (List.hd operands) (E_var temp, size)
+      elaborate_writeback emit' (List.hd operands) (E_var temp, size);
+      release_temp env temp
     | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
       let args = operands |> List.map (elaborate_operand pc') in
       emit' (S_call (fn inst, args, None))
     | I_POP ->
-      let temp = new_temp env size in
+      let temp = acquire_temp env size in
       emit' (S_call (fn inst, [], Some temp));
-      elaborate_writeback emit' (List.hd operands) (E_var temp, size)
+      elaborate_writeback emit' (List.hd operands) (E_var temp, size);
+      release_temp env temp
     | I_MOV ->
       let dst, src =
         match operands with
