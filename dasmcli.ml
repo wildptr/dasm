@@ -59,22 +59,31 @@ let cmd_ssa args =
   let cfg = proc.Database.stmt_cfg in
   let temp_tab = proc.Database.temp_tab in
   let cfg' = Dataflow.convert_to_ssa temp_tab cfg in
-(*
   let changed = ref false in
   let rec loop () =
-    if Dataflow.SSADefUse.auto_subst cfg' then changed := true;
-    if Simplify.SSA.simplify_cfg env cfg' then changed := true;
-    if Dataflow.SSADefUse.remove_dead_code cfg' then changed := true;
+    if Dataflow.auto_subst cfg' then changed := true;
+    if Simplify.SSA.simplify_cfg cfg' then changed := true;
+(*     if Dataflow.SSADefUse.remove_dead_code cfg' then changed := true; *)
     if !changed then begin
       changed := false;
       loop ()
     end
   in
   loop ();
-*)
   let cs = Fold_cfg.fold_cfg ~debug:false cfg' in
-  let il = Pseudocode.SSA.convert cs in
+  let il = Pseudocode.SSA.(convert cs |> remove_unused_labels) in
   print_string Semant.SSA.(string_of_pcode il)
+
+let cmd_inst args =
+  let va = List.hd args |> parse_hex in
+  let inst = Database.get_inst db va in
+  let bytes = inst.Inst.bytes in
+  let n = String.length bytes in
+  for i=0 to n-1 do
+    Printf.printf "%02x" (int_of_char bytes.[i])
+  done;
+  print_string "  ";
+  Inst.to_string inst |> print_endline
 
 let cmd_load args =
   let path = List.hd args in
@@ -85,6 +94,7 @@ let unknown_cmd _ =
 
 let cmd_table = [
   "analyze", cmd_analyze;
+  "inst", cmd_inst;
   "load", cmd_load;
   "pcode", cmd_pcode;
   "ssa", cmd_ssa;

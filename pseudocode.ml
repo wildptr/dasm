@@ -53,6 +53,38 @@ module Make(V : VarType) = struct
       stmts1 @ stmts2, cond
     | _ -> assert false
 
+  let remove_unused_labels stmts =
+    let module S = Set.Nativeint in
+    let used_labels =
+      let temp = ref S.empty in
+      let rec mark = function
+        | S_jump (_, (E_lit bv, _)) ->
+          let dst = Bitvec.to_nativeint bv in
+          temp := S.add dst !temp
+        | S_if (_, body) -> body |> List.iter mark
+        | S_if_else (_, body1, body2) ->
+          body1 |> List.iter mark;
+          body2 |> List.iter mark
+        | S_do_while (body, _) -> body |> List.iter mark
+        | _ -> ()
+      in
+      stmts |> List.iter mark;
+      !temp
+    in
+    let rec sweep = function
+      | S_label va as s -> if S.mem va used_labels then Some s else None
+      | S_if (cond, body) ->
+        Some (S_if (cond, body |> List.filter_map sweep))
+      | S_if_else (cond, body1, body2) ->
+        let body1' = body1 |> List.filter_map sweep in
+        let body2' = body2 |> List.filter_map sweep in
+        Some (S_if_else (cond, body1', body2'))
+      | S_do_while (body, cond) ->
+        Some (S_do_while (body |> List.filter_map sweep, cond))
+      | s -> Some s
+    in
+    stmts |> List.filter_map sweep
+
 end
 
 module Plain = Make(Var)

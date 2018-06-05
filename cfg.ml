@@ -1,3 +1,5 @@
+open Batteries
+
 type 'a basic_block = {
   start : nativeint;
   stop : nativeint;
@@ -12,6 +14,7 @@ type 'a cfg = {
   succ : int list array;
   pred : int list array;
   edges : edge list;
+  exits : Set.Int.t;
 }
 
 let print_cfg pp_stmt cfg =

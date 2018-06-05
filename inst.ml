@@ -611,3 +611,6 @@ let pp f inst =
     pp_print_string f " ";
     pp_operand f o_hd;
     List.iter (fun o -> pp_print_string f ","; pp_operand f o) o_tl
+
+let to_string inst =
+  asprintf "%a" pp inst

@@ -50,3 +50,6 @@ let get_code db =
 
 let get_jump_info db va =
   Hashtbl.find db.jump_info va
+
+let get_inst db va =
+  Hashtbl.find db.inst_table va

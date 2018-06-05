@@ -47,12 +47,12 @@ module DefUse(V : VarType) = struct
     | S_label _ -> S.empty
     | _ -> assert false
 
-  let remove_dead_code_bb bb n_var =
+  let remove_dead_code_bb bb live_out =
     let stmt_arr = Array.of_list bb.stmts in
     let n = Array.length stmt_arr in
     let keep = Array.make n true in
     begin
-      let live = Array.make n_var true in
+      let live = Array.copy live_out in
       for i=n-1 downto 0 do
         let s = stmt_arr.(i) in
         def_of_stmt s |> begin function
@@ -68,7 +68,7 @@ module DefUse(V : VarType) = struct
     for i=0 to n-1 do
       if keep.(i) then new_stmts := stmt_arr.(i) :: !new_stmts
     done;
-    { bb with stmts = List.rev !new_stmts }
+    bb.stmts <- List.rev !new_stmts
 
   let compute_defsites cfg n_var =
     let size = Array.length cfg.node in
@@ -83,10 +83,99 @@ module DefUse(V : VarType) = struct
     done;
     defsites
 
+  let defuse_of_bb stmts =
+    let defs = ref S.empty in
+    let uses = ref S.empty in
+    stmts |> List.iter begin fun s ->
+      uses := S.union !uses (S.diff (use_of_stmt s) !defs);
+      def_of_stmt s |> begin function
+        | Some v -> defs := S.add v !defs
+        | None -> ()
+      end;
+    end;
+    !defs, !uses
+
 end
 
 module PlainDefUse = DefUse(Var)
 module SSADefUse = DefUse(SSAVar)
+
+let postorder f cfg =
+  let n = Array.length cfg.node in
+  let vis = Array.make n false in
+  let rec visit i =
+    if not vis.(i) then begin
+      vis.(i) <- true;
+      cfg.succ.(i) |> List.iter visit;
+      f i
+    end
+  in
+  visit 0
+
+let liveness cfg n_var =
+  let n = Array.length cfg.node in
+  let defs = Array.make n S.empty in
+  let uses = Array.make n S.empty in
+  for i=0 to n-1 do
+    let d, u = PlainDefUse.defuse_of_bb cfg.node.(i).stmts in
+    defs.(i) <- d;
+    uses.(i) <- u
+  done;
+  let live_in = Array.make n [||] in
+  let live_out = Array.make n [||] in
+  for i=0 to n-1 do
+    live_in.(i) <- Array.make n_var false;
+    live_out.(i) <- Array.make n_var (S.mem i cfg.exits)
+  done;
+  let changed = ref false in
+  let rec loop () =
+    cfg |> postorder begin fun i ->
+      let live_in_i = live_in.(i) in
+      let live_out_i = live_out.(i) in
+      for v=0 to n_var-1 do
+        let lo =
+          let temp = ref live_out_i.(v) in
+          cfg.succ.(i) |> List.iter begin fun j ->
+            if live_in.(j).(v) then temp := true
+          end;
+          !temp
+        in
+        if live_out_i.(v) <> lo then begin
+          changed := true;
+          live_out_i.(v) <- lo
+        end;
+        let li =
+          S.mem v uses.(i) || (live_out_i.(v) && not (S.mem v defs.(i)))
+        in
+        if live_in_i.(v) <> li then begin
+          changed := true;
+          live_in_i.(v) <- li
+        end
+      done
+    end;
+    if !changed then begin
+      changed := false;
+      loop ()
+    end
+  in
+  loop ();
+(*
+  for i=0 to n-1 do
+    Printf.printf "live_out[%d]:" i;
+    for v=0 to n_var-1 do
+      if live_out.(i).(v) then Format.printf " %a" Var.pp (Var.of_int v)
+    done;
+    print_endline ""
+  done;
+*)
+  live_in, live_out
+
+let remove_dead_code_plain cfg n_var =
+  let n = Array.length cfg.node in
+  let live_in, live_out = liveness cfg n_var in
+  for i=0 to n-1 do
+    PlainDefUse.remove_dead_code_bb cfg.node.(i) live_out.(i)
+  done
 
 (*
 let count_uses cfg =
@@ -107,7 +196,6 @@ let count_uses cfg =
     if Hashtbl.mem use_count svid then Hashtbl.find use_count svid else 0
 *)
 
-(*
 let auto_subst cfg =
   let open SSA in
   let n = Array.length cfg.node in
@@ -117,7 +205,7 @@ let auto_subst cfg =
       | S_set (lhs, rhs) ->
         let ok =
           begin match fst rhs with
-            | E_var _ | E_lit _ | E_part ((E_var _, _), _, _) -> true
+            | E_var _ | E_lit _ -> true
             | _ -> lhs.SSAVar.orig = Var.Global "ESP"
           end
         in
@@ -143,8 +231,7 @@ let auto_subst cfg =
         cfg.node.(i).stmts |> filter_map begin fun stmt ->
           let stmt' =
             match stmt with
-            | S_set (lhs, rhs) ->
-              if Hashtbl.mem t lhs then None else Some (subst_stmt f stmt)
+            | S_set (({ orig = Var.Temp _; _ } as lhs), rhs) when Hashtbl.mem t lhs -> None
             | _ -> Some (subst_stmt f stmt)
           in
           if Some stmt <> stmt' then changed := true;
@@ -153,7 +240,6 @@ let auto_subst cfg =
     done
   end;
   !changed
-*)
 
 (*
 let remove_dead_code cfg =
@@ -240,16 +326,17 @@ let convert_to_ssa temp_tab cfg =
   compute_df 0;
   let n_var = Inst.number_of_registers + (Array.length temp_tab) in
   let defsites = PlainDefUse.compute_defsites cfg n_var in
-  for uid = 0 to n_var - 1 do
+  let live_in, live_out = liveness cfg n_var in
+  for v = 0 to n_var - 1 do
     let phi_inserted_at = Array.make size false in
     let q = Queue.create () in
-    defsites.(uid) |> S.iter (fun defsite -> Queue.add defsite q);
+    defsites.(v) |> S.iter (fun defsite -> Queue.add defsite q);
     while not (Queue.is_empty q) do
-      let n = Queue.pop q in
-      df.(n) |> iter begin fun y ->
-        if not phi_inserted_at.(y) then begin
+      let i = Queue.pop q in
+      df.(i) |> iter begin fun y ->
+        if not phi_inserted_at.(y) && live_in.(i).(v) then begin
           let n_pred = length pred.(y) in
-          let lhs = Var.of_int uid in
+          let lhs = Var.of_int v in
           (* RHS is never used *)
           let phi = Plain.(S_phi (lhs, Array.make n_pred (E_var lhs, 0))) in
           (* actually insert phi function *)
@@ -258,7 +345,7 @@ let convert_to_ssa temp_tab cfg =
             | _ -> failwith "empty basic block"
           end;
           phi_inserted_at.(y) <- true;
-          if not (S.mem y defsites.(uid)) then Queue.push y q
+          if not (S.mem y defsites.(v)) then Queue.push y q
         end
       end
     done
@@ -282,7 +369,7 @@ let convert_to_ssa temp_tab cfg =
     let uid = get_svid (orig_uid, ver) in
     SSAVar.{ orig; ver; uid }
   in
-  let rec rename_bb n =
+  let rec rename_bb i =
     let rename_lhs orig =
       let orig_uid = Var.to_int orig in
       let ver = count.(orig_uid) + 1 in
@@ -292,7 +379,7 @@ let convert_to_ssa temp_tab cfg =
       SSAVar.{ orig; ver; uid }
     in
     let new_stmts = ref [] in
-    cfg.node.(n).stmts |> iter begin fun stmt ->
+    cfg.node.(i).stmts |> iter begin fun stmt ->
       let new_stmt =
         match stmt with
         | Plain.S_set (name, e) ->
@@ -329,12 +416,12 @@ let convert_to_ssa temp_tab cfg =
       in
       new_stmts := new_stmt :: !new_stmts
     end;
-    let old_stmts = cfg.node.(n).stmts in
-    node.(n).stmts <- rev !new_stmts;
+    let old_stmts = cfg.node.(i).stmts in
+    node.(i).stmts <- rev !new_stmts;
     (* rename variables in RHS of phi-functions *)
-    succ.(n) |> iter begin fun y ->
-      (* n is the j-th predecessor of y *)
-      let j = index_of n pred.(y) |> Option.get in
+    succ.(i) |> iter begin fun y ->
+      (* i is the j-th predecessor of y *)
+      let j = index_of i pred.(y) |> Option.get in
       node.(y).stmts |> iter begin function
         | SSA.S_phi (lhs, rhs) ->
           rhs.(j) <-
@@ -342,7 +429,7 @@ let convert_to_ssa temp_tab cfg =
         | _ -> ()
       end
     end;
-    children.(n) |> iter rename_bb;
+    children.(i) |> iter rename_bb;
     old_stmts |> iter begin fun stmt ->
       PlainDefUse.def_of_stmt stmt |> begin function
         | Some uid -> stack.(uid) <- tl stack.(uid)
@@ -351,4 +438,4 @@ let convert_to_ssa temp_tab cfg =
     end
   in
   rename_bb 0;
-  { node; succ; pred; edges = cfg.edges }
+  { node; succ; pred; edges = cfg.edges; exits = cfg.exits }

@@ -339,6 +339,10 @@ let elaborate_basic_block env bb =
   end;
   let stmts = get_stmts env in
   env.stmts_rev <- [];
+  (* no temps should be in use *)
+  for i=0 to env.n_temp-1 do
+    assert env.temp_avail_tab.(i)
+  done;
   { bb with stmts }
 
 let elaborate_cfg db cfg =
@@ -347,7 +351,7 @@ let elaborate_cfg db cfg =
   let node = cfg.node |> Array.map (elaborate_basic_block env) in
   let succ = Array.copy cfg.succ in
   let pred = Array.copy cfg.pred in
-  { node; succ; pred; edges = cfg.edges }, env
+  { node; succ; pred; edges = cfg.edges; exits = cfg.exits }, env
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in

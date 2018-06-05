@@ -10,9 +10,11 @@ type string_iter = {
 let build_cfg db init_pc =
   Printf.printf "building CFG for %nx\n" init_pc;
   let open Database in
+  let module S = Set.Nativeint in
   let code = get_code db in
   let span = ref Itree.empty in
   let edges = ref [] in (* from end of basic block to start of basic block *)
+  let exits = ref S.empty in
   let q = Queue.create () in
   Queue.add init_pc q;
   let s = { str = code; pos = 0 } in
@@ -61,6 +63,7 @@ let build_cfg db init_pc =
             end
           | I_RET | I_RETF | I_RETN ->
             Hashtbl.add db.jump_info pc J_ret;
+            exits := S.add pc' !exits;
             pc', []
           | _ ->
             if inst.operation = I_CALL then
@@ -106,7 +109,6 @@ let build_cfg db init_pc =
     end
   end;
   let entry = Hashtbl.find start_table init_pc in
-  Printf.printf "entry=%d\n" entry;
   let succ = Array.make n [] in
   let pred = Array.make n [] in
   let edges =
@@ -126,7 +128,19 @@ let build_cfg db init_pc =
     succ.(i) <- List.rev succ.(i);
     pred.(i) <- List.rev pred.(i)
   done;
-  let inst_cfg = { node = Array.of_list basic_blocks; succ; pred; edges } in
+  let exits =
+    let temp = ref Set.Int.empty in
+    !exits |> S.iter begin fun i ->
+      temp := Set.Int.add (Hashtbl.find end_table i) !temp
+    end;
+    !temp
+  in
+  Printf.printf "exits:";
+  exits |> Set.Int.iter (Printf.printf " %d");
+  print_endline "";
+  let inst_cfg =
+    { node = Array.of_list basic_blocks; succ; pred; edges; exits }
+  in
   let nbb = Array.length inst_cfg.node in
   Printf.printf "%nx: %d basic %s\n" init_pc nbb (if nbb=1 then "block" else "blocks");
   let inst_cs = Fold_cfg.fold_cfg ~debug:false inst_cfg in
@@ -136,16 +150,13 @@ let build_cfg db init_pc =
     List.map (Elaborate.elaborate_basic_block env) |>
     Array.of_list
   in
-  let stmt_cfg = { node = stmt_node; succ; pred; edges } in
+  let stmt_cfg = { node = stmt_node; succ; pred; edges; exits } in
   let n_temp = Env.temp_count env in
   let n_var = number_of_registers + n_temp in
-  for i=0 to nbb-1 do
-    stmt_cfg.node.(i) <-
-      Dataflow.PlainDefUse.remove_dead_code_bb stmt_cfg.node.(i) n_var
-  done;
+  Dataflow.remove_dead_code_plain stmt_cfg n_var;
 (*   print_cfg Semant.Plain.pp_stmt stmt_cfg; *)
   let stmt_cs = Fold_cfg.fold_cfg ~debug:false stmt_cfg in
-  let il = Pseudocode.Plain.convert stmt_cs in
+  let il = Pseudocode.Plain.(convert stmt_cs |> remove_unused_labels) in
   let temp_tab = Array.make n_temp 0 in
   for i=0 to n_temp-1 do
     temp_tab.(i) <- Env.width_of_temp i env
