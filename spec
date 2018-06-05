@@ -160,6 +160,7 @@ template proc inc<N>(in:N)
 	SF = less(out, #0:N);
 	//OF = sum1[N] ^ out[N-1] ^ in[N-1];
 	OF = undefined(1);
+	return out;
 }
 
 template proc dec<N>(in:N)
@@ -169,6 +170,7 @@ template proc dec<N>(in:N)
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
 	OF = undefined(1);
+	return out;
 }
 
 proc inc8  = inc< 8>;
