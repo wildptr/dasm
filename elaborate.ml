@@ -2,14 +2,15 @@ open Batteries
 open Env
 open Inst
 open Semant
+open Plain
 
-let eCF = E_var (V_global "CF")
-let ePF = E_var (V_global "PF")
-let eAF = E_var (V_global "AF")
-let eZF = E_var (V_global "ZF")
-let eSF = E_var (V_global "SF")
-let eDF = E_var (V_global "DF")
-let eOF = E_var (V_global "OF")
+let eCF = E_var (Var.Global "CF"), 1
+let ePF = E_var (Var.Global "PF"), 1
+let eAF = E_var (Var.Global "AF"), 1
+let eZF = E_var (Var.Global "ZF"), 1
+let eSF = E_var (Var.Global "SF"), 1
+let eDF = E_var (Var.Global "DF"), 1
+let eOF = E_var (Var.Global "OF"), 1
 
 let predef_table : (string, proc) Hashtbl.t = Hashtbl.create 0
 
@@ -22,45 +23,47 @@ let cond_expr1 = function
   | 0 -> eOF
   | 1 -> eCF
   | 2 -> eZF
-  | 3 -> E_primn (Pn_or, [eCF; eZF]) (* CF|ZF *)
+  | 3 -> E_primn (Pn_or, [eCF; eZF]), 1 (* CF|ZF *)
   | 4 -> eSF
   | 5 -> ePF
-  | 6 -> E_primn (Pn_xor, [eSF; eOF]) (* SF^OF *)
-  | 7 -> E_primn (Pn_or, [eZF; E_primn (Pn_xor, [eSF; eOF])]) (* ZF|(SF^OF) *)
+  | 6 -> E_primn (Pn_xor, [eSF; eOF]), 1 (* SF^OF *)
+  | 7 -> E_primn (Pn_or, [eZF; E_primn (Pn_xor, [eSF; eOF]), 1]), 1 (* ZF|(SF^OF) *)
   | _ -> assert false
 
 let cond_expr code =
   let e = cond_expr1 (code lsr 1) in
-  if (code land 1) = 0 then e else E_prim1 (P1_not, e)
+  if (code land 1) = 0 then e else not_expr e
 
 let elaborate_reg r =
   match r with
-  | R_AL -> E_part (E_var (V_global "EAX"), 0, 8)
-  | R_CL -> E_part (E_var (V_global "ECX"), 0, 8)
-  | R_DL -> E_part (E_var (V_global "EDX"), 0, 8)
-  | R_BL -> E_part (E_var (V_global "EBX"), 0, 8)
-  | R_AH -> E_part (E_var (V_global "EAX"), 8, 16)
-  | R_CH -> E_part (E_var (V_global "ECX"), 8, 16)
-  | R_DH -> E_part (E_var (V_global "EDX"), 8, 16)
-  | R_BH -> E_part (E_var (V_global "EBX"), 8, 16)
-  | R_AX -> E_part (E_var (V_global "EAX"), 0, 16)
-  | R_CX -> E_part (E_var (V_global "ECX"), 0, 16)
-  | R_DX -> E_part (E_var (V_global "EDX"), 0, 16)
-  | R_BX -> E_part (E_var (V_global "EBX"), 0, 16)
-  | R_SP -> E_part (E_var (V_global "ESP"), 0, 16)
-  | R_BP -> E_part (E_var (V_global "EBP"), 0, 16)
-  | R_SI -> E_part (E_var (V_global "ESI"), 0, 16)
-  | R_DI -> E_part (E_var (V_global "EDI"), 0, 16)
-  | _ -> E_var (V_global (string_of_reg r))
+  | R_AL -> E_part ((E_var (Var.Global "EAX"), 32), 0, 8), 8
+  | R_CL -> E_part ((E_var (Var.Global "ECX"), 32), 0, 8), 8
+  | R_DL -> E_part ((E_var (Var.Global "EDX"), 32), 0, 8), 8
+  | R_BL -> E_part ((E_var (Var.Global "EBX"), 32), 0, 8), 8
+  | R_AH -> E_part ((E_var (Var.Global "EAX"), 32), 8, 16), 8
+  | R_CH -> E_part ((E_var (Var.Global "ECX"), 32), 8, 16), 8
+  | R_DH -> E_part ((E_var (Var.Global "EDX"), 32), 8, 16), 8
+  | R_BH -> E_part ((E_var (Var.Global "EBX"), 32), 8, 16), 8
+  | R_AX -> E_part ((E_var (Var.Global "EAX"), 32), 0, 16), 16
+  | R_CX -> E_part ((E_var (Var.Global "ECX"), 32), 0, 16), 16
+  | R_DX -> E_part ((E_var (Var.Global "EDX"), 32), 0, 16), 16
+  | R_BX -> E_part ((E_var (Var.Global "EBX"), 32), 0, 16), 16
+  | R_SP -> E_part ((E_var (Var.Global "ESP"), 32), 0, 16), 16
+  | R_BP -> E_part ((E_var (Var.Global "EBP"), 32), 0, 16), 16
+  | R_SI -> E_part ((E_var (Var.Global "ESI"), 32), 0, 16), 16
+  | R_DI -> E_part ((E_var (Var.Global "EDI"), 32), 0, 16), 16
+  | _ -> E_var (Var.Global (string_of_reg r)), size_of_reg r
+
+(* TODO: don't hard code address size *)
 
 let elaborate_mem_index (reg, scale) =
   let e_reg = elaborate_reg reg in
   if scale = 0 then e_reg
   else
-    let e_scale = E_lit (Bitvec.of_int 2 scale) in
-    E_prim2 (P2_shiftleft, e_reg, e_scale)
+    let e_scale = make_lit 2 (Nativeint.of_int scale) in
+    E_prim2 (P2_shiftleft, e_reg, e_scale), 32
 
-let make_address addr = E_lit (Bitvec.of_nativeint 32 addr)
+let make_address addr = make_lit 32 addr
 
 let elaborate_mem_addr m =
   let seg = elaborate_reg m.seg in
@@ -75,19 +78,19 @@ let elaborate_mem_addr m =
           let e_disp = make_address m.disp in
           [e_base; e_index; e_disp]
       in
-      E_primn (Pn_add, to_be_added)
+      E_primn (Pn_add, to_be_added), 32
     | Some base, None ->
       let e_base = elaborate_reg base in
       if m.disp = 0n then e_base
       else
         let e_disp = make_address m.disp in
-        E_primn (Pn_add, [e_base; e_disp])
+        E_primn (Pn_add, [e_base; e_disp]), 32
     | None, Some index ->
       let e_index = elaborate_mem_index index in
       if m.disp = 0n then e_index
       else
         let e_disp = make_address m.disp in
-        E_primn (Pn_add, [e_index; e_disp])
+        E_primn (Pn_add, [e_index; e_disp]), 32
     | None, None ->
       make_address m.disp
   in
@@ -98,16 +101,16 @@ let elaborate_operand pc' = function
   | O_mem (mem, size) ->
     if size <= 0 then failwith "size of operand invalid";
     let seg, off = elaborate_mem_addr mem in
-    E_load (size, seg, off)
+    E_load (size, seg, off), size*8
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
-    E_lit (Bitvec.of_nativeint (size*8) imm)
+    make_lit (size*8) imm
   | O_offset ofs -> make_address (Nativeint.(pc' + ofs))
   | _ -> failwith "invalid operand type"
 
 let elaborate_writeback emit o_dst e_data =
   match o_dst with
-  | O_reg r -> emit (S_set (V_global (string_of_reg r), e_data))
+  | O_reg r -> emit (S_set (Var.Global (string_of_reg r), e_data))
   | O_mem (m, size) ->
     assert (size > 0);
     let seg, off = elaborate_mem_addr m in
@@ -141,15 +144,15 @@ let fnname_of_op = function
 
 let rec expand_stmt env pc retval stmt =
   let rename_var = function
-    | V_local name ->
+    | Var.Local name ->
       begin
         try Hashtbl.find env.rename_table name
         with Not_found -> failwith ("unbound local variable: "^name)
       end
-    | V_pc -> E_lit (Bitvec.of_nativeint 32 pc)
+    | Var.PC -> E_lit (Bitvec.of_nativeint 32 pc)
     | v -> E_var v
   in
-  let rename e = subst_expr rename_var e in
+  let rename e = subst rename_var e in
   match stmt with
   | S_set (var, e) ->
     let var' =
@@ -170,7 +173,9 @@ let rec expand_stmt env pc retval stmt =
     let arg_arr = Array.of_list args in
     let n_arg = Array.length arg_arr in
     let arg_is_const =
-      arg_arr |> Array.map (function E_lit _ -> true | _ -> false)
+      arg_arr |> Array.map begin fun (argp, _) ->
+        argp |> function E_lit _ -> true | _ -> false
+      end
     in
     let n_param = List.length proc.p_param_names in
     (* TODO: check widths *)
@@ -178,7 +183,7 @@ let rec expand_stmt env pc retval stmt =
       let open Format in
       printf "procedure: %s@." proc.p_name;
       printf "arguments:@.";
-      args |> List.iter (printf "%a@." (pp_expr' pp_var));
+      args |> List.iter (printf "%a@." pp_expr);
       failwith "wrong arity"
     end;
     let param_arr = proc.p_param_names |> Array.of_list in
@@ -189,7 +194,7 @@ let rec expand_stmt env pc retval stmt =
     proc.p_var_tab |> Hashtbl.iter begin fun name width ->
       let arg_temp =
         match Map.String.Exceptionless.find name param_index_map with
-        | Some i when arg_is_const.(i) -> arg_arr.(i)
+        | Some i when arg_is_const.(i) -> fst arg_arr.(i)
         | _ -> E_var (new_temp env width)
       in
       Hashtbl.add env.rename_table name arg_temp
@@ -214,7 +219,7 @@ let rec expand_stmt env pc retval stmt =
         | _ -> assert false
       end
     in
-    List.iter (expand_stmt env pc' rv') proc.p_body;
+    List.iter (expand_stmt env pc rv') proc.p_body;
     proc.p_var_tab |> Hashtbl.iter begin fun name _ ->
       Hashtbl.remove env.rename_table name
     end
@@ -229,10 +234,11 @@ let rec expand_stmt env pc retval stmt =
 let elaborate_inst env pc inst =
   let op = operation_of inst in
   let lsize = inst.variant land 15 in (* log size in bytes *)
+  let size = 8 lsl lsize in
   let operands = operands_of inst in
   let fn inst =
     let fnname_base = fnname_of_op op in
-    let fnname = Printf.sprintf "%s%d" fnname_base (1 lsl (lsize+3)) in
+    let fnname = Printf.sprintf "%s%d" fnname_base size in
     lookup_predef fnname
   in
   emit env (S_label pc);
@@ -245,17 +251,17 @@ let elaborate_inst env pc inst =
     match op with
     | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR
     | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
-      let temp = new_temp env (8 lsl lsize) in
+      let temp = new_temp env size in
       let args = operands |> List.map (elaborate_operand pc') in
       emit' (S_call (fn inst, args, Some temp));
-      elaborate_writeback emit' (List.hd operands) (E_var temp)
+      elaborate_writeback emit' (List.hd operands) (E_var temp, size)
     | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
       let args = operands |> List.map (elaborate_operand pc') in
       emit' (S_call (fn inst, args, None))
     | I_POP ->
-      let temp = new_temp env (8 lsl lsize) in
+      let temp = new_temp env size in
       emit' (S_call (fn inst, [], Some temp));
-      elaborate_writeback emit' (List.hd operands) (E_var temp)
+      elaborate_writeback emit' (List.hd operands) (E_var temp, size)
     | I_MOV ->
       let dst, src =
         match operands with
@@ -270,10 +276,9 @@ let elaborate_inst env pc inst =
         | _ -> assert false
       in
       (*let lsize_src = inst.variant lsr 4 in*)
-      let dst_size = 8 lsl lsize in
       (*let src_size = 8 lsl lsize_src in*)
       let src' = elaborate_operand pc' src in
-      elaborate_writeback emit' dst (E_extend (op = I_MOVSX, src', dst_size))
+      elaborate_writeback emit' dst (E_extend (op = I_MOVSX, src', size), size)
     | I_LEA ->
       let dst, src =
         match operands with
@@ -301,7 +306,7 @@ let elaborate_inst env pc inst =
         | _ -> assert false
       in
       let cond = cond_expr (inst.variant lsr 4) in
-      let data = E_extend (false, cond, 8) in
+      let data = E_extend (false, cond, 8), 8 in
       elaborate_writeback emit' dst data
     | I_XCHG ->
       let dst, src =
@@ -316,7 +321,7 @@ let elaborate_inst env pc inst =
     | _ ->
       Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst
   end;
-  List.rev !inst_stmts |> List.iter (expand_stmt env pc None)
+  List.rev !inst_stmts |> List.iter (expand_stmt env pc' None)
 
 let elaborate_basic_block env bb =
   let open Cfg in

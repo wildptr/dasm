@@ -5,70 +5,94 @@ open Semant
 
 module S = Set.Int
 
-module IntPair = struct
-  type t = int * int
-  let compare (fst1, snd1) (fst2, snd2) =
-    let c = Int.compare fst1 fst2 in
-    if c <> 0 then c else Int.compare snd1 snd2
+module DefUse(V : VarType) = struct
+
+  module Sem = Semant.Make(V)
+  open Sem
+
+  let def_of_stmt = function
+    | S_set (lhs, _) -> Some (V.to_int lhs)
+    | S_phi (lhs, _) -> Some (V.to_int lhs)
+    | _ -> None
+
+  let rec use_of_expr (ep, _) =
+    match ep with
+    | E_lit _ -> S.empty
+    | E_var var -> S.singleton (V.to_int var)
+    | E_part (e, _, _) -> use_of_expr e
+    | E_prim1 (_, e) -> use_of_expr e
+    | E_prim2 (_, e1, e2) -> S.union (use_of_expr e1) (use_of_expr e2)
+    | E_prim3 (_, e1, e2, e3) ->
+      (use_of_expr e3) |> S.union (use_of_expr e2) |> S.union (use_of_expr e1)
+    | E_primn (_, es) -> uses_expr_list es
+    | E_nondet _ -> S.empty
+    | E_extend (_, e, _) -> use_of_expr e
+    | E_load (_, seg, off) -> S.union (use_of_expr seg) (use_of_expr off)
+
+  and uses_expr_list es =
+    es |> map (use_of_expr) |> fold_left S.union S.empty
+
+  let use_of_stmt = function
+    | S_set (_, e) -> use_of_expr e
+    | S_store (_, seg, off, data) ->
+      use_of_expr data |>
+      S.union (use_of_expr off) |>
+      S.union (use_of_expr seg)
+    | S_jump (cond_opt, e) ->
+      begin match cond_opt with
+        | Some cond -> S.union (use_of_expr cond) (use_of_expr e)
+        | None -> use_of_expr e
+      end (* TODO: use set is incomplete *)
+    | S_phi (_, rhs) -> Array.to_list rhs |> uses_expr_list
+    | S_label _ -> S.empty
+    | _ -> assert false
+
+  let remove_dead_code_bb bb n_var =
+    let stmt_arr = Array.of_list bb.stmts in
+    let n = Array.length stmt_arr in
+    let live = Array.make n_var true in
+    let keep = Array.make n true in
+    for i=n-1 downto 0 do
+      let s = stmt_arr.(i) in
+      def_of_stmt s |> begin function
+        | Some uid ->
+          if not live.(uid) then keep.(i) <- false;
+          live.(uid) <- false
+        | None -> ()
+      end;
+      use_of_stmt s |> S.iter (fun uid -> live.(uid) <- false)
+    done;
+    let new_stmts = ref [] in
+    for i=0 to n-1 do
+      if keep.(i) then new_stmts := stmt_arr.(i) :: !new_stmts
+    done;
+    { bb with stmts = !new_stmts }
+
+  let compute_defsites cfg n_var =
+    let size = Array.length cfg.node in
+    let defsites = Array.make n_var S.empty in
+    for i=0 to size-1 do
+      cfg.node.(i).stmts |> iter begin fun stmt ->
+        def_of_stmt stmt |> begin function
+          | Some uid -> defsites.(uid) <- S.add i defsites.(uid)
+          | None -> ()
+        end
+      end
+    done;
+    defsites
+
 end
 
-module SS = Set.Make(IntPair)
+module PlainDefUse = DefUse(Var)
+module SSADefUse = DefUse(SSAVar)
 
-let number_of_registers = 56
-
-let var_to_uid = function
-  | V_global name -> Inst.lookup_reg name |> Obj.magic
-  | V_temp i -> number_of_registers + i
-  | _ -> failwith "var_to_uid: invalid variable"
-
-let uid_to_var uid =
-  if uid < number_of_registers then
-    V_global (Inst.string_of_reg (Obj.magic uid))
-  else
-    V_temp (uid - number_of_registers)
-
-let def_of_stmt = function
-  | S_set (lhs, _) -> Some lhs
-  | S_phi (lhs, _) -> Some lhs
-  | _ -> None
-
-let rec uses_expr = function
-  | E_lit _ -> SS.empty
-  | E_var (var, i) -> SS.singleton (var_to_uid var, i)
-  | E_part (e, _, _) -> uses_expr e
-  | E_prim1 (_, e) -> uses_expr e
-  | E_prim2 (_, e1, e2) -> SS.union (uses_expr e1) (uses_expr e2)
-  | E_prim3 (_, e1, e2, e3) ->
-    (uses_expr e3) |> SS.union (uses_expr e2) |> SS.union (uses_expr e1)
-  | E_primn (_, es) -> uses_expr_list es
-  | E_nondet _ -> SS.empty
-  | E_extend (_, e, _) -> uses_expr e
-  | E_load (_, seg, off) -> SS.union (uses_expr seg) (uses_expr off)
-
-and uses_expr_list es =
-  es |> map uses_expr |> fold_left SS.union SS.empty
-
-let uses = function
-  | S_set (_, e) -> uses_expr e
-  | S_store (_, seg, off, data) ->
-    uses_expr data |>
-    SS.union (uses_expr off) |>
-    SS.union (uses_expr seg)
-  | S_jump (cond_opt, e) ->
-    begin match cond_opt with
-      | Some cond -> SS.union (uses_expr cond) (uses_expr e)
-      | None -> uses_expr e
-    end (* TODO: use set is incomplete *)
-  | S_phi (_, rhs) -> Array.to_list rhs |> uses_expr_list
-  | S_label _ -> SS.empty
-  | _ -> assert false
-
+(*
 let count_uses cfg =
   let use_count = Hashtbl.create 0 in
   let n = Array.length cfg.node in
   for i=0 to n-1 do
     cfg.node.(i).stmts |> iter begin fun stmt ->
-      uses stmt |> SS.iter begin fun svid ->
+      uses stmt |> S.iter begin fun svid ->
         if Hashtbl.mem use_count svid then
           Hashtbl.replace use_count svid (Hashtbl.find use_count svid + 1)
         else
@@ -77,28 +101,31 @@ let count_uses cfg =
     end
   done;
   fun (var, i) ->
-    let svid = var_to_uid var, i in
+    let svid = Var.to_int var, i in
     if Hashtbl.mem use_count svid then Hashtbl.find use_count svid else 0
+*)
 
+(*
 let auto_subst cfg =
+  let open SSA in
   let n = Array.length cfg.node in
   let t = Hashtbl.create 0 in
   for i=0 to n-1 do
     cfg.node.(i).stmts |> iter begin function
       | S_set (lhs, rhs) ->
-        let subst =
-          begin match rhs with
-            | E_var _ | E_lit _ | E_part (E_var _, _, _) -> true
-            | _ -> fst lhs = V_global "ESP"
+        let ok =
+          begin match fst rhs with
+            | E_var _ | E_lit _ | E_part ((E_var _, _), _, _) -> true
+            | _ -> lhs.SSAVar.orig = Var.Global "ESP"
           end
         in
-        if subst then begin
+        if ok then begin
           let rhs' =
-            rhs |> subst_expr begin fun sv ->
+            rhs |> subst begin fun sv ->
               Hashtbl.find_option t sv |> Option.default (E_var sv)
             end
           in
-          Hashtbl.add t lhs rhs'
+          Hashtbl.add t lhs (fst rhs')
         end
       | _ -> ()
     end;
@@ -114,7 +141,7 @@ let auto_subst cfg =
         cfg.node.(i).stmts |> filter_map begin fun stmt ->
           let stmt' =
             match stmt with
-            | S_set ((V_temp _, _ as lhs), rhs) ->
+            | S_set (lhs, rhs) ->
               if Hashtbl.mem t lhs then None else Some (subst_stmt f stmt)
             | _ -> Some (subst_stmt f stmt)
           in
@@ -124,7 +151,9 @@ let auto_subst cfg =
     done
   end;
   !changed
+*)
 
+(*
 let remove_dead_code cfg =
   let n = Array.length cfg.node in
   let changed = ref false in
@@ -137,7 +166,7 @@ let remove_dead_code cfg =
           | S_jump _ | S_store _ -> true
           | _ ->
             begin match def_of_stmt stmt with
-              | Some (V_temp _, _ as sv) -> use_count sv > 0
+              | Some (Var.Temp _, _ as sv) -> use_count sv > 0
               | _ -> true
             end
         in
@@ -147,23 +176,35 @@ let remove_dead_code cfg =
     end
   done;
   !changed
-
-let compute_defs (cfg : var stmt cfg) n_var =
-  let size = Array.length cfg.node in
-  let defs = Array.make n_var Set.Int.empty in
-  for i=0 to size-1 do
-    cfg.node.(i).stmts |> iter begin fun stmt ->
-      def_of_stmt stmt |> begin function
-        | Some var ->
-          let uid = var_to_uid var in
-          defs.(uid) <- Set.Int.add i defs.(uid)
-        | None -> ()
-      end
-    end
-  done;
-  defs
+*)
 
 exception Break
+
+let rec rename f (expr, w) =
+  let expr' =
+    match expr with
+    | Plain.E_lit bv ->
+      SSA.E_lit bv
+    | Plain.E_var name ->
+      SSA.E_var (f name)
+    | Plain.E_part (e, lo, hi) ->
+      SSA.E_part (rename f e, lo, hi)
+    | Plain.E_prim1 (p, e) ->
+      SSA.E_prim1 (p, rename f e)
+    | Plain.E_prim2 (p, e1, e2) ->
+      SSA.E_prim2 (p, rename f e1, rename f e2)
+    | Plain.E_prim3 (p, e1, e2, e3) ->
+      SSA.E_prim3 (p, rename f e1, rename f e2, rename f e3)
+    | Plain.E_primn (p, es) ->
+      SSA.E_primn (p, List.map (rename f) es)
+    | Plain.E_load (size, seg, addr) ->
+      SSA.E_load (size, rename f seg, rename f addr)
+    | Plain.E_nondet (w, id) ->
+      SSA.E_nondet (w, id)
+    | Plain.E_extend (sign, e, n) ->
+      SSA.E_extend (sign, rename f e, n)
+  in
+  expr', w
 
 let convert_to_ssa (cfg, env) =
   let size = Array.length cfg.node in
@@ -195,27 +236,27 @@ let convert_to_ssa (cfg, env) =
     df.(n) <- !s
   in
   compute_df 0;
-  let n_var = number_of_registers + (Env.temp_count env) in
-  let defs = compute_defs cfg n_var in
+  let n_var = Inst.number_of_registers + (Env.temp_count env) in
+  let defsites = PlainDefUse.compute_defsites cfg n_var in
   for uid = 0 to n_var - 1 do
     let phi_inserted_at = Array.make size false in
     let q = Queue.create () in
-    defs.(uid) |> Set.Int.iter (fun defsite -> Queue.add defsite q);
+    defsites.(uid) |> S.iter (fun defsite -> Queue.add defsite q);
     while not (Queue.is_empty q) do
       let n = Queue.pop q in
       df.(n) |> iter begin fun y ->
         if not phi_inserted_at.(y) then begin
           let n_pred = length pred.(y) in
-          let lhs = uid_to_var uid in
+          let lhs = Var.of_int uid in
           (* RHS is never used *)
-          let phi = S_phi (lhs, Array.make n_pred (E_var lhs)) in
+          let phi = Plain.(S_phi (lhs, Array.make n_pred (E_var lhs, 0))) in
           (* actually insert phi function *)
           begin match cfg.node.(y).stmts with
             | label :: rest -> cfg.node.(y).stmts <- label :: phi :: rest;
             | _ -> failwith "empty basic block"
           end;
           phi_inserted_at.(y) <- true;
-          if not (Set.Int.mem y defs.(uid)) then Queue.push y q
+          if not (S.mem y defsites.(uid)) then Queue.push y q
         end
       end
     done
@@ -223,46 +264,58 @@ let convert_to_ssa (cfg, env) =
   (* rename variables *)
   let count = Array.make n_var 0 in
   let stack = Array.make n_var [0] in
-  let rename_rhs var =
-    let uid = var_to_uid var in
-    let i = hd stack.(uid) in
-    var, i
+  let svid_table = Hashtbl.create 0 in
+  let next_svid = ref 0 in
+  let rename_rhs orig =
+    let orig_uid = Var.to_int orig in
+    let ver = hd stack.(orig_uid) in
+    let uid = Hashtbl.find svid_table (orig_uid, ver) in
+    SSAVar.{ orig; ver; uid }
   in
-  let rec rename n =
-    let rename_lhs var =
-      let uid = var_to_uid var in
-      let i = count.(uid) + 1 in
-      count.(uid) <- i;
-      stack.(uid) <- i :: stack.(uid);
-      var, i
+  let rec rename_bb n =
+    let rename_lhs orig =
+      let orig_uid = Var.to_int orig in
+      let ver = count.(orig_uid) + 1 in
+      count.(orig_uid) <- ver;
+      stack.(orig_uid) <- ver :: stack.(orig_uid);
+      let uid = !next_svid in
+      incr next_svid;
+      SSAVar.{ orig; ver; uid }
     in
     let new_stmts = ref [] in
     cfg.node.(n).stmts |> iter begin fun stmt ->
       let new_stmt =
         match stmt with
-        | S_set (name, e) ->
-          let e' = rename_variables rename_rhs e in
+        | Plain.S_set (name, e) ->
+          let e' = rename rename_rhs e in
           let name' = rename_lhs name in
-          S_set (name', e')
-        | S_store (size, seg, off, data) ->
-          let seg' = rename_variables rename_rhs seg in
-          let off' = rename_variables rename_rhs off in
-          let data' = rename_variables rename_rhs data in
-          S_store (size, seg', off', data')
-        | S_jump (c, dst) ->
-          let c' = Option.map (rename_variables rename_rhs) c in
-          let dst' = rename_variables rename_rhs dst in
-          S_jump (c', dst')
-        | S_phi (lhs, rhs) ->
+          SSA.S_set (name', e')
+        | Plain.S_store (size, seg, off, data) ->
+          let seg' = rename rename_rhs seg in
+          let off' = rename rename_rhs off in
+          let data' = rename rename_rhs data in
+          SSA.S_store (size, seg', off', data')
+        | Plain.S_jump (c, dst) ->
+          let c' = Option.map (rename rename_rhs) c in
+          let dst' = rename rename_rhs dst in
+          SSA.S_jump (c', dst')
+        | Plain.S_phi (lhs, rhs) ->
           let rhs' =
-            let uid = var_to_uid lhs in
-            let i = count.(uid) in
-            (lhs, i)
+            let orig_uid = Var.to_int lhs in
+            let ver = count.(orig_uid) in
+            let uid = Hashtbl.find svid_table (orig_uid, ver) in
+            SSAVar.{ orig = lhs; ver; uid }
           in
           let lhs' = rename_lhs lhs in
           let n = Array.length rhs in
-          S_phi (lhs', Array.make n (E_var rhs'))
-        | S_label _ as s -> s
+          let w =
+            match lhs with
+            | Var.Global name -> Inst.(size_of_reg (lookup_reg name))
+            | Var.Temp i -> Env.width_of_temp i env
+            | _ -> failwith "???"
+          in
+          SSA.S_phi (lhs', Array.make n (SSA.E_var rhs', w))
+        | Plain.S_label pc -> SSA.S_label pc
         | _ -> assert false
       in
       new_stmts := new_stmt :: !new_stmts
@@ -274,20 +327,19 @@ let convert_to_ssa (cfg, env) =
       (* n is the j-th predecessor of y *)
       let j = index_of n pred.(y) |> Option.get in
       node.(y).stmts |> iter begin function
-        | S_phi (lhs, rhs) ->
-          rhs.(j) <- rename_variables rename_rhs (E_var (fst lhs))
+        | SSA.S_phi (lhs, rhs) ->
+          rhs.(j) <-
+            SSA.subst (fun sv -> SSA.E_var (rename_rhs sv.SSAVar.orig)) rhs.(j)
         | _ -> ()
       end
     end;
-    children.(n) |> iter rename;
+    children.(n) |> iter rename_bb;
     old_stmts |> iter begin fun stmt ->
-      def_of_stmt stmt |> begin function
-        | Some var ->
-          let uid = var_to_uid var in
-          stack.(uid) <- tl stack.(uid)
+      PlainDefUse.def_of_stmt stmt |> begin function
+        | Some uid -> stack.(uid) <- tl stack.(uid)
         | None -> ()
       end
     end
   in
-  rename 0;
+  rename_bb 0;
   { node; succ; pred; edges = cfg.edges }

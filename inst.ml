@@ -9,6 +9,8 @@ type reg =
   | R_XMM0 | R_XMM1 | R_XMM2 | R_XMM3 | R_XMM4 | R_XMM5 | R_XMM6 | R_XMM7
   | R_CF | R_PF | R_AF | R_ZF | R_SF | R_DF | R_OF
 
+let number_of_registers = 56
+
 let string_of_reg = function
   | R_AL -> "AL"
   | R_CL -> "CL"

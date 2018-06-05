@@ -47,37 +47,11 @@ let cmd_scan args =
   let va = List.hd args |> parse_hex in
   Analyze.scan db va
 
-let string_of_pcode pp_v stmts =
-  let buf = Buffer.create 0 in
-  let open Format in
-  let f = formatter_of_buffer buf in
-  let open Semant in
-  let rec print_stmt indent stmt =
-    match stmt with
-    | S_if (cond, body) ->
-      fprintf f "%sif (%a) {@." indent (pp_expr' pp_v) cond;
-      body |> List.iter (print_stmt (indent^"  "));
-      fprintf f "%s}@." indent
-    | S_if_else (cond, body_t, body_f) ->
-      fprintf f "%sif (%a) {@." indent (pp_expr' pp_v) cond;
-      body_t |> List.iter (print_stmt (indent^"  "));
-      fprintf f "%s} else {@." indent;
-      body_f |> List.iter (print_stmt (indent^"  "));
-      fprintf f "%s}@." indent
-    | S_do_while (body, cond) ->
-      fprintf f "%sdo {@." indent;
-      body |> List.iter (print_stmt (indent^"  "));
-      fprintf f "%s} while (%a)@." indent (pp_expr' pp_v) cond
-    | _ -> fprintf f "%s%a@." indent (pp_stmt' pp_v) stmt
-  in
-  stmts |> List.iter (print_stmt "");
-  Buffer.contents buf
-
 let cmd_pcode args =
   let va = List.hd args |> parse_hex in
   let proc = Database.get_proc db va in
   let stmts = proc.Database.il in
-  print_string (string_of_pcode Semant.pp_var stmts)
+  print_string Semant.Plain.(string_of_pcode stmts)
 
 let cmd_ssa args =
   let va = List.hd args |> parse_hex in
@@ -85,19 +59,21 @@ let cmd_ssa args =
   let cfg, env = Elaborate.elaborate_cfg db proc.cfg in
   let cfg' = Dataflow.convert_to_ssa (cfg, env) in
   let changed = ref false in
+(*
   let rec loop () =
-    if Dataflow.auto_subst cfg' then changed := true;
-    if Simplify.simplify_cfg env cfg' then changed := true;
-    if Dataflow.remove_dead_code cfg' then changed := true;
+    if Dataflow.SSADefUse.auto_subst cfg' then changed := true;
+    if Simplify.SSA.simplify_cfg env cfg' then changed := true;
+    if Dataflow.SSADefUse.remove_dead_code cfg' then changed := true;
     if !changed then begin
       changed := false;
       loop ()
     end
   in
   loop ();
+*)
   let cs = Fold_cfg.fold_cfg ~debug:false cfg' in
-  let il = Pseudocode.convert cs in
-  print_string (string_of_pcode Semant.pp_ssa_var il)
+  let il = Pseudocode.SSA.convert cs in
+  print_string Semant.SSA.(string_of_pcode il)
 
 let cmd_load args =
   let path = List.hd args in

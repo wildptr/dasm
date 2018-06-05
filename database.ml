@@ -3,9 +3,9 @@ open Batteries
 type proc = {
   mutable cfg : Inst.inst Cfg.cfg;
   mutable inst_cs : Inst.inst Cfg.ctlstruct;
-  mutable stmt_cs : Semant.var Semant.stmt Cfg.ctlstruct;
+  mutable stmt_cs : Semant.Plain.stmt Cfg.ctlstruct;
   mutable span : nativeint Itree.t;
-  mutable il : Semant.var Semant.stmt list;
+  mutable il : Semant.Plain.stmt list;
 }
 
 type jump =

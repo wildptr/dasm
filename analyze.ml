@@ -1,5 +1,6 @@
 open Batteries
 open Semant
+open Plain
 
 let rec scan db va =
   if not (Database.has_proc db va) then begin
@@ -13,7 +14,7 @@ let rec scan db va =
         begin match Database.get_jump_info db !pc with
           | Database.J_call ->
             is_leaf := false;
-            begin match dst with
+            begin match fst dst with
               | E_lit bv ->
                 let dst_va = Bitvec.to_nativeint bv in
                 scan db dst_va

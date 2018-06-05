@@ -135,5 +135,5 @@ let build_cfg db init_pc =
   let stmt_cs =
     inst_cs |> map_ctlstruct (Elaborate.elaborate_basic_block env)
   in
-  let il = Pseudocode.convert stmt_cs in
+  let il = Pseudocode.Plain.convert stmt_cs in
   { cfg; inst_cs; stmt_cs; span; il }
