@@ -126,14 +126,28 @@ let build_cfg db init_pc =
     succ.(i) <- List.rev succ.(i);
     pred.(i) <- List.rev pred.(i)
   done;
-  let cfg = { node = Array.of_list basic_blocks; succ; pred; edges } in
-  let nbb = Array.length cfg.node in
+  let inst_cfg = { node = Array.of_list basic_blocks; succ; pred; edges } in
+  let nbb = Array.length inst_cfg.node in
   Printf.printf "%nx: %d basic %s\n" init_pc nbb (if nbb=1 then "block" else "blocks");
-  print_cfg cfg;
-  let inst_cs = Fold_cfg.fold_cfg ~debug:false cfg in
+  let inst_cs = Fold_cfg.fold_cfg ~debug:false inst_cfg in
   let env = Env.create db in
-  let stmt_cs =
-    inst_cs |> map_ctlstruct (Elaborate.elaborate_basic_block env)
+  let stmt_node =
+    basic_blocks |>
+    List.map (Elaborate.elaborate_basic_block env) |>
+    Array.of_list
   in
+  let stmt_cfg = { node = stmt_node; succ; pred; edges } in
+  let n_temp = Env.temp_count env in
+  let n_var = number_of_registers + n_temp in
+  for i=0 to nbb-1 do
+    stmt_cfg.node.(i) <-
+      Dataflow.PlainDefUse.remove_dead_code_bb stmt_cfg.node.(i) n_var
+  done;
+(*   print_cfg Semant.Plain.pp_stmt stmt_cfg; *)
+  let stmt_cs = Fold_cfg.fold_cfg ~debug:false stmt_cfg in
   let il = Pseudocode.Plain.convert stmt_cs in
-  { cfg; inst_cs; stmt_cs; span; il }
+  let temp_tab = Array.make n_temp 0 in
+  for i=0 to n_temp-1 do
+    temp_tab.(i) <- Env.width_of_temp i env
+  done;
+  { inst_cfg; inst_cs; stmt_cfg; stmt_cs; span; il; temp_tab }

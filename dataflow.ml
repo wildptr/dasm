@@ -50,23 +50,25 @@ module DefUse(V : VarType) = struct
   let remove_dead_code_bb bb n_var =
     let stmt_arr = Array.of_list bb.stmts in
     let n = Array.length stmt_arr in
-    let live = Array.make n_var true in
     let keep = Array.make n true in
-    for i=n-1 downto 0 do
-      let s = stmt_arr.(i) in
-      def_of_stmt s |> begin function
-        | Some uid ->
-          if not live.(uid) then keep.(i) <- false;
-          live.(uid) <- false
-        | None -> ()
-      end;
-      use_of_stmt s |> S.iter (fun uid -> live.(uid) <- false)
-    done;
+    begin
+      let live = Array.make n_var true in
+      for i=n-1 downto 0 do
+        let s = stmt_arr.(i) in
+        def_of_stmt s |> begin function
+          | Some uid ->
+            if not live.(uid) then keep.(i) <- false;
+            live.(uid) <- false
+          | None -> ()
+        end;
+        use_of_stmt s |> S.iter (fun uid -> live.(uid) <- true)
+      done
+    end;
     let new_stmts = ref [] in
     for i=0 to n-1 do
       if keep.(i) then new_stmts := stmt_arr.(i) :: !new_stmts
     done;
-    { bb with stmts = !new_stmts }
+    { bb with stmts = List.rev !new_stmts }
 
   let compute_defsites cfg n_var =
     let size = Array.length cfg.node in
@@ -206,7 +208,7 @@ let rec rename f (expr, w) =
   in
   expr', w
 
-let convert_to_ssa (cfg, env) =
+let convert_to_ssa temp_tab cfg =
   let size = Array.length cfg.node in
   (* fields of the resulting CFG *)
   let node = cfg.node |> Array.map (fun bb -> { bb with stmts = [] }) in
@@ -236,7 +238,7 @@ let convert_to_ssa (cfg, env) =
     df.(n) <- !s
   in
   compute_df 0;
-  let n_var = Inst.number_of_registers + (Env.temp_count env) in
+  let n_var = Inst.number_of_registers + (Array.length temp_tab) in
   let defsites = PlainDefUse.compute_defsites cfg n_var in
   for uid = 0 to n_var - 1 do
     let phi_inserted_at = Array.make size false in
@@ -266,10 +268,18 @@ let convert_to_ssa (cfg, env) =
   let stack = Array.make n_var [0] in
   let svid_table = Hashtbl.create 0 in
   let next_svid = ref 0 in
+  let get_svid k =
+    try Hashtbl.find svid_table k
+    with Not_found ->
+      let uid = !next_svid in
+      incr next_svid;
+      Hashtbl.add svid_table k uid;
+      uid
+  in
   let rename_rhs orig =
     let orig_uid = Var.to_int orig in
     let ver = hd stack.(orig_uid) in
-    let uid = Hashtbl.find svid_table (orig_uid, ver) in
+    let uid = get_svid (orig_uid, ver) in
     SSAVar.{ orig; ver; uid }
   in
   let rec rename_bb n =
@@ -278,8 +288,7 @@ let convert_to_ssa (cfg, env) =
       let ver = count.(orig_uid) + 1 in
       count.(orig_uid) <- ver;
       stack.(orig_uid) <- ver :: stack.(orig_uid);
-      let uid = !next_svid in
-      incr next_svid;
+      let uid = get_svid (orig_uid, ver) in
       SSAVar.{ orig; ver; uid }
     in
     let new_stmts = ref [] in
@@ -303,7 +312,7 @@ let convert_to_ssa (cfg, env) =
           let rhs' =
             let orig_uid = Var.to_int lhs in
             let ver = count.(orig_uid) in
-            let uid = Hashtbl.find svid_table (orig_uid, ver) in
+            let uid = get_svid (orig_uid, ver) in
             SSAVar.{ orig = lhs; ver; uid }
           in
           let lhs' = rename_lhs lhs in
@@ -311,7 +320,7 @@ let convert_to_ssa (cfg, env) =
           let w =
             match lhs with
             | Var.Global name -> Inst.(size_of_reg (lookup_reg name))
-            | Var.Temp i -> Env.width_of_temp i env
+            | Var.Temp i -> temp_tab.(i)
             | _ -> failwith "???"
           in
           SSA.S_phi (lhs', Array.make n (SSA.E_var rhs', w))

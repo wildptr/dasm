@@ -56,10 +56,11 @@ let cmd_pcode args =
 let cmd_ssa args =
   let va = List.hd args |> parse_hex in
   let proc = Database.get_proc db va in
-  let cfg, env = Elaborate.elaborate_cfg db proc.cfg in
-  let cfg' = Dataflow.convert_to_ssa (cfg, env) in
-  let changed = ref false in
+  let cfg = proc.Database.stmt_cfg in
+  let temp_tab = proc.Database.temp_tab in
+  let cfg' = Dataflow.convert_to_ssa temp_tab cfg in
 (*
+  let changed = ref false in
   let rec loop () =
     if Dataflow.SSADefUse.auto_subst cfg' then changed := true;
     if Simplify.SSA.simplify_cfg env cfg' then changed := true;

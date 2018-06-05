@@ -14,13 +14,14 @@ type 'a cfg = {
   edges : edge list;
 }
 
-let print_cfg cfg =
+let print_cfg pp_stmt cfg =
   let n = Array.length cfg.node in
   for i=0 to n-1 do
-    let open Printf in
+    let open Format in
     printf "%d -> [" i;
     cfg.succ.(i) |> List.iter (printf " %d");
-    printf " ]\n"
+    printf " ]\n";
+    cfg.node.(i).stmts |> List.iter (printf "%a@." pp_stmt)
   done
 
 type 'a ctlstruct =
