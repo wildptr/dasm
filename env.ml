@@ -73,3 +73,8 @@ let get_stmts env =
 
 let width_of_temp tid env =
   env.temp_size_tab.(tid)
+
+let new_nondet_id env =
+  let id = env.next_nondet_id in
+  env.next_nondet_id <- env.next_nondet_id + 1;
+  id

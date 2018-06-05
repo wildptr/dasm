@@ -40,12 +40,14 @@ module Var = struct
     | Temp of int
     | Local of string
     | PC
+    | Nondet of int
 
   let pp f = function
     | Global s -> pp_print_string f s
     | Temp i -> fprintf f "$%d" i
     | Local s -> pp_print_string f s
     | PC -> pp_print_string f "PC"
+    | Nondet w -> fprintf f "?%d" w
 
   let to_int = function
     | Global name -> Inst.lookup_reg name |> Obj.magic
@@ -259,17 +261,17 @@ module Make(V : VarType) = struct
       match stmt with
       | S_if (cond, body) ->
         fprintf f "%sif (%a) {@." indent pp_expr cond;
-        body |> List.iter (print_stmt (indent^"  "));
+        body |> List.iter (print_stmt (indent^"\t"));
         fprintf f "%s}@." indent
       | S_if_else (cond, body_t, body_f) ->
         fprintf f "%sif (%a) {@." indent pp_expr cond;
-        body_t |> List.iter (print_stmt (indent^"  "));
+        body_t |> List.iter (print_stmt (indent^"\t"));
         fprintf f "%s} else {@." indent;
-        body_f |> List.iter (print_stmt (indent^"  "));
+        body_f |> List.iter (print_stmt (indent^"\t"));
         fprintf f "%s}@." indent
       | S_do_while (body, cond) ->
         fprintf f "%sdo {@." indent;
-        body |> List.iter (print_stmt (indent^"  "));
+        body |> List.iter (print_stmt (indent^"\t"));
         fprintf f "%s} while (%a)@." indent pp_expr cond
       | _ -> fprintf f "%s%a@." indent pp_stmt stmt
     in

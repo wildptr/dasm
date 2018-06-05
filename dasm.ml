@@ -512,8 +512,8 @@ let optable_basic = [|
   (* 81 *) { op =       opgroup_80; var=15;  fmt = E_uni [RM;I] };
   (* 82 *) { op =       opgroup_80; var= 0;  fmt = E_uni [RM;I] };
   (* 83 *) { op =       opgroup_80; var=15;  fmt = E_uni [RM;I] };
-  (* 84 *) { op = E_uni I_TEST;     var= 0;  fmt = E_uni [RM;I] };
-  (* 85 *) { op = E_uni I_TEST;     var=15;  fmt = E_uni [RM;I] };
+  (* 84 *) { op = E_uni I_TEST;     var= 0;  fmt = E_uni [RM;R] };
+  (* 85 *) { op = E_uni I_TEST;     var=15;  fmt = E_uni [RM;R] };
   (* 86 *) { op = E_uni I_XCHG;     var= 0;  fmt = E_uni [RM;R] };
   (* 87 *) { op = E_uni I_XCHG;     var=15;  fmt = E_uni [RM;R] };
   (* 88 *) { op = E_uni I_MOV;      var= 0;  fmt = E_uni [RM;R] };

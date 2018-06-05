@@ -150,6 +150,7 @@ let rec expand_stmt env pc retval stmt =
         with Not_found -> failwith ("unbound local variable: "^name)
       end
     | Var.PC -> E_lit (Bitvec.of_nativeint 32 pc)
+    | Var.Nondet w -> E_nondet (w, new_nondet_id env)
     | v -> E_var v
   in
   let rename e = subst rename_var e in
@@ -351,7 +352,7 @@ let elaborate_cfg db cfg =
   let node = cfg.node |> Array.map (elaborate_basic_block env) in
   let succ = Array.copy cfg.succ in
   let pred = Array.copy cfg.pred in
-  { node; succ; pred; edges = cfg.edges; exits = cfg.exits }, env
+  { cfg with node; succ; pred }, env
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in

@@ -15,6 +15,7 @@ type 'a cfg = {
   pred : int list array;
   edges : edge list;
   exits : Set.Int.t;
+  n_var : int;
 }
 
 let print_cfg pp_stmt cfg =

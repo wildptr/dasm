@@ -258,7 +258,7 @@ let rec translate_expr env expr =
     e', width_of_binary_op (op, w1, w2)
   | Expr_undef c_width ->
     let width = translate_cexpr st c_width in
-    E_nondet (width, 0), width (* TODO: nondet id *)
+    E_var (Var.Nondet width), width
   | Expr_load memloc ->
     let seg', off', w = translate_memloc env memloc in
     E_load (w lsr 3, seg', off'), w

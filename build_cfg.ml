@@ -139,7 +139,7 @@ let build_cfg db init_pc =
   exits |> Set.Int.iter (Printf.printf " %d");
   print_endline "";
   let inst_cfg =
-    { node = Array.of_list basic_blocks; succ; pred; edges; exits }
+    { node = Array.of_list basic_blocks; succ; pred; edges; exits; n_var = 0 }
   in
   let nbb = Array.length inst_cfg.node in
   Printf.printf "%nx: %d basic %s\n" init_pc nbb (if nbb=1 then "block" else "blocks");
@@ -150,10 +150,10 @@ let build_cfg db init_pc =
     List.map (Elaborate.elaborate_basic_block env) |>
     Array.of_list
   in
-  let stmt_cfg = { node = stmt_node; succ; pred; edges; exits } in
   let n_temp = Env.temp_count env in
   let n_var = number_of_registers + n_temp in
-  Dataflow.remove_dead_code_plain stmt_cfg n_var;
+  let stmt_cfg = { node = stmt_node; succ; pred; edges; exits; n_var } in
+  Dataflow.remove_dead_code_plain stmt_cfg;
 (*   print_cfg Semant.Plain.pp_stmt stmt_cfg; *)
   let stmt_cs = Fold_cfg.fold_cfg ~debug:false stmt_cfg in
   let il = Pseudocode.Plain.(convert stmt_cs |> remove_unused_labels) in
