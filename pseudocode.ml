@@ -80,8 +80,19 @@ module Make(V : VarType) = struct
     | Do_while (cond, t) ->
       let cond_stmts, cond_expr = convert_cond cond in
       [P_do_while (cond_stmts, make_cond cond_expr t)]
-    | Generic (_, node, _) ->
-      node |> Array.to_list |> List.map convert |> List.concat
+    | Generic (_, node, edges) ->
+      let n = Array.length node in
+      let need_label = Array.make n false in
+      edges |> List.iter begin fun (src, dst, _) ->
+        if src+1 <> dst && node.(dst) <> Virtual then need_label.(dst) <- true
+      end;
+      node |> Array.to_list |> List.map convert |>
+      List.mapi begin fun i stmts ->
+        if need_label.(i) then
+          P_label (start_of_ctlstruct node.(i)) :: stmts
+        else
+          stmts
+      end |> List.concat
     | _ -> failwith "not implemented"
 
   and convert_cond = function
@@ -100,18 +111,23 @@ module Make(V : VarType) = struct
     | _ -> assert false
 
   and convert_bb bb stmts =
-    let comment = P_comment (sprintf "%nx" bb.start) in
-    comment :: (stmts |> convert_stmt_list)
+    (*let comment = P_comment (sprintf "%nx" bb.start) in
+    comment ::*) (stmts |> convert_stmt_list)
 
   let pp_lvalue f = function
     | L_var var -> V.pp f var
     | L_mem (seg, off, size) -> pp_expr f (E_load (size, seg, off), size*8)
 
+  let pp_label_expr f (ep, _ as e) =
+    match ep with
+    | E_lit bv -> fprintf f "%nx" (Bitvec.to_nativeint bv)
+    | _ -> pp_expr f e
+
   let rec pp_pstmt' indent f = function
     | P_set (lv, e) ->
       fprintf f "%s%a = %a;\n" indent pp_lvalue lv pp_expr e
     | P_goto e ->
-      fprintf f "%sgoto %a;\n" indent pp_expr e
+      fprintf f "%sgoto %a;\n" indent pp_label_expr e
     | P_if (cond, body) ->
       fprintf f "%sif (%a) {\n" indent pp_expr cond;
       body |> List.iter (pp_pstmt' (indent^"\t") f);

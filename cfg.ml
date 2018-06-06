@@ -55,3 +55,15 @@ let rec map_ctlstruct f = function
     If_else (map_ctlstruct f v1, t, map_ctlstruct f v2, map_ctlstruct f v3)
   | Do_while (v, t) -> Do_while (map_ctlstruct f v, t)
   | _ -> failwith "not implemented"
+
+let rec start_of_ctlstruct = function
+  | Virtual -> failwith "start_of_ctlstruct: virtual node"
+  | BB (b, _) -> b.start
+  | Seq (v1, _) -> start_of_ctlstruct v1
+  | Generic (_, node, _) -> start_of_ctlstruct node.(0)
+  | If (v1, _, _, _) -> start_of_ctlstruct v1
+  | If_else (v1, _, _, _) -> start_of_ctlstruct v1
+  | Do_while (v, _) -> start_of_ctlstruct v
+  | While_true v -> start_of_ctlstruct v
+  | Fork1 _ -> failwith "start_of_ctlstruct: Fork1 not implemented"
+  | Fork2 _ -> failwith "start_of_ctlstruct: Fork2 not implemented"
