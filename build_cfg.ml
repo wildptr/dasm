@@ -15,6 +15,7 @@ let build_cfg db init_pc =
   let span = ref Itree.empty in
   let edges = ref [] in (* from end of basic block to start of basic block *)
   let exits = ref S.empty in
+  let conc_table = Hashtbl.create 0 in
   let q = Queue.create () in
   Queue.add init_pc q;
   let s = { str = code; pos = 0 } in
@@ -24,6 +25,7 @@ let build_cfg db init_pc =
       | Itree.Start -> ()
       | Itree.Middle ->
         span := Itree.split pc !span;
+        Hashtbl.add conc_table pc NoJump;
         edges := (pc, pc, Edge_neutral) :: !edges
       | Itree.Nowhere ->
         s.pos <- translate_va db pc;
@@ -37,44 +39,41 @@ let build_cfg db init_pc =
           match inst.operation with
           | I_JMP ->
             begin match List.hd inst.operands with
-              | O_offset ofs ->
-                Hashtbl.add db.jump_info pc J_resolved;
-                pc', [Nativeint.(pc + ofs), Edge_neutral]
+              | O_offset _ -> failwith "offset operand???"
               | O_imm (imm, _) ->
                 Hashtbl.add db.jump_info pc J_resolved;
-                pc', [imm, Edge_neutral]
+                pc', [imm, Edge_neutral], Jump
               | _ ->
                 Hashtbl.add db.jump_info pc J_unknown;
-                pc', []
+                exits := S.add pc' !exits;
+                pc', [], NoJump
             end
           | I_JMPF -> failwith "cannot handle far jump"
           | I_CALLF -> failwith "cannot handle far call"
           | I_CJMP ->
             begin match List.hd inst.operands with
-              | O_offset ofs ->
-                Hashtbl.add db.jump_info pc J_resolved;
-                pc', [pc', Edge_false; Nativeint.(pc + ofs), Edge_true]
+              | O_offset _ -> failwith "offset operand???"
               | O_imm (imm, _) ->
                 Hashtbl.add db.jump_info pc J_resolved;
-                pc', [pc', Edge_false; imm, Edge_true]
+                pc', [pc', Edge_false; imm, Edge_true], Branch
               | _ ->
                 Hashtbl.add db.jump_info pc J_unknown;
-                pc', [pc', Edge_false]
+                pc', [pc', Edge_false], NoJump
             end
           | I_RET | I_RETF | I_RETN ->
             Hashtbl.add db.jump_info pc J_ret;
             exits := S.add pc' !exits;
-            pc', []
+            pc', [], NoJump
           | _ ->
             if inst.operation = I_CALL then
               Hashtbl.add db.jump_info pc J_call;
-            if Itree.find pc' !span = Itree.Start then
-              pc', [pc', Edge_neutral]
-            else
-              loop pc'
+            if Itree.find pc' !span = Itree.Start then begin
+              pc', [pc', Edge_neutral], NoJump
+            end else loop pc'
         in
-        let pc', dests = loop pc in
+        let pc', dests, conc = loop pc in
         span := Itree.add (pc,pc') !span;
+        Hashtbl.add conc_table pc' conc;
         dests |> List.iter begin fun (dest, attr) ->
           edges := (pc', dest, attr) :: !edges;
           (* If dest is strictly between start(b) and end(b) for some basic
@@ -86,7 +85,9 @@ let build_cfg db init_pc =
   done;
   let span = !span in
   let start_end_list = Itree.to_list span in
-  let entry_bb = { start = init_pc; stop = init_pc; stmts = [] } in
+  let entry_bb =
+    { start = init_pc; stop = init_pc; stmts = []; conclusion = NoJump }
+  in
   let basic_blocks =
     entry_bb :: (start_end_list |> List.map begin fun (start, stop) ->
         let rec loop pc insts =
@@ -96,7 +97,12 @@ let build_cfg db init_pc =
           if pc' = stop then insts' else loop pc' insts'
         in
         let insts = List.rev (loop start []) in
-        { start; stop; stmts = insts }
+        let conclusion =
+          try Hashtbl.find conc_table stop with Not_found ->
+            Printf.printf "missing entry in conclusion table: %nx\n" stop;
+            raise Not_found
+        in
+        { start; stop; stmts = insts; conclusion }
       end)
   in
   let n = List.length basic_blocks in
@@ -135,9 +141,11 @@ let build_cfg db init_pc =
     end;
     !temp
   in
+(*
   Printf.printf "exits:";
   exits |> Set.Int.iter (Printf.printf " %d");
   print_endline "";
+*)
   let inst_cfg =
     { node = Array.of_list basic_blocks; succ; pred; edges; exits; n_var = 0 }
   in

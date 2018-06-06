@@ -1,9 +1,12 @@
 open Batteries
 
+type conclusion = NoJump | Jump | Branch
+
 type 'a basic_block = {
   start : nativeint;
   stop : nativeint;
   mutable stmts : 'a list;
+  conclusion : conclusion;
 }
 
 type edge_attr = Edge_neutral | Edge_true | Edge_false

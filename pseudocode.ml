@@ -16,7 +16,11 @@ module Make(V : VarType) = struct
 
   let rec convert = function
     | Virtual -> []
-    | BB (b, _) -> b.stmts
+    | BB (b, _) ->
+      if b.conclusion = Jump then
+        b.stmts |> List.rev |> List.tl |> List.rev
+      else
+        b.stmts
     | Seq (v1, v2) ->
       let stmts1 = convert v1 in
       let stmts2 = convert v2 in
@@ -42,6 +46,7 @@ module Make(V : VarType) = struct
 
   and convert_cond = function
     | BB (b, _) ->
+      assert (b.conclusion = Branch);
       let stmts_rev = List.rev b.stmts in
       begin match List.hd stmts_rev with
       | S_jump (Some cond, e) -> List.rev (List.tl stmts_rev), cond
