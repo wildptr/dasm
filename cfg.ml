@@ -67,3 +67,18 @@ let rec start_of_ctlstruct = function
   | While_true v -> start_of_ctlstruct v
   | Fork1 _ -> failwith "start_of_ctlstruct: Fork1 not implemented"
   | Fork2 _ -> failwith "start_of_ctlstruct: Fork2 not implemented"
+
+let rec remove_final_jump = function
+  | Virtual -> ()
+  | BB (b, _) ->
+    if b.conclusion = Jump then
+      b.stmts <- b.stmts |> List.rev |> List.tl |> List.rev
+  | Seq (_, v2) -> remove_final_jump v2
+  | Generic _ -> () (* TODO *)
+  | If (_, _, v2, has_exit) ->
+    if has_exit then remove_final_jump v2
+  | If_else (_, _, v2, v3) ->
+    remove_final_jump v2;
+    remove_final_jump v3;
+  | Do_while _ -> ()
+  | _ -> ()

@@ -54,13 +54,7 @@ module Make(V : VarType) = struct
   let rec convert = function
     | Virtual -> []
     | BB (b, _) ->
-      let stmts =
-        if b.conclusion = Jump then
-          b.stmts |> List.rev |> List.tl |> List.rev
-        else
-          b.stmts
-      in
-      convert_bb b stmts
+      convert_bb b b.stmts
     | Seq (v1, v2) ->
       let stmts1 = convert v1 in
       let stmts2 = convert v2 in
@@ -86,12 +80,24 @@ module Make(V : VarType) = struct
       edges |> List.iter begin fun (src, dst, _) ->
         if src+1 <> dst && node.(dst) <> Virtual then need_label.(dst) <- true
       end;
+      let succ = Array.make n [] in
+      edges |> List.iter begin fun (src, dst, _) ->
+        succ.(src) <- dst :: succ.(src)
+      end;
       node |> Array.to_list |> List.map convert |>
       List.mapi begin fun i stmts ->
-        if need_label.(i) then
-          P_label (start_of_ctlstruct node.(i)) :: stmts
-        else
-          stmts
+        let buf = Buffer.create 16 in
+        let f = Format.formatter_of_buffer buf in
+        fprintf f "%d ->" i;
+        succ.(i) |> List.rev |> List.iter (fprintf f " %d");
+        Format.pp_print_flush f ();
+        let cmt = Buffer.contents buf in
+        P_comment cmt :: begin
+          if need_label.(i) then
+            P_label (start_of_ctlstruct node.(i)) :: stmts
+          else
+            stmts
+        end
       end |> List.concat
     | _ -> failwith "not implemented"
 

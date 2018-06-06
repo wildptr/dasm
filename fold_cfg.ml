@@ -172,6 +172,7 @@ let fold_cfg ~debug cfg =
     match succ_attr.(i) with
     | [Edge_true; Edge_false]
     | [Edge_false; Edge_true] -> true
+    | [_;_] -> Printf.printf "is_fork: unusual case\n"; false
     | _ -> false
   in
 
@@ -207,6 +208,7 @@ let fold_cfg ~debug cfg =
   let try_fold_seq entry body =
     try
       if succ.(entry) <> [body] || pred.(body) <> [entry] then raise Break;
+      remove_final_jump node.(entry);
       let new_node = Seq (node.(entry), node.(body)) in
       let exits_list = succ.(body) in
       if debug then begin
@@ -450,5 +452,28 @@ let fold_cfg ~debug cfg =
   in
 
   fold_cfg_rec 0;
+
+(*
+  let c = ref false in
+  let rec loop () =
+    for i=0 to n-1 do
+      match succ.(i) with
+      | [] -> ()
+      | [j] -> 
+        c := try_fold_seq i j || !c;
+      | [j1;j2] ->
+        c := try_fold_if i j1 || !c;
+        c := try_fold_if i j2 || !c;
+        c := try_fold_if_else i j1 j2 || !c
+      | _ -> failwith "fold_cfg: more than 2 successors"
+    done;
+    if !c then begin
+      c := false;
+      loop ()
+    end
+  in
+  loop ();
+*)
+
   fold_generic 0;
   node.(0)
