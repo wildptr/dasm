@@ -2,11 +2,48 @@ open Batteries
 open Cfg
 open Control_flow
 open Semant
+open Format
 
 module Make(V : VarType) = struct
 
   module S = Make(V)
   open S
+
+  type lvalue =
+    | L_var of var
+    | L_mem of expr * expr * int
+
+  type pstmt =
+    | P_set of lvalue * expr
+    | P_goto of expr
+    | P_if of expr * pstmt list
+    | P_if_else of expr * pstmt list * pstmt list
+    | P_do_while of pstmt list * expr
+    | P_label of nativeint
+    | P_comment of string
+
+  let rec convert_stmt = function
+    | S_set (var, e) ->
+      P_set (L_var var, e)
+    | S_store (size, seg, off, data) ->
+      let lv = L_mem (seg, off, size) in
+      P_set (lv, data)
+    | S_jump (cond_opt, dst) ->
+      begin match cond_opt with
+        | Some cond ->
+          P_if (cond, [P_goto dst])
+        | None ->
+          P_goto dst
+      end
+    | S_if (cond, body) ->
+      P_if (cond, convert_stmt_list body)
+    | S_if_else (cond, body1, body2) ->
+      P_if_else (cond, convert_stmt_list body1, convert_stmt_list body2)
+    | S_do_while (body, cond) ->
+      P_do_while (convert_stmt_list body, cond)
+    | _ -> invalid_arg "convert_stmt"
+
+  and convert_stmt_list stmts = stmts |> List.map convert_stmt
 
   let make_cond (condp, _ as cond) t =
     if t then cond else
@@ -17,10 +54,13 @@ module Make(V : VarType) = struct
   let rec convert = function
     | Virtual -> []
     | BB (b, _) ->
-      if b.conclusion = Jump then
-        b.stmts |> List.rev |> List.tl |> List.rev
-      else
-        b.stmts
+      let stmts =
+        if b.conclusion = Jump then
+          b.stmts |> List.rev |> List.tl |> List.rev
+        else
+          b.stmts
+      in
+      convert_bb b stmts
     | Seq (v1, v2) ->
       let stmts1 = convert v1 in
       let stmts2 = convert v2 in
@@ -28,18 +68,18 @@ module Make(V : VarType) = struct
     | If (cond, t, body, _) ->
       let cond_stmts, cond_expr = convert_cond cond in
       let if_stmt =
-        S_if (make_cond cond_expr t, convert body)
+        P_if (make_cond cond_expr t, convert body)
       in
       cond_stmts @ [if_stmt]
     | If_else (cond, t, body_t, body_f) ->
       let cond_stmts, cond_expr = convert_cond cond in
       let if_else_stmt =
-        S_if_else (make_cond cond_expr t, convert body_t, convert body_f)
+        P_if_else (make_cond cond_expr t, convert body_t, convert body_f)
       in
       cond_stmts @ [if_else_stmt]
     | Do_while (cond, t) ->
       let cond_stmts, cond_expr = convert_cond cond in
-      [S_do_while (cond_stmts, make_cond cond_expr t)]
+      [P_do_while (cond_stmts, make_cond cond_expr t)]
     | Generic (_, node, _) ->
       node |> Array.to_list |> List.map convert |> List.concat
     | _ -> failwith "not implemented"
@@ -49,7 +89,8 @@ module Make(V : VarType) = struct
       assert (b.conclusion = Branch);
       let stmts_rev = List.rev b.stmts in
       begin match List.hd stmts_rev with
-      | S_jump (Some cond, e) -> List.rev (List.tl stmts_rev), cond
+      | S_jump (Some cond, e) ->
+        convert_bb b (stmts_rev |> List.tl |> List.rev), cond
       | _ -> assert false
       end
     | Seq (v1, v2) ->
@@ -57,6 +98,41 @@ module Make(V : VarType) = struct
       let stmts2, cond = convert_cond v2 in
       stmts1 @ stmts2, cond
     | _ -> assert false
+
+  and convert_bb bb stmts =
+    let comment = P_comment (sprintf "%nx" bb.start) in
+    comment :: (stmts |> convert_stmt_list)
+
+  let pp_lvalue f = function
+    | L_var var -> V.pp f var
+    | L_mem (seg, off, size) -> pp_expr f (E_load (size, seg, off), size*8)
+
+  let rec pp_pstmt' indent f = function
+    | P_set (lv, e) ->
+      fprintf f "%s%a = %a;\n" indent pp_lvalue lv pp_expr e
+    | P_goto e ->
+      fprintf f "%sgoto %a;\n" indent pp_expr e
+    | P_if (cond, body) ->
+      fprintf f "%sif (%a) {\n" indent pp_expr cond;
+      body |> List.iter (pp_pstmt' (indent^"\t") f);
+      fprintf f "%s}\n" indent
+    | P_if_else (cond, body_t, body_f) ->
+      fprintf f "%sif (%a) {\n" indent pp_expr cond;
+      body_t |> List.iter (pp_pstmt' (indent^"\t") f);
+      fprintf f "%s} else {\n" indent;
+      body_f |> List.iter (pp_pstmt' (indent^"\t") f);
+      fprintf f "%s}\n" indent
+    | P_do_while (body, cond) ->
+      fprintf f "%sdo {\n" indent;
+      body |> List.iter (pp_pstmt' (indent^"\t") f);
+      fprintf f "%s} while (%a)\n" indent pp_expr cond
+    | P_label va ->
+      (* no indent *)
+      fprintf f "%nx:\n" va
+    | P_comment s ->
+      fprintf f "%s/* %s */\n" indent s
+
+  let pp_pstmt f stmt = pp_pstmt' "" f stmt
 
 (*
   let remove_unused_labels stmts =

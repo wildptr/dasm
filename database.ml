@@ -6,7 +6,7 @@ type proc = {
   mutable stmt_cfg : Semant.Plain.stmt Cfg.cfg;
   mutable stmt_cs  : Semant.Plain.stmt Cfg.ctlstruct;
   mutable span : nativeint Itree.t;
-  mutable il : Semant.Plain.stmt list;
+  mutable il : Pseudocode.Plain.pstmt list;
   temp_tab : int array;
 }
 

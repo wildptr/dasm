@@ -250,31 +250,6 @@ module Make(V : VarType) = struct
 
   let subst_stmt f stmt = map_stmt (subst f) stmt
 
-  let string_of_pcode stmts =
-    let buf = Buffer.create 0 in
-    let open Format in
-    let f = formatter_of_buffer buf in
-    let rec print_stmt indent stmt =
-      match stmt with
-      | S_if (cond, body) ->
-        fprintf f "%sif (%a) {@." indent pp_expr cond;
-        body |> List.iter (print_stmt (indent^"\t"));
-        fprintf f "%s}@." indent
-      | S_if_else (cond, body_t, body_f) ->
-        fprintf f "%sif (%a) {@." indent pp_expr cond;
-        body_t |> List.iter (print_stmt (indent^"\t"));
-        fprintf f "%s} else {@." indent;
-        body_f |> List.iter (print_stmt (indent^"\t"));
-        fprintf f "%s}@." indent
-      | S_do_while (body, cond) ->
-        fprintf f "%sdo {@." indent;
-        body |> List.iter (print_stmt (indent^"\t"));
-        fprintf f "%s} while (%a)@." indent pp_expr cond
-      | _ -> fprintf f "%s%a@." indent pp_stmt stmt
-    in
-    stmts |> List.iter (print_stmt "");
-    Buffer.contents buf
-
 end
 
 module Plain = Make(Var)

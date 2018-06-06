@@ -51,7 +51,7 @@ let cmd_pcode args =
   let va = List.hd args |> parse_hex in
   let proc = Database.get_proc db va in
   let stmts = proc.Database.il in
-  print_string Semant.Plain.(string_of_pcode stmts)
+  stmts |> List.iter (Pseudocode.Plain.pp_pstmt Format.std_formatter)
 
 let cmd_ssa args =
   let va = List.hd args |> parse_hex in
@@ -70,14 +70,16 @@ let cmd_ssa args =
     end
   in
   loop ();
+(*
   let cs = Fold_cfg.fold_cfg ~debug:false cfg' in
   let il = Pseudocode.SSA.(convert cs (*|> remove_unused_labels*)) in
-  print_string Semant.SSA.(string_of_pcode il);
+  il |> List.iter (Pseudocode.SSA.pp_pstmt Format.std_formatter);
+*)
   print_endline (String.make 80 '=');
   let final_cfg = Dataflow.convert_from_ssa cfg' in
   let final_cs = Fold_cfg.fold_cfg ~debug:false final_cfg in
   let final_il = Pseudocode.Plain.(convert final_cs (*|> remove_unused_labels*)) in
-  print_string Semant.Plain.(string_of_pcode final_il)
+  final_il |> List.iter (Pseudocode.Plain.pp_pstmt Format.std_formatter)
 
 let cmd_inst args =
   let va = List.hd args |> parse_hex in
