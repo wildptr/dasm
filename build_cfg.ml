@@ -156,7 +156,7 @@ let build_cfg db init_pc =
   Dataflow.remove_dead_code_plain stmt_cfg;
 (*   print_cfg Semant.Plain.pp_stmt stmt_cfg; *)
   let stmt_cs = Fold_cfg.fold_cfg ~debug:false stmt_cfg in
-  let il = Pseudocode.Plain.(convert stmt_cs |> remove_unused_labels) in
+  let il = Pseudocode.Plain.(convert stmt_cs (*|> remove_unused_labels*)) in
   let temp_tab = Array.make n_temp 0 in
   for i=0 to n_temp-1 do
     temp_tab.(i) <- Env.width_of_temp i env

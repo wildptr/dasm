@@ -106,7 +106,6 @@ module Make(V : VarType) = struct
     | S_store of int * expr * expr * expr
     | S_jump of expr option * expr
     | S_phi of var * expr array
-    | S_label of nativeint (* program counter *)
     (* the following do not occur after elaboration *)
     | S_call of proc * expr list * var option
     | S_return of expr
@@ -183,7 +182,6 @@ module Make(V : VarType) = struct
       fprintf f "goto %a" pp_expr e
     | S_phi (lhs, rhs) ->
       fprintf f "%a = phi(%a)" V.pp lhs (pp_sep_list ", " pp_expr) (Array.to_list rhs)
-    | S_label pc -> fprintf f "%nd:" pc
     | S_call (proc, args, result_opt) ->
       begin match result_opt with
         | None -> ()
@@ -248,7 +246,6 @@ module Make(V : VarType) = struct
       let dest' = f dest in
       S_jump (cond_opt', dest')
     | S_phi (lhs, rhs) -> S_phi (lhs, Array.map f rhs)
-    | S_label _ as s -> s
     | _ -> failwith "map_stmt: not implemented"
 
   let subst_stmt f stmt = map_stmt (subst f) stmt

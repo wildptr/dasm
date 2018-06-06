@@ -53,6 +53,7 @@ module Make(V : VarType) = struct
       stmts1 @ stmts2, cond
     | _ -> assert false
 
+(*
   let remove_unused_labels stmts =
     let module S = Set.Nativeint in
     let used_labels =
@@ -84,6 +85,7 @@ module Make(V : VarType) = struct
       | s -> Some s
     in
     stmts |> List.filter_map sweep
+*)
 
 end
 

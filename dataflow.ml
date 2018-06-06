@@ -44,7 +44,6 @@ module DefUse(V : VarType) = struct
         | None -> use_of_expr e
       end (* TODO: use set is incomplete *)
     | S_phi (_, rhs) -> Array.to_list rhs |> uses_expr_list
-    | S_label _ -> S.empty
     | _ -> assert false
 
   let remove_dead_code_bb bb live_out =
@@ -367,10 +366,7 @@ let convert_to_ssa temp_tab cfg =
           let lhs = Var.of_int v in
           let phi = Plain.(S_phi (lhs, Array.make n_pred plain_dummy)) in
           (* actually insert phi function *)
-          begin match cfg.node.(y).stmts with
-            | label :: rest -> cfg.node.(y).stmts <- label :: phi :: rest;
-            | _ -> failwith "empty basic block"
-          end;
+          cfg.node.(y).stmts <- phi :: cfg.node.(y).stmts;
           phi_inserted_at.(y) <- true;
           if not (S.mem y defsites.(v)) then Queue.push y q
         end
@@ -431,7 +427,6 @@ let convert_to_ssa temp_tab cfg =
           let lhs' = f lhs in
           let n = Array.length rhs in
           SSA.S_phi (lhs', Array.make n ssa_dummy)
-        | Plain.S_label pc -> SSA.S_label pc
         | _ -> assert false
       in
       stmts' := stmt' :: !stmts'
@@ -459,7 +454,6 @@ let convert_to_ssa temp_tab cfg =
         | S_phi (lhs, rhs) ->
           let lhs' = rename_lhs lhs in
           S_phi (lhs', rhs)
-        | S_label pc -> SSA.S_label pc
         | _ -> assert false
       end
     end;
@@ -505,8 +499,6 @@ let convert_stmt_to_ssa f s =
     let cond_opt' = Option.map rename cond_opt in
     let dest' = rename dest in
     Plain.S_jump (cond_opt', dest')
-  | SSA.S_label pc ->
-    Plain.S_label pc
   | _ -> failwith "???"
 
 let convert_from_ssa cfg =

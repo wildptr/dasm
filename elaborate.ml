@@ -247,7 +247,6 @@ let elaborate_inst env pc inst =
     let fnname = Printf.sprintf "%s%d" fnname_base size in
     lookup_predef fnname
   in
-  emit env (S_label pc);
   let inst_stmts = ref [] in
   let emit' s =
     inst_stmts := s :: !inst_stmts

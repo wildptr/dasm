@@ -71,12 +71,12 @@ let cmd_ssa args =
   in
   loop ();
   let cs = Fold_cfg.fold_cfg ~debug:false cfg' in
-  let il = Pseudocode.SSA.(convert cs |> remove_unused_labels) in
+  let il = Pseudocode.SSA.(convert cs (*|> remove_unused_labels*)) in
   print_string Semant.SSA.(string_of_pcode il);
   print_endline (String.make 80 '=');
   let final_cfg = Dataflow.convert_from_ssa cfg' in
   let final_cs = Fold_cfg.fold_cfg ~debug:false final_cfg in
-  let final_il = Pseudocode.Plain.(convert final_cs |> remove_unused_labels) in
+  let final_il = Pseudocode.Plain.(convert final_cs (*|> remove_unused_labels*)) in
   print_string Semant.Plain.(string_of_pcode final_il)
 
 let cmd_inst args =

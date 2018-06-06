@@ -7,23 +7,20 @@ let rec scan db va =
     let proc = Build_cfg.build_cfg db va in
     Database.set_proc db va proc;
     let is_leaf = ref true in
-    let pc = ref 0n in
-    proc.Database.il |> List.iter begin function
-      | S_label va -> pc := va
-      | S_jump (cond_opt, dst) ->
-        begin match Database.get_jump_info db !pc with
-          | Database.J_call ->
-            is_leaf := false;
-            begin match fst dst with
-              | E_lit bv ->
-                let dst_va = Bitvec.to_nativeint bv in
-                scan db dst_va
-              | _ -> ()
-            end
-          | _ -> ()
-        end;
-      | _ -> ()
-    end;
+    let cfg = proc.Database.inst_cfg in
+    let n = Array.length cfg.node in
+    for i=0 to n-1 do
+      cfg.node.(i).stmts |> List.iter begin fun inst ->
+        match inst.Inst.operation with
+        | I_CALL ->
+          is_leaf := false;
+          begin match List.hd inst.Inst.operands with
+            | O_imm (dst, _) -> scan db dst
+            | _ -> ()
+          end
+        | _ -> ()
+      end
+    done;
     if !is_leaf then begin
       Printf.printf "leaf function: %nx\n" va
     end
