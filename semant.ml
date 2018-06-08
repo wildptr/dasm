@@ -36,27 +36,27 @@ end
 module Var = struct
 
   type t =
-    | Global of string
+    | Global of Inst.reg
     | Temp of int
     | Local of string
     | PC
     | Nondet of int
 
   let pp f = function
-    | Global s -> pp_print_string f s
+    | Global r -> pp_print_string f (Inst.string_of_reg r)
     | Temp i -> fprintf f "$%d" i
     | Local s -> pp_print_string f s
     | PC -> pp_print_string f "PC"
     | Nondet w -> fprintf f "?%d" w
 
   let to_int = function
-    | Global name -> Inst.lookup_reg name |> Obj.magic
+    | Global r -> Obj.magic r
     | Temp i -> Inst.number_of_registers + i
     | _ -> failwith "Var.to_int: invalid variable"
 
   let of_int uid =
     if uid < Inst.number_of_registers then
-      Global (Inst.string_of_reg (Obj.magic uid))
+      Global (Obj.magic uid)
     else
       Temp (uid - Inst.number_of_registers)
 
@@ -85,7 +85,6 @@ module Make(V : VarType) = struct
   type expr_proper =
     | E_lit of Bitvec.t
     | E_var of var
-    | E_part of expr * int * int
     | E_prim1 of prim1 * expr
     | E_prim2 of prim2 * expr * expr
     | E_prim3 of prim3 * expr * expr * expr
@@ -126,7 +125,6 @@ module Make(V : VarType) = struct
     match expr with
     | E_lit bv -> fprintf f "%nd" (Bitvec.to_nativeint bv) (* width is lost *)
     | E_var var -> V.pp f var
-    | E_part (e, lo, hi) -> fprintf f "%a[%d:%d]" pp_expr e lo hi
     | E_prim1 (p, e) ->
       let op_s =
         match p with
@@ -223,7 +221,6 @@ module Make(V : VarType) = struct
       match expr with
       | E_lit _ as e -> e
       | E_var v -> f v
-      | E_part (e, lo, hi) -> E_part (subst f e, lo, hi)
       | E_prim1 (p, e) -> E_prim1 (p, subst f e)
       | E_prim2 (p, e1, e2) ->
         E_prim2 (p, subst f e1, subst f e2)

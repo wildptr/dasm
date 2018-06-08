@@ -36,14 +36,6 @@ let rec pp_cexpr f = function
 
 (* ---- *)
 
-type index =
-  | Index_bit of cexpr
-  | Index_part of cexpr * cexpr
-
-let pp_index f = function
-  | Index_bit i -> fprintf f "[%a]" pp_cexpr i
-  | Index_part (hi, lo) -> fprintf f "[%a:%a]" pp_cexpr hi pp_cexpr lo
-
 type unary_op =
   | Not
   | Neg
@@ -79,7 +71,6 @@ type astexpr =
   | Expr_sym of string
   | Expr_literal of Bitvec.t
   | Expr_literal2 of cexpr * cexpr (* value, width *)
-  | Expr_index of astexpr * index
   | Expr_unary of unary_op * astexpr
   | Expr_binary of binary_op * astexpr * astexpr
   | Expr_apply of string * astexpr list
@@ -113,7 +104,6 @@ let rec pp_astexpr f = function
   | Expr_sym s -> pp_print_string f s
   | Expr_literal bv -> fprintf f "'%a'" Bitvec.pp bv
   | Expr_literal2 (v, w) -> fprintf f "{%a:%a}" pp_cexpr v pp_cexpr w
-  | Expr_index (e, i) -> fprintf f "%a%a" pp_astexpr e pp_index i
   | Expr_unary (op, e) ->
     fprintf f "(%s%a)" (string_of_unary_op op) pp_astexpr e
   | Expr_binary (op, e1, e2) ->

@@ -3,7 +3,7 @@ template proc add<N>(a:N, b:N):N
 	CF = carry(a, b, '0');
 	ZF = a+b == #0:N;
 	SF = less(a+b, #0:N);
-	OF = CF ^ SF ^ a[N-1] ^ b[N-1];
+	OF = CF ^ SF ^ less(a, #0:N) ^ less(b, #0:N);
 	return a+b;
 }
 
@@ -14,7 +14,7 @@ template proc adc<N>(a:N, b:N):N
 	CF = carry(a, b, CF);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
-	OF = CF ^ SF ^ a[N-1] ^ b[N-1];
+	OF = CF ^ SF ^ less(a, #0:N) ^ less(b, #0:N);
 	return out;
 }
 
@@ -34,7 +34,7 @@ template proc sbb<N>(a:N, b:N)
 	CF = ~carry(a, ~b, ~CF);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
-	OF = CF ^ SF ^ a[N-1] ^ b[N-1];
+	OF = ~CF ^ SF ^ less(a, #0:N) ^ less(b, #0:N);
 }
 
 template proc log_op<N, OP>(a:N, b:N):N

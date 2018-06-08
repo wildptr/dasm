@@ -65,47 +65,48 @@ let width_of_binary_op (op, w1, w2) =
   | Eq ->
     check_width w1 w2; 1
 
-(* 32 just for now *)
 let init_symtab = [
-  "EAX", 32;
-  "ECX", 32;
-  "EDX", 32;
-  "EBX", 32;
-  "ESP", 32;
-  "EBP", 32;
-  "ESI", 32;
-  "EDI", 32;
-  "AX", 16;
-  "CX", 16;
-  "DX", 16;
-  "BX", 16;
-  "SP", 16;
-  "BP", 16;
-  "SI", 16;
-  "DI", 16;
-  "AL",  8;
-  "CL",  8;
-  "DL",  8;
-  "BL",  8;
-  "AH",  8;
-  "CH",  8;
-  "DH",  8;
-  "BH",  8;
-  "ES", 16;
-  "CS", 16;
-  "SS", 16;
-  "DS", 16;
-  "FS", 16;
-  "GS", 16;
-  "CF",  1;
-  "PF",  1;
-  "AF",  1;
-  "ZF",  1;
-  "SF",  1;
-  "DF",  1;
-  "OF",  1;
-] |> List.fold_left (fun map (name, w) ->
-    Map.String.add name (Var (Var.Global name, w)) map) Map.String.empty
+  Inst.R_EAX;
+  Inst.R_ECX;
+  Inst.R_EDX;
+  Inst.R_EBX;
+  Inst.R_ESP;
+  Inst.R_EBP;
+  Inst.R_ESI;
+  Inst.R_EDI;
+  Inst.R_AX;
+  Inst.R_CX;
+  Inst.R_DX;
+  Inst.R_BX;
+  Inst.R_SP;
+  Inst.R_BP;
+  Inst.R_SI;
+  Inst.R_DI;
+  Inst.R_AL;
+  Inst.R_CL;
+  Inst.R_DL;
+  Inst.R_BL;
+  Inst.R_AH;
+  Inst.R_CH;
+  Inst.R_DH;
+  Inst.R_BH;
+  Inst.R_ES;
+  Inst.R_CS;
+  Inst.R_SS;
+  Inst.R_DS;
+  Inst.R_FS;
+  Inst.R_GS;
+  Inst.R_CF;
+  Inst.R_PF;
+  Inst.R_AF;
+  Inst.R_ZF;
+  Inst.R_SF;
+  Inst.R_DF;
+  Inst.R_OF;
+] |> List.fold_left begin fun map reg ->
+    Map.String.add (Inst.string_of_reg reg)
+      (Var (Var.Global reg, Inst.size_of_reg reg)) map
+  end Map.String.empty
 
 let extend_symtab (name, value) st =
   if Map.String.mem name st
@@ -163,20 +164,6 @@ let rec translate_expr env expr =
     let v = translate_cexpr st c_v in
     let w = translate_cexpr st c_w in
     E_lit (Bitvec.of_int w v), w
-  | Expr_index (e, i) ->
-    let e', w = translate_expr env e in
-    begin match i with
-      | Index_bit c_b ->
-        let b = translate_cexpr st c_b in
-        if b >= w then raise (Index_out_of_bounds ((e,w),b));
-        E_part ((e', w), b, b+1), 1
-      | Index_part (c_hi', c_lo) ->
-        let hi' = translate_cexpr st c_hi' in
-        let lo = translate_cexpr st c_lo in
-        let hi = hi'+1 in
-        if hi > w then raise (Index_out_of_bounds ((e,w),hi'));
-        E_part ((e', w), lo, hi), hi-lo
-    end
   | Expr_apply (func_name, args) ->
     let handle_builtin func_name =
       let f1 prim =

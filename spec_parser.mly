@@ -106,17 +106,6 @@ memloc:
     size = primary_cexpr
     { seg, off, size }
 
-index:
-  | LBrack; i = cexpr; RBrack
-    { Index_bit i }
-  | LBrack; hi = cexpr; Colon; lo = cexpr; RBrack
-    { Index_part (hi, lo) }
-
-postfix_expr:
-  | primary_expr {$1}
-  | e = postfix_expr; i = index
-    { Expr_index (e, i) }
-
 unary_op:
   | Tilde { Not }
   | Amp { Reduce_and }
@@ -125,7 +114,7 @@ unary_op:
   | Minus { Neg }
 
 prefix_expr:
-  | postfix_expr {$1}
+  | primary_expr {$1}
   | op = unary_op; e = prefix_expr
     { Expr_unary (op, e) }
 

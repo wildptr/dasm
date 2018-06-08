@@ -4,13 +4,15 @@ open Inst
 open Semant
 open Plain
 
-let eCF = E_var (Var.Global "CF"), 1
-let ePF = E_var (Var.Global "PF"), 1
-let eAF = E_var (Var.Global "AF"), 1
-let eZF = E_var (Var.Global "ZF"), 1
-let eSF = E_var (Var.Global "SF"), 1
-let eDF = E_var (Var.Global "DF"), 1
-let eOF = E_var (Var.Global "OF"), 1
+let elaborate_reg r = E_var (Var.Global r), size_of_reg r
+
+let eCF = elaborate_reg R_CF
+let ePF = elaborate_reg R_PF
+let eAF = elaborate_reg R_AF
+let eZF = elaborate_reg R_ZF
+let eSF = elaborate_reg R_SF
+let eDF = elaborate_reg R_DF
+let eOF = elaborate_reg R_OF
 
 let predef_table : (string, proc) Hashtbl.t = Hashtbl.create 0
 
@@ -33,26 +35,6 @@ let cond_expr1 = function
 let cond_expr code =
   let e = cond_expr1 (code lsr 1) in
   if (code land 1) = 0 then e else not_expr e
-
-let elaborate_reg r =
-  match r with
-  | R_AL -> E_part ((E_var (Var.Global "EAX"), 32), 0, 8), 8
-  | R_CL -> E_part ((E_var (Var.Global "ECX"), 32), 0, 8), 8
-  | R_DL -> E_part ((E_var (Var.Global "EDX"), 32), 0, 8), 8
-  | R_BL -> E_part ((E_var (Var.Global "EBX"), 32), 0, 8), 8
-  | R_AH -> E_part ((E_var (Var.Global "EAX"), 32), 8, 16), 8
-  | R_CH -> E_part ((E_var (Var.Global "ECX"), 32), 8, 16), 8
-  | R_DH -> E_part ((E_var (Var.Global "EDX"), 32), 8, 16), 8
-  | R_BH -> E_part ((E_var (Var.Global "EBX"), 32), 8, 16), 8
-  | R_AX -> E_part ((E_var (Var.Global "EAX"), 32), 0, 16), 16
-  | R_CX -> E_part ((E_var (Var.Global "ECX"), 32), 0, 16), 16
-  | R_DX -> E_part ((E_var (Var.Global "EDX"), 32), 0, 16), 16
-  | R_BX -> E_part ((E_var (Var.Global "EBX"), 32), 0, 16), 16
-  | R_SP -> E_part ((E_var (Var.Global "ESP"), 32), 0, 16), 16
-  | R_BP -> E_part ((E_var (Var.Global "EBP"), 32), 0, 16), 16
-  | R_SI -> E_part ((E_var (Var.Global "ESI"), 32), 0, 16), 16
-  | R_DI -> E_part ((E_var (Var.Global "EDI"), 32), 0, 16), 16
-  | _ -> E_var (Var.Global (string_of_reg r)), size_of_reg r
 
 (* TODO: don't hard code address size *)
 
@@ -110,7 +92,7 @@ let elaborate_operand pc' = function
 
 let elaborate_writeback emit o_dst e_data =
   match o_dst with
-  | O_reg r -> emit (S_set (Var.Global (string_of_reg r), e_data))
+  | O_reg r -> emit (S_set (Var.Global r, e_data))
   | O_mem (m, size) ->
     assert (size > 0);
     let seg, off = elaborate_mem_addr m in
@@ -377,8 +359,7 @@ let load_spec filepath =
     try Translate.translate_ast spec_ast with
     | Translate.Index_out_of_bounds ((e,w),b) ->
       let open Format in
-      fprintf err_formatter
-        "width of expression %a is %d, %d is out of bounds@."
+      eprintf "width of expression %a is %d, %d is out of bounds@."
         Spec_ast.pp_astexpr e w b;
       exit 1
   in

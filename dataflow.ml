@@ -19,7 +19,6 @@ module DefUse(V : VarType) = struct
     match ep with
     | E_lit _ -> S.empty
     | E_var var -> S.singleton (V.to_int var)
-    | E_part (e, _, _) -> use_of_expr e
     | E_prim1 (_, e) -> use_of_expr e
     | E_prim2 (_, e1, e2) -> S.union (use_of_expr e1) (use_of_expr e2)
     | E_prim3 (_, e1, e2, e3) ->
@@ -207,7 +206,7 @@ let auto_subst cfg =
           use_count.(v) = 1 ||
           begin match fst rhs with
             | E_var _ | E_lit _ -> true
-            | _ -> lhs.SSAVar.orig = Var.Global "ESP"
+            | _ -> lhs.SSAVar.orig = Var.Global R_ESP
           end
         in
         if ok then begin
@@ -273,8 +272,6 @@ let rec rename_to_ssa f (expr, w) =
       SSA.E_lit bv
     | Plain.E_var name ->
       SSA.E_var (f name)
-    | Plain.E_part (e, lo, hi) ->
-      SSA.E_part (rename_to_ssa f e, lo, hi)
     | Plain.E_prim1 (p, e) ->
       SSA.E_prim1 (p, rename_to_ssa f e)
     | Plain.E_prim2 (p, e1, e2) ->
@@ -299,8 +296,6 @@ let rec rename_from_ssa f (expr, w) =
       Plain.E_lit bv
     | SSA.E_var name ->
       Plain.E_var (f name)
-    | SSA.E_part (e, lo, hi) ->
-      Plain.E_part (rename_from_ssa f e, lo, hi)
     | SSA.E_prim1 (p, e) ->
       Plain.E_prim1 (p, rename_from_ssa f e)
     | SSA.E_prim2 (p, e1, e2) ->
@@ -466,7 +461,7 @@ let convert_to_ssa temp_tab cfg =
           let open SSAVar in
           let w =
             match lhs.orig with
-            | Var.Global name -> Inst.(size_of_reg (lookup_reg name))
+            | Var.Global reg -> Inst.(size_of_reg reg)
             | Var.Temp i -> temp_tab.(i)
             | _ -> failwith "???"
           in

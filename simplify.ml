@@ -10,13 +10,6 @@ module Make(V : VarType) = struct
   let rec simplify = function
     | E_lit _ as e -> e
     | E_var _ as e -> e
-    | E_part (e, lo, hi) ->
-      let (ep', _ as e') = simplify' e in
-      begin match ep' with
-        | E_lit b -> E_lit (Bitvec.part (lo, hi) b)
-        | E_part (e1, lo1, hi1) -> E_part (e1, lo1+lo, lo1+hi)
-        | _ -> E_part (e', lo, hi)
-      end
     | E_prim1 (p, e) ->
       let (ep', _ as e') = simplify' e in
       begin match ep' with
