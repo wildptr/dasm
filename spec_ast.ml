@@ -83,14 +83,10 @@ and memloc = astexpr * astexpr * cexpr (* seg, offset, size *)
 
 type lhs =
   | Lhs_var of string
-  (*| Loc_part of string * cexpr * cexpr*)
   | Lhs_mem of memloc
 
 type aststmt =
-  (* Variables created by let statements are immutable. *)
   | Stmt_set of lhs * astexpr
-  | Stmt_return of astexpr
-  (*| Stmt_load of cexpr * astexpr * string*)
   | Stmt_jump of astexpr
   | Stmt_call of string * astexpr list
 
@@ -120,8 +116,6 @@ and pp_memloc f (seg, off, size) =
 
 let pp_lhs f = function
   | Lhs_var name -> pp_print_string f name
-  (*| Loc_part (name, hi, lo) ->
-    fprintf f "%s[%a:%a]" name pp_cexpr hi pp_cexpr lo*)
   | Lhs_mem memloc -> pp_memloc f memloc
 
 let pp_aststmt f = function
@@ -130,10 +124,6 @@ let pp_aststmt f = function
   | Stmt_call (proc_name, args) ->
     fprintf f "%s(%a);"
       proc_name (pp_comma_separated_list pp_astexpr) args;
-  | Stmt_return e ->
-    fprintf f "return %a;" pp_astexpr e
-  (*| Stmt_load (size, addr, name) ->
-    fprintf f "%s = load %a, %a;" name pp_cexpr size pp_astexpr addr*)
   | Stmt_jump addr ->
     fprintf f "jump %a;" pp_astexpr addr
 
@@ -148,17 +138,16 @@ type astproc = {
   ap_name : string;
   ap_params : param_list;
   ap_body : astblock;
-  ap_result_width : cexpr;
+  ap_results : (string * cexpr) list;
 }
 
 let pp_astblock f (decls, stmts) =
   () (* TODO *)
 
 let pp_astproc f astproc =
-  fprintf f "proc %s(%a):%a {%a}"
+  fprintf f "proc %s(%a) -> ... {%a}" (* TODO: see the ellipsis *)
     astproc.ap_name
     (pp_comma_separated_list pp_param) astproc.ap_params
-    pp_cexpr astproc.ap_result_width
     pp_astblock astproc.ap_body
 
 type templ_arg =
@@ -172,15 +161,14 @@ type proc_templ = {
   pt_templ_params : string list;
   pt_proc_params : param_list;
   pt_body : astblock;
-  pt_result_width : cexpr;
+  pt_results : (string * cexpr) list;
 }
 
 let pp_proc_templ f pt =
-  fprintf f "template proc %s<%a>(%a):%a {%a}"
+  fprintf f "template proc %s<%a>(%a) -> ... {%a}" (* TODO *)
     pt.pt_name
     (pp_comma_separated_list pp_print_string) pt.pt_templ_params
     (pp_comma_separated_list pp_param) pt.pt_proc_params
-    pp_cexpr pt.pt_result_width
     pp_astblock pt.pt_body
 
 type proc_inst = {

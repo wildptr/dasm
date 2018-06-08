@@ -52,7 +52,9 @@ module Var = struct
   let to_int = function
     | Global r -> Obj.magic r
     | Temp i -> Inst.number_of_registers + i
-    | _ -> failwith "Var.to_int: invalid variable"
+    | Local name -> failwith ("Var.to_int: Local " ^ name)
+    | PC -> failwith "Var.to_int: PC"
+    | Nondet _ -> failwith "Var.to_int: Nondet"
 
   let of_int uid =
     if uid < Inst.number_of_registers then
@@ -106,8 +108,7 @@ module Make(V : VarType) = struct
     | S_jump of expr option * expr
     | S_phi of var * expr array
     (* the following do not occur after elaboration *)
-    | S_call of proc * expr list * var option
-    | S_return of expr
+    | S_call of proc * expr list * var list
     | S_if of expr * stmt list
     | S_if_else of expr * stmt list * stmt list
     | S_do_while of stmt list * expr
@@ -117,7 +118,7 @@ module Make(V : VarType) = struct
     p_name : string;
     p_body : stmt list;
     p_param_names : string list;
-    p_result_width : int;
+    p_results : (string * int) list;
     p_var_tab : (string, int) Hashtbl.t;
   }
 
@@ -161,7 +162,7 @@ module Make(V : VarType) = struct
       in
       fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") pp_expr) es
     | E_load (size, seg, addr) ->
-      fprintf f "%a:[%a]@%d" pp_expr seg pp_expr addr size
+      fprintf f "[%a]" pp_expr addr
     | E_nondet (n, id) -> fprintf f "nondet(%d)#%d" n id
     | E_extend (sign, e, n) ->
       let op_s = if sign then "sign_extend" else "zero_extend" in
@@ -180,10 +181,13 @@ module Make(V : VarType) = struct
       fprintf f "goto %a" pp_expr e
     | S_phi (lhs, rhs) ->
       fprintf f "%a = phi(%a)" V.pp lhs (pp_sep_list ", " pp_expr) (Array.to_list rhs)
-    | S_call (proc, args, result_opt) ->
-      begin match result_opt with
-        | None -> ()
-        | Some var -> fprintf f "%a = " V.pp var
+    | S_call (proc, args, results) ->
+      begin match results with
+        | [] -> ()
+        | hd::tl ->
+          V.pp f hd;
+          tl |> List.iter (fprintf f ", %a" V.pp);
+          pp_print_string f " = "
       end;
       fprintf f "%s(" proc.p_name;
       let n = List.length args in
@@ -191,8 +195,6 @@ module Make(V : VarType) = struct
           pp_expr f arg;
           if i < n-1 then fprintf f ", ");
       fprintf f ")";
-    | S_return e ->
-      fprintf f "return %a" pp_expr e
     | S_if (e, _) -> fprintf f "if (%a) ..." pp_expr e
     | S_if_else (e, _, _) -> fprintf f "if (%a) ... else ..." pp_expr e
     | S_do_while (_, e) -> fprintf f "do ... while (%a)" pp_expr e
@@ -205,7 +207,7 @@ module Make(V : VarType) = struct
     proc.p_param_names |> List.iteri (fun i name ->
         fprintf f "%s" name;
         if i < n_param-1 then fprintf f ",@ ");
-    fprintf f "):%d@]@ " proc.p_result_width;
+    fprintf f ") -> ...@ "; (* TODO *)
     (* print body *)
     fprintf f "{@ ";
     fprintf f "  @[<v>";

@@ -16,7 +16,6 @@ let keyword_map : token Map.String.t =
   [
     (*"if", K_if;*)
     "jump", K_jump;
-    "return", K_return;
     "pc", K_pc;
     "proc", K_proc;
     "template", K_template;
@@ -41,6 +40,7 @@ rule read = parse
   | id
     { let s = Lexing.lexeme lexbuf in
       try Map.String.find s keyword_map with Not_found -> Ident s }
+  | "->" { Arrow }
   | "==" { EqEq }
   (*| '$' { Dollar }*)
   | '#' { Hash }

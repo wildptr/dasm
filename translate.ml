@@ -219,11 +219,15 @@ let rec translate_expr env expr =
     in
     begin match try_lookup st func_name with
       | None -> handle_builtin func_name
-      | Some (Prim func_name) -> handle_builtin func_name
+      | Some (Prim prim_name) -> handle_builtin prim_name
       | Some (Proc proc) ->
-        let w = proc.p_result_width in
+        let w =
+          match proc.p_results with
+          | [_,w] -> w
+          | _ -> failwith "number of return values is not 1"
+        in
         let temp = Var.Local (new_temp env w) in
-        translate_call env proc args (Some temp);
+        translate_call env proc args [temp];
         E_var temp, w
       | _ -> raise (Unknown_primitive func_name)
     end
@@ -255,7 +259,7 @@ let rec translate_expr env expr =
     E_extend (sign, data', size'), size'
   | Expr_pc -> E_var Var.PC, 32 (* TODO *)
 
-and translate_call env proc args result_opt =
+and translate_call env proc args results =
   let args' = List.map (translate_expr env) args in
   let arg_widths = args' |> List.map snd in
   let n_param = List.length proc.p_param_names in
@@ -267,7 +271,7 @@ and translate_call env proc args result_opt =
        let param_width = Hashtbl.find proc.p_var_tab param_name in
        check_width param_width arg_width);
   (* function that translates arguments *)
-  emit env (S_call (proc, args', result_opt))
+  emit env (S_call (proc, args', results))
 
 and translate_memloc env (seg, off, size) =
   let (_, segw as seg') = translate_expr env seg in
@@ -305,10 +309,7 @@ let translate_stmt env stmt =
       | Proc p -> p
       | _ -> failwith ("not a Proc value: "^proc_name)
     in
-    translate_call env proc args None
-  | Stmt_return e ->
-    let e' = translate_expr env e in
-    emit env (S_return e')
+    translate_call env proc args []
   | Stmt_jump addr ->
     let addr' = translate_expr env addr in
     emit env (S_jump (None, addr'))
@@ -324,16 +325,32 @@ let translate_proc st proc =
     Hashtbl.add proc_env.var_tab name width
   in
   proc.ap_params |> List.iter register_var;
+  proc.ap_results |> List.iter begin fun (name, c_width) ->
+    let width = translate_cexpr proc_env.symtab c_width in
+    proc_env.symtab <-
+      extend_symtab (name, Var (Var.Local name, width))
+        proc_env.symtab
+  end;
   let vardecls, stmts = proc.ap_body in
   vardecls |> List.iter register_var;
   let param_names = proc.ap_params |> List.map fst in
-  let result_width = translate_cexpr st proc.ap_result_width in
+  let results =
+    proc.ap_results |> List.map begin fun (name, width_cexpr) ->
+      name, translate_cexpr st width_cexpr
+    end
+  in
   stmts |> List.iter (translate_stmt proc_env);
+(*
+  Printf.printf "Local variables of %s:\n" proc.ap_name;
+  proc_env.var_tab |> Hashtbl.iter begin fun name width ->
+    Printf.printf "%s:%d\n" name width
+  end;
+*)
   (*Printf.printf "%s: %d statements\n" proc.ap_name (List.length proc_env.stmts_rev);*)
   { p_name = proc.ap_name;
     p_body = List.rev proc_env.stmts_rev;
     p_param_names = param_names;
-    p_result_width = result_width;
+    p_results = results;
     p_var_tab = proc_env.var_tab }
 
 let translate_ast ast =
@@ -367,7 +384,7 @@ let translate_ast ast =
         { ap_name = pi.pi_inst_name;
           ap_params = pt.pt_proc_params;
           ap_body = pt.pt_body;
-          ap_result_width = pt.pt_result_width }
+          ap_results = pt.pt_results }
       in
       let proc' = translate_proc inst_st proc in
       extend_symtab (proc.ap_name, Proc proc') st

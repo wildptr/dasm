@@ -124,7 +124,7 @@ let fnname_of_op = function
   | I_XOR -> "xor"
   | _ -> failwith "fnname_of_op: not implemented"
 
-let rec expand_stmt env pc retval stmt =
+let rec expand_stmt env pc stmt =
   let rename_var = function
     | Var.Local name ->
       begin
@@ -141,7 +141,7 @@ let rec expand_stmt env pc retval stmt =
     let var' =
       match rename_var var with
       | E_lit _ -> failwith "assignment to parameter (via ordinary assignment)"
-      | E_var var' -> var'
+      | E_var v -> v
       | _ -> assert false
     in
     let e' = rename e in
@@ -150,7 +150,7 @@ let rec expand_stmt env pc retval stmt =
     emit env (S_store (size, seg, rename addr, rename data))
   | S_jump (c, e) ->
     emit env (S_jump (Option.map rename c, rename e))
-  | S_call (proc, args, rv) ->
+  | S_call (proc, args, results) ->
     (* try not to create temporary variables for constants, as they confuse the
        recursive procedure scanner *)
     let arg_arr = Array.of_list args in
@@ -174,9 +174,17 @@ let rec expand_stmt env pc retval stmt =
       proc.p_param_names |> List.mapi (fun i name -> name, i) |>
       List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
     in
+    let results' =
+      results |> List.map begin fun v ->
+        match rename_var v with
+        | E_var v' -> v'
+        | _ -> assert false
+      end
+    in
     let temps = ref [] in
+    (* bind local variables *)
     proc.p_var_tab |> Hashtbl.iter begin fun name width ->
-      let arg =
+      let var =
         match Map.String.Exceptionless.find name param_index_map with
         | Some i when arg_is_const.(i) -> fst arg_arr.(i)
         | _ ->
@@ -184,7 +192,12 @@ let rec expand_stmt env pc retval stmt =
           temps := temp :: !temps;
           E_var temp
       in
-      Hashtbl.add env.rename_table name arg
+      Hashtbl.add env.rename_table name var
+    end;
+    (* bind return values *)
+    List.combine proc.p_results results' |>
+    List.iter begin fun ((name, width), var) ->
+      Hashtbl.add env.rename_table name (E_var var)
     end;
     (* pass arguments *)
     for i=0 to n_arg-1 do
@@ -198,25 +211,16 @@ let rec expand_stmt env pc retval stmt =
         in
         emit env (S_set (param_var, rename arg))
     done;
-    let rv' =
-      rv |> Option.map begin fun rv ->
-        match rename_var rv with
-        | E_var v -> v
-        | E_lit _ -> failwith "assignment to parameter (via call)"
-        | _ -> assert false
-      end
-    in
-    List.iter (expand_stmt env pc rv') proc.p_body;
+    (* expand procedure body *)
+    List.iter (expand_stmt env pc) proc.p_body;
+    (* remove bindings *)
     proc.p_var_tab |> Hashtbl.iter begin fun name _ ->
       Hashtbl.remove env.rename_table name
     end;
+    proc.p_results |> List.iter begin fun (name, _) ->
+      Hashtbl.remove env.rename_table name
+    end;
     !temps |> List.iter (release_temp env)
-  | S_return e ->
-    begin match retval with
-      | None -> ()
-      | Some name ->
-        emit env (S_set (name, rename e))
-    end
   | _ -> assert false
 
 let elaborate_inst env pc inst =
@@ -240,15 +244,21 @@ let elaborate_inst env pc inst =
     | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
       let temp = acquire_temp env size in
       let args = operands |> List.map (elaborate_operand pc') in
-      emit' (S_call (fn inst, args, Some temp));
+      emit' (S_call (fn inst, args, [temp]));
       elaborate_writeback emit' (List.hd operands) (E_var temp, size);
       release_temp env temp
     | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
+      let proc = fn inst in
+      let temps =
+        proc.p_results |> List.map (fun (_, w) -> acquire_temp env w)
+      in
       let args = operands |> List.map (elaborate_operand pc') in
-      emit' (S_call (fn inst, args, None))
+      emit' (S_call (proc, args, temps));
+      (* no writeback *)
+      temps |> List.iter (release_temp env)
     | I_POP ->
       let temp = acquire_temp env size in
-      emit' (S_call (fn inst, [], Some temp));
+      emit' (S_call (fn inst, [], [temp]));
       elaborate_writeback emit' (List.hd operands) (E_var temp, size);
       release_temp env temp
     | I_MOV ->
@@ -310,7 +320,7 @@ let elaborate_inst env pc inst =
     | _ ->
       Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst
   end;
-  List.rev !inst_stmts |> List.iter (expand_stmt env pc' None)
+  List.rev !inst_stmts |> List.iter (expand_stmt env pc')
 
 let elaborate_basic_block env bb =
   let open Cfg in

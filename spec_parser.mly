@@ -6,6 +6,7 @@ open Spec_ast
 %token <string> Ident
 %token <int> Int
 %token <Bitvec.t> Bitvec
+%token Arrow
 %token EqEq
 (*%token Dollar*)
 %token Hash
@@ -33,7 +34,6 @@ open Spec_ast
 %token Tilde
 
 %token K_jump
-%token K_return
 %token K_pc
 %token K_proc
 %token K_template
@@ -69,16 +69,15 @@ block:
   | LBrace; decls = list(localdecl); stmts = list(stmt); RBrace
     { decls, stmts }
 
+name_width_pair:
+  | name = Ident; Colon; len = cexpr { name, len }
+
 proc_def:
   | K_proc; ap_name = Ident;
-    LParen; ap_params = separated_list(Comma, name_length_pair); RParen;
-    result_width_opt = option(preceded(Colon, cexpr)); ap_body = block
-    {{ ap_name; ap_params; ap_body;
-       ap_result_width =
-         match result_width_opt with None -> C_int 0 | Some width -> width }}
-
-name_length_pair:
-  | name = Ident; Colon; len = cexpr { name, len }
+    LParen; ap_params = separated_list(Comma, name_width_pair); RParen;
+    ap_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_width_pair)));
+    ap_body = block
+    {{ ap_name; ap_params; ap_body; ap_results }}
 
 primary_expr:
   | name = Ident
@@ -148,8 +147,6 @@ stmt:
     { Stmt_set (lhs, value) }
   | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen; Semi
     { Stmt_call (proc_name, args) }
-  | K_return; value = expr; Semi
-    { Stmt_return value }
   | K_jump; addr = expr; Semi
     { Stmt_jump addr }
 
@@ -193,11 +190,10 @@ cexpr: binary_cexpr {$1}
 proc_templ:
   | K_template; K_proc; pt_name = Ident;
     LAngle; pt_templ_params = separated_list(Comma, Ident); RAngle;
-    LParen; pt_proc_params = separated_list(Comma, name_length_pair); RParen;
-    result_width_opt = option(preceded(Colon, cexpr)); pt_body = block
-    {{ pt_name; pt_templ_params; pt_proc_params; pt_body;
-       pt_result_width =
-         match result_width_opt with Some width -> width | None -> C_int 0 }}
+    LParen; pt_proc_params = separated_list(Comma, name_width_pair); RParen;
+    pt_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_width_pair)));
+    pt_body = block
+    {{ pt_name; pt_templ_params; pt_proc_params; pt_body; pt_results }}
 
 proc_inst:
   | K_proc; pi_inst_name = Ident; Eq; pi_templ_name = Ident;

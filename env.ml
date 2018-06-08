@@ -14,6 +14,7 @@ type env = {
 }
 
 let emit env stmt =
+(*   Format.printf "  %a\n" Plain.pp_stmt stmt; *)
   env.stmts_rev <- stmt :: env.stmts_rev
 
 let init_temp_tab_size = 16
