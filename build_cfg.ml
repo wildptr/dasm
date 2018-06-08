@@ -25,7 +25,7 @@ let build_cfg db init_pc =
       | Itree.Start -> ()
       | Itree.Middle ->
         span := Itree.split pc !span;
-        Hashtbl.add conc_table pc NoJump;
+        Hashtbl.add conc_table pc false;
         edges := (pc, pc, Edge_neutral) :: !edges
       | Itree.Nowhere ->
         s.pos <- translate_va db pc;
@@ -42,11 +42,12 @@ let build_cfg db init_pc =
               | O_offset _ -> failwith "offset operand???"
               | O_imm (imm, _) ->
                 Hashtbl.add db.jump_info pc J_resolved;
-                pc', [imm, Edge_neutral], Jump
+                pc', [imm, Edge_neutral], true
               | _ ->
+                Printf.printf "unresolved jump at %nx\n" pc;
                 Hashtbl.add db.jump_info pc J_unknown;
                 exits := S.add pc' !exits;
-                pc', [], NoJump
+                pc', [], false
             end
           | I_JMPF -> failwith "cannot handle far jump"
           | I_CALLF -> failwith "cannot handle far call"
@@ -55,20 +56,21 @@ let build_cfg db init_pc =
               | O_offset _ -> failwith "offset operand???"
               | O_imm (imm, _) ->
                 Hashtbl.add db.jump_info pc J_resolved;
-                pc', [pc', Edge_false; imm, Edge_true], Branch
+                pc', [pc', Edge_false; imm, Edge_true], false
               | _ ->
+                Printf.printf "unresolved conditional jump at %nx\n" pc;
                 Hashtbl.add db.jump_info pc J_unknown;
-                pc', [pc', Edge_false], NoJump
+                pc', [pc', Edge_false], false
             end
           | I_RET | I_RETF | I_RETN ->
             Hashtbl.add db.jump_info pc J_ret;
             exits := S.add pc' !exits;
-            pc', [], NoJump
+            pc', [], false
           | _ ->
             if inst.operation = I_CALL then
               Hashtbl.add db.jump_info pc J_call;
             if Itree.find pc' !span = Itree.Start then begin
-              pc', [pc', Edge_neutral], NoJump
+              pc', [pc', Edge_neutral], false
             end else loop pc'
         in
         let pc', dests, conc = loop pc in
@@ -86,7 +88,7 @@ let build_cfg db init_pc =
   let span = !span in
   let start_end_list = Itree.to_list span in
   let entry_bb =
-    { start = init_pc; stop = init_pc; stmts = []; conclusion = NoJump }
+    { start = init_pc; stop = init_pc; stmts = []; has_final_jump = false }
   in
   let basic_blocks =
     entry_bb :: (start_end_list |> List.map begin fun (start, stop) ->
@@ -97,12 +99,12 @@ let build_cfg db init_pc =
           if pc' = stop then insts' else loop pc' insts'
         in
         let insts = List.rev (loop start []) in
-        let conclusion =
+        let has_final_jump =
           try Hashtbl.find conc_table stop with Not_found ->
             Printf.printf "missing entry in conclusion table: %nx\n" stop;
             raise Not_found
         in
-        { start; stop; stmts = insts; conclusion }
+        { start; stop; stmts = insts; has_final_jump }
       end)
   in
   let n = List.length basic_blocks in
@@ -151,7 +153,6 @@ let build_cfg db init_pc =
   in
   let nbb = Array.length inst_cfg.node in
   Printf.printf "%nx: %d basic %s\n" init_pc nbb (if nbb=1 then "block" else "blocks");
-  let inst_cs = Fold_cfg.fold_cfg ~debug:false inst_cfg in
   let env = Env.create db in
   let stmt_node =
     basic_blocks |>
@@ -163,10 +164,10 @@ let build_cfg db init_pc =
   let stmt_cfg = { node = stmt_node; succ; pred; edges; exits; n_var } in
   Dataflow.remove_dead_code_plain stmt_cfg;
 (*   print_cfg Semant.Plain.pp_stmt stmt_cfg; *)
-  let stmt_cs = Fold_cfg.fold_cfg ~debug:false stmt_cfg in
-  let il = Pseudocode.Plain.(convert stmt_cs (*|> remove_unused_labels*)) in
+  let stmt_cs = Fold_cfg.fold_cfg stmt_cfg in
+  let il = Pseudocode.Plain.(convert stmt_cs) in
   let temp_tab = Array.make n_temp 0 in
   for i=0 to n_temp-1 do
     temp_tab.(i) <- Env.width_of_temp i env
   done;
-  { inst_cfg; inst_cs; stmt_cfg; stmt_cs; span; il; temp_tab }
+  { inst_cfg; stmt_cfg; span; il; temp_tab }

@@ -1,12 +1,10 @@
 open Batteries
 
-type conclusion = NoJump | Jump | Branch
-
 type 'a basic_block = {
   start : nativeint;
   stop : nativeint;
   mutable stmts : 'a list;
-  conclusion : conclusion;
+  has_final_jump : bool;
 }
 
 type edge_attr = Edge_neutral | Edge_true | Edge_false
@@ -32,53 +30,17 @@ let print_cfg pp_stmt cfg =
   done
 
 type 'a ctlstruct =
-  | Virtual
-  | BB of 'a basic_block * int
+  | BB of 'a basic_block * nativeint option
   | Seq of 'a ctlstruct * 'a ctlstruct
-  | Generic of int list * 'a ctlstruct array * edge list
-  | If of 'a ctlstruct * bool * 'a ctlstruct * bool
-  | If_else of 'a ctlstruct * bool * 'a ctlstruct * 'a ctlstruct
-  | Fork1 of 'a ctlstruct * bool * 'a ctlstruct * bool
-  | Fork2 of 'a ctlstruct * bool * 'a ctlstruct * bool * 'a ctlstruct * bool
-  | Do_while of 'a ctlstruct * bool
-  | While_true of 'a ctlstruct
-
-let rec map_ctlstruct f = function
-  | Virtual -> Virtual
-  | BB (b, nexit) -> BB (f b, nexit)
-  | Seq (v1, v2) -> Seq (map_ctlstruct f v1, map_ctlstruct f v2)
-  | Generic (exits, node, edges) ->
-    Generic (exits, Array.map (map_ctlstruct f) node, edges)
-  | If (v1, t, v2, has_exit) ->
-    If (map_ctlstruct f v1, t, map_ctlstruct f v2, has_exit)
-  | If_else (v1, t, v2, v3) ->
-    If_else (map_ctlstruct f v1, t, map_ctlstruct f v2, map_ctlstruct f v3)
-  | Do_while (v, t) -> Do_while (map_ctlstruct f v, t)
-  | _ -> failwith "not implemented"
+  | If of 'a ctlstruct * bool * 'a ctlstruct * bool * nativeint
+  | IfElse of 'a ctlstruct * bool * 'a ctlstruct * 'a ctlstruct * nativeint
+  | DoWhile of 'a ctlstruct * bool * nativeint
+  | Generic of 'a ctlstruct array
 
 let rec start_of_ctlstruct = function
-  | Virtual -> failwith "start_of_ctlstruct: virtual node"
-  | BB (b, _) -> b.start
-  | Seq (v1, _) -> start_of_ctlstruct v1
-  | Generic (_, node, _) -> start_of_ctlstruct node.(0)
-  | If (v1, _, _, _) -> start_of_ctlstruct v1
-  | If_else (v1, _, _, _) -> start_of_ctlstruct v1
-  | Do_while (v, _) -> start_of_ctlstruct v
-  | While_true v -> start_of_ctlstruct v
-  | Fork1 _ -> failwith "start_of_ctlstruct: Fork1 not implemented"
-  | Fork2 _ -> failwith "start_of_ctlstruct: Fork2 not implemented"
-
-let rec remove_final_jump = function
-  | Virtual -> ()
-  | BB (b, _) ->
-    if b.conclusion = Jump then
-      b.stmts <- b.stmts |> List.rev |> List.tl |> List.rev
-  | Seq (_, v2) -> remove_final_jump v2
-  | Generic _ -> () (* TODO *)
-  | If (_, _, v2, has_exit) ->
-    if has_exit then remove_final_jump v2
-  | If_else (_, _, v2, v3) ->
-    remove_final_jump v2;
-    remove_final_jump v3;
-  | Do_while _ -> ()
-  | _ -> ()
+  | BB (bb, _) -> bb.start
+  | Seq (a, _) -> start_of_ctlstruct a
+  | If (a, _, _, _, _) -> start_of_ctlstruct a
+  | IfElse (a, _, _, _, _) -> start_of_ctlstruct a
+  | DoWhile (a, _, _) -> start_of_ctlstruct a
+  | Generic l -> start_of_ctlstruct l.(0)

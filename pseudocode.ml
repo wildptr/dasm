@@ -6,8 +6,8 @@ open Format
 
 module Make(V : VarType) = struct
 
-  module S = Make(V)
-  open S
+  module Sem = Make(V)
+  open Sem
 
   type lvalue =
     | L_var of var
@@ -51,74 +51,95 @@ module Make(V : VarType) = struct
       | E_prim1 (P1_not, e) -> e
       | _ -> not_expr cond
 
-  let rec convert = function
-    | Virtual -> []
-    | BB (b, _) ->
-      convert_bb b b.stmts
-    | Seq (v1, v2) ->
-      let stmts1 = convert v1 in
-      let stmts2 = convert v2 in
-      stmts1 @ stmts2
-    | If (cond, t, body, _) ->
-      let cond_stmts, cond_expr = convert_cond cond in
-      let if_stmt =
-        P_if (make_cond cond_expr t, convert body)
-      in
-      cond_stmts @ [if_stmt]
-    | If_else (cond, t, body_t, body_f) ->
-      let cond_stmts, cond_expr = convert_cond cond in
-      let if_else_stmt =
-        P_if_else (make_cond cond_expr t, convert body_t, convert body_f)
-      in
-      cond_stmts @ [if_else_stmt]
-    | Do_while (cond, t) ->
-      let cond_stmts, cond_expr = convert_cond cond in
-      [P_do_while (cond_stmts, make_cond cond_expr t)]
-    | Generic (_, node, edges) ->
-      let n = Array.length node in
-      let need_label = Array.make n false in
-      edges |> List.iter begin fun (src, dst, _) ->
-        if src+1 <> dst && node.(dst) <> Virtual then need_label.(dst) <- true
-      end;
-      let succ = Array.make n [] in
-      edges |> List.iter begin fun (src, dst, _) ->
-        succ.(src) <- dst :: succ.(src)
-      end;
-      node |> Array.to_list |> List.map convert |>
-      List.mapi begin fun i stmts ->
-        let buf = Buffer.create 16 in
-        let f = Format.formatter_of_buffer buf in
-        fprintf f "%d ->" i;
-        succ.(i) |> List.rev |> List.iter (fprintf f " %d");
-        Format.pp_print_flush f ();
-        let cmt = Buffer.contents buf in
-        P_comment cmt :: begin
-          if need_label.(i) then
-            P_label (start_of_ctlstruct node.(i)) :: stmts
-          else
-            stmts
-        end
-      end |> List.concat
-    | _ -> failwith "not implemented"
+  let conclude emit next_opt succ =
+    match next_opt with
+    | Some next ->
+      if next <> succ then P_goto (make_lit 32 succ) |> emit
+    | None -> ()
 
-  and convert_cond = function
-    | BB (b, _) ->
-      assert (b.conclusion = Branch);
-      let stmts_rev = List.rev b.stmts in
-      begin match List.hd stmts_rev with
-      | S_jump (Some cond, e) ->
-        convert_bb b (stmts_rev |> List.tl |> List.rev), cond
-      | _ -> assert false
+  let rec convert_seq emit next_opt = function
+    | BB (bb, succ_opt) ->
+      begin match succ_opt with
+        | None -> convert_bb emit None bb 0n
+        | Some succ -> convert_bb emit next_opt bb succ
       end
     | Seq (v1, v2) ->
-      let stmts1 = convert v1 in
-      let stmts2, cond = convert_cond v2 in
-      stmts1 @ stmts2, cond
-    | _ -> assert false
+      convert_seq emit (Some (start_of_ctlstruct v2)) v1;
+      convert_seq emit next_opt v2
+    | If (cond, t, body, _, succ) ->
+      let cond_expr = convert_cond emit cond in
+      let body' = convert_seq' (Some succ) body in
+      P_if (make_cond cond_expr t, body') |> emit;
+      conclude emit next_opt succ
+    | IfElse (cond, t, body_t, body_f, succ) ->
+      let cond_expr = convert_cond emit cond in
+      let body_t' = convert_seq' (Some succ) body_t in
+      let body_f' = convert_seq' (Some succ) body_f in
+      P_if_else (make_cond cond_expr t, body_t', body_f') |> emit;
+      conclude emit next_opt succ
+    | DoWhile (cond, t, succ) ->
+      let cond_stmts, cond_expr =
+        let temp = ref [] in
+        let emit' s = temp := s :: !temp in
+        let cond_expr = convert_cond emit' cond in
+        !temp, cond_expr
+      in
+      P_do_while (cond_stmts, make_cond cond_expr t) |> emit;
+      conclude emit next_opt succ
+    | Generic l ->
+      let n = Array.length l in
+      let next =
+        Array.init n begin fun i ->
+          if i+1<n then
+            Some (start_of_ctlstruct l.(i+1))
+          else
+            next_opt
+        end
+      in
+      l |> Array.iteri (fun i cs -> convert_seq emit next.(i) cs)
 
-  and convert_bb bb stmts =
-    (*let comment = P_comment (sprintf "%nx" bb.start) in
-    comment ::*) (stmts |> convert_stmt_list)
+  and convert_cond emit = function
+    | BB (bb, _) ->
+      let stmts_rev = List.rev bb.stmts in
+      begin match List.hd stmts_rev with
+      | S_jump (Some cond, e) ->
+        let stmts = stmts_rev |> List.tl |> List.rev in
+        let bb' = { bb with stmts } in
+        convert_bb emit None bb' 0n;
+        cond
+      | _ -> failwith "convert_cond: no conditional jump at end of basic block"
+      end
+    | Seq (v1, v2) ->
+      convert_seq emit (Some (start_of_ctlstruct v2)) v1;
+      convert_cond emit v2
+    | _ -> failwith "convert_cond"
+
+  and convert_bb emit next_opt bb succ =
+    P_comment (sprintf "%nx" bb.start) |> emit;
+    let stmts' =
+      match next_opt with
+      | Some next ->
+        if next = succ then begin
+          if bb.has_final_jump then
+            match List.rev bb.stmts with
+            | S_jump (None, _) :: rest -> rest |> List.rev
+            | _ -> failwith "convert_bb: no final jump"
+          else bb.stmts
+        end else begin
+          if bb.has_final_jump then bb.stmts else
+            bb.stmts @ [S_jump (None, make_lit 32 succ)]
+        end
+      | None -> bb.stmts
+    in
+    stmts' |> convert_stmt_list |> List.iter emit
+
+  and convert_seq' next_opt cs =
+    let l = ref [] in
+    let emit s = l := s :: !l in
+    convert_seq emit next_opt cs;
+    List.rev !l
+
+  let convert cs = convert_seq' None cs
 
   let pp_lvalue f = function
     | L_var var -> V.pp f var
@@ -147,7 +168,7 @@ module Make(V : VarType) = struct
     | P_do_while (body, cond) ->
       fprintf f "%sdo {\n" indent;
       body |> List.iter (pp_pstmt' (indent^"\t") f);
-      fprintf f "%s} while (%a)\n" indent pp_expr cond
+      fprintf f "%s} while (%a);\n" indent pp_expr cond
     | P_label va ->
       (* no indent *)
       fprintf f "%nx:\n" va

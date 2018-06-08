@@ -77,7 +77,7 @@ let cmd_ssa args =
 *)
   print_endline (String.make 80 '=');
   let final_cfg = Dataflow.convert_from_ssa cfg' in
-  let final_cs = Fold_cfg.fold_cfg ~debug:false final_cfg in
+  let final_cs = Fold_cfg.fold_cfg final_cfg in
   let final_il = Pseudocode.Plain.(convert final_cs (*|> remove_unused_labels*)) in
   final_il |> List.iter (Pseudocode.Plain.pp_pstmt Format.std_formatter)
 
