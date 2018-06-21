@@ -26,6 +26,7 @@ module DefUse(V : VarType) = struct
     | E_primn (_, es) -> uses_expr_list es
     | E_nondet _ -> S.empty
     | E_extend (_, e, _) -> use_of_expr e
+    | E_shrink (e, _) -> use_of_expr e
     | E_load (_, seg, off) -> S.union (use_of_expr seg) (use_of_expr off)
 
   and uses_expr_list es =
@@ -41,7 +42,10 @@ module DefUse(V : VarType) = struct
       begin match cond_opt with
         | Some cond -> S.union (use_of_expr cond) (use_of_expr e)
         | None -> use_of_expr e
-      end (* TODO: use set is incomplete *)
+      end
+    | S_jumpout (e, l) ->
+      l |> List.fold_left (fun acc (_, v) -> S.union acc (use_of_expr v))
+        (use_of_expr e)
     | S_phi (_, rhs) -> Array.to_list rhs |> uses_expr_list
     | _ -> assert false
 
@@ -286,6 +290,8 @@ let rec rename_to_ssa f (expr, w) =
       SSA.E_nondet (w, id)
     | Plain.E_extend (sign, e, n) ->
       SSA.E_extend (sign, rename_to_ssa f e, n)
+    | Plain.E_shrink (e, n) ->
+      SSA.E_shrink (rename_to_ssa f e, n)
   in
   expr', w
 
@@ -310,6 +316,8 @@ let rec rename_from_ssa f (expr, w) =
       Plain.E_nondet (w, id)
     | SSA.E_extend (sign, e, n) ->
       Plain.E_extend (sign, rename_from_ssa f e, n)
+    | SSA.E_shrink (e, n) ->
+      Plain.E_shrink (rename_from_ssa f e, n)
   in
   expr', w
 
@@ -418,6 +426,10 @@ let convert_to_ssa temp_tab cfg =
           let c' = Option.map (rename_to_ssa f) c in
           let dst' = rename_to_ssa f dst in
           SSA.S_jump (c', dst')
+        | Plain.S_jumpout (dst, l) ->
+          let dst' = rename_to_ssa f dst in
+          let l' = l |> List.map (fun (r,v) -> r, rename_to_ssa f v) in
+          SSA.S_jumpout (dst', l')
         | Plain.S_phi (lhs, rhs) ->
           let lhs' = f lhs in
           let n = Array.length rhs in
@@ -446,6 +458,10 @@ let convert_to_ssa temp_tab cfg =
           let c' = Option.map sub c in
           let dst' = sub dst in
           S_jump (c', dst')
+        | S_jumpout (dst, l) ->
+          let dst' = sub dst in
+          let l' = l |> List.map (fun (r,v) -> r, sub v) in
+          S_jumpout (dst', l')
         | S_phi (lhs, rhs) ->
           let lhs' = rename_lhs lhs in
           S_phi (lhs', rhs)
@@ -483,7 +499,7 @@ let convert_to_ssa temp_tab cfg =
   rename_bb 0;
   { node; succ; pred; edges = cfg.edges; exits = cfg.exits; n_var = !next_svid }
 
-let convert_stmt_to_ssa f s =
+let convert_stmt_from_ssa f s =
   let rename = rename_from_ssa f in
   match s with
   | SSA.S_set (lhs, rhs) ->
@@ -494,7 +510,11 @@ let convert_stmt_to_ssa f s =
     let cond_opt' = Option.map rename cond_opt in
     let dest' = rename dest in
     Plain.S_jump (cond_opt', dest')
-  | _ -> failwith "???"
+  | SSA.S_jumpout (dest, l) ->
+    let dest' = rename dest in
+    let l' = l |> List.map (fun (r,v) -> r, rename v) in
+    Plain.S_jumpout (dest', l')
+  | _ -> invalid_arg "convert_stmt_from_ssa"
 
 let convert_from_ssa cfg =
   let n = Array.length cfg.node in
@@ -510,7 +530,17 @@ let convert_from_ssa cfg =
     cfg.node.(i).stmts |> List.iter begin function
       | SSA.S_phi _ -> ()
       | s ->
-        new_stmts.(i) <- convert_stmt_to_ssa svar_to_pvar s :: new_stmts.(i)
+        let emit s = new_stmts.(i) <- s :: new_stmts.(i) in
+        begin
+          match convert_stmt_from_ssa svar_to_pvar s with
+          | S_jumpout (dst, l) ->
+            l |> List.iter begin fun (r, v) ->
+              if fst v <> Plain.E_var (Var.Global r) then
+                emit (Plain.S_set (Var.Global r, v))
+            end;
+            emit (Plain.S_jump (None, dst))
+          | s' -> emit s'
+        end
     end
   done;
   for i=0 to n-1 do

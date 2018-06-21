@@ -35,6 +35,8 @@ module Make(V : VarType) = struct
         | None ->
           P_goto dst
       end
+    | S_jumpout (dst, _) ->
+      P_goto dst
     | S_if (cond, body) ->
       P_if (cond, convert_stmt_list body)
     | S_if_else (cond, body1, body2) ->

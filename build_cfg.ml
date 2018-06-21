@@ -41,11 +41,11 @@ let build_cfg db init_pc =
             begin match List.hd inst.operands with
               | O_offset _ -> failwith "offset operand???"
               | O_imm (imm, _) ->
-                Hashtbl.add db.jump_info pc J_resolved;
+                Hashtbl.add db.jump_info pc' J_resolved;
                 pc', [imm, Edge_neutral], true
               | _ ->
                 Printf.printf "unresolved jump at %nx\n" pc;
-                Hashtbl.add db.jump_info pc J_unknown;
+                Hashtbl.add db.jump_info pc' J_unknown;
                 exits := S.add pc' !exits;
                 pc', [], false
             end
@@ -55,20 +55,20 @@ let build_cfg db init_pc =
             begin match List.hd inst.operands with
               | O_offset _ -> failwith "offset operand???"
               | O_imm (imm, _) ->
-                Hashtbl.add db.jump_info pc J_resolved;
+                Hashtbl.add db.jump_info pc' J_resolved;
                 pc', [pc', Edge_false; imm, Edge_true], false
               | _ ->
                 Printf.printf "unresolved conditional jump at %nx\n" pc;
-                Hashtbl.add db.jump_info pc J_unknown;
+                Hashtbl.add db.jump_info pc' J_unknown;
                 pc', [pc', Edge_false], false
             end
           | I_RET | I_RETF | I_RETN ->
-            Hashtbl.add db.jump_info pc J_ret;
+            Hashtbl.add db.jump_info pc' J_ret;
             exits := S.add pc' !exits;
             pc', [], false
           | _ ->
             if inst.operation = I_CALL then
-              Hashtbl.add db.jump_info pc J_call;
+              Hashtbl.add db.jump_info pc' J_call;
             if Itree.find pc' !span = Itree.Start then begin
               pc', [pc', Edge_neutral], false
             end else loop pc'

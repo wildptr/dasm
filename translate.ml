@@ -74,22 +74,6 @@ let init_symtab = [
   Inst.R_EBP;
   Inst.R_ESI;
   Inst.R_EDI;
-  Inst.R_AX;
-  Inst.R_CX;
-  Inst.R_DX;
-  Inst.R_BX;
-  Inst.R_SP;
-  Inst.R_BP;
-  Inst.R_SI;
-  Inst.R_DI;
-  Inst.R_AL;
-  Inst.R_CL;
-  Inst.R_DL;
-  Inst.R_BL;
-  Inst.R_AH;
-  Inst.R_CH;
-  Inst.R_DH;
-  Inst.R_BH;
   Inst.R_ES;
   Inst.R_CS;
   Inst.R_SS;
@@ -101,6 +85,7 @@ let init_symtab = [
   Inst.R_AF;
   Inst.R_ZF;
   Inst.R_SF;
+  Inst.R_IF;
   Inst.R_DF;
   Inst.R_OF;
 ] |> List.fold_left begin fun map reg ->

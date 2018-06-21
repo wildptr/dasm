@@ -105,6 +105,9 @@ module Make(V : VarType) = struct
     | E_extend (sign, e, n) ->
       let e' = simplify' e in
       E_extend (sign, e', n)
+    | E_shrink (e, n) ->
+      let e' = simplify' e in
+      E_shrink (e', n)
 
   and simplify' (ep, w) = simplify ep, w
 

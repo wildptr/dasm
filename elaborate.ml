@@ -4,15 +4,52 @@ open Inst
 open Semant
 open Plain
 
-let elaborate_reg r = E_var (Var.Global r), size_of_reg r
+type reg_alias = LoByte | HiByte | LoWord
 
-let eCF = elaborate_reg R_CF
-let ePF = elaborate_reg R_PF
-let eAF = elaborate_reg R_AF
-let eZF = elaborate_reg R_ZF
-let eSF = elaborate_reg R_SF
-let eDF = elaborate_reg R_DF
-let eOF = elaborate_reg R_OF
+let alias_table = [|
+  LoByte, R_EAX;
+  LoByte, R_ECX;
+  LoByte, R_EDX;
+  LoByte, R_EBX;
+  HiByte, R_EAX;
+  HiByte, R_ECX;
+  HiByte, R_EDX;
+  HiByte, R_EBX;
+  LoWord, R_EAX;
+  LoWord, R_ECX;
+  LoWord, R_EDX;
+  LoWord, R_EBX;
+  LoWord, R_ESP;
+  LoWord, R_EBP;
+  LoWord, R_ESI;
+  LoWord, R_EDI;
+|]
+
+let expr_of_reg r = E_var (Var.Global r), size_of_reg r
+
+let elaborate_reg r =
+  let (rid:int) = Obj.magic r in
+  if rid < 16 then
+    let size = size_of_reg r in
+    let a, r' = alias_table.(rid) in
+    let ep =
+      match a with
+      | LoByte | LoWord -> E_shrink (expr_of_reg r', size)
+      | HiByte ->
+        let shifted =
+          make_prim2 P2_logshiftright (expr_of_reg r') (make_lit 4 8n)
+        in
+        E_shrink (shifted, size)
+    in
+    ep, size
+  else
+    expr_of_reg r
+
+let eCF = expr_of_reg R_CF
+let ePF = expr_of_reg R_PF
+let eZF = expr_of_reg R_ZF
+let eSF = expr_of_reg R_SF
+let eOF = expr_of_reg R_OF
 
 let predef_table : (string, proc) Hashtbl.t = Hashtbl.create 0
 
@@ -92,7 +129,25 @@ let elaborate_operand pc' = function
 
 let elaborate_writeback emit o_dst e_data =
   match o_dst with
-  | O_reg r -> emit (S_set (Var.Global r, e_data))
+  | O_reg r ->
+    let (rid:int) = Obj.magic r in
+    if rid < 16 then
+      let a, r' = alias_table.(rid) in
+      let size' = size_of_reg r' in
+      let ext = extend_expr false e_data size' in
+      let e1, mask =
+        match a with
+        | LoByte ->
+          ext, Nativeint.lognot 0xffn
+        | LoWord ->
+          ext, Nativeint.lognot 0xffffn
+        | HiByte ->
+          make_prim2 P2_shiftleft ext (make_lit 4 8n), Nativeint.lognot 0xff00n
+      in
+      let e2 = make_primn Pn_and [expr_of_reg r'; make_lit size' mask] in
+      emit (S_set (Var.Global r', make_primn Pn_or [e1;e2]))
+    else
+      emit (S_set (Var.Global r, e_data))
   | O_mem (m, size) ->
     assert (size > 0);
     let seg, off = elaborate_mem_addr m in
@@ -124,6 +179,13 @@ let fnname_of_op = function
   | I_XOR -> "xor"
   | _ -> failwith "fnname_of_op: not implemented"
 
+let jumpout_value_list =
+  List.range 16 `To (Inst.number_of_registers-1) |>
+  List.map begin fun rid ->
+    let (r:Inst.reg) = Obj.magic rid in
+    r, expr_of_reg r
+  end
+
 let rec expand_stmt env pc stmt =
   let rename_var = function
     | Var.Local name ->
@@ -133,6 +195,21 @@ let rec expand_stmt env pc stmt =
       end
     | Var.PC -> E_lit (Bitvec.of_nativeint 32 pc)
     | Var.Nondet w -> E_nondet (w, new_nondet_id env)
+(*
+    | Var.Global r as v ->
+      let (rid:int) = Obj.magic r in
+      if rid < 16 then
+        let size = size_of_reg r in
+        let a, r' = alias_table.(rid) in
+        match a with
+        | LoByte | LoWord -> E_shrink (expr_of_reg r', size)
+        | HiByte ->
+          let shifted =
+            make_prim2 P2_logshiftright (expr_of_reg r') (make_lit 4 8n)
+          in
+          E_shrink (shifted, size)
+      else E_var v
+*)
     | v -> E_var v
   in
   let rename e = subst rename_var e in
@@ -149,7 +226,13 @@ let rec expand_stmt env pc stmt =
   | S_store (size, seg, addr, data) ->
     emit env (S_store (size, seg, rename addr, rename data))
   | S_jump (c, e) ->
-    emit env (S_jump (Option.map rename c, rename e))
+    begin match Database.get_jump_info env.db pc with
+      | J_call | J_ret ->
+        assert (c = None);
+        emit env (S_jumpout (rename e, jumpout_value_list))
+      | _ ->
+        emit env (S_jump (Option.map rename c, rename e))
+    end
   | S_call (proc, args, results) ->
     (* try not to create temporary variables for constants, as they confuse the
        recursive procedure scanner *)

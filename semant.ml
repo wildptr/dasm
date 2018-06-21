@@ -94,18 +94,51 @@ module Make(V : VarType) = struct
     | E_load of int * expr * expr
     | E_nondet of int * int
     | E_extend of bool * expr * int
+    | E_shrink of expr * int
 
   and expr = expr_proper * int (* width *)
 
   let make_lit width value = E_lit (Bitvec.of_nativeint width value), width
   let expr_of_bitvec bv = E_lit bv, Bitvec.length bv
   let not_expr (_, w as e) = E_prim1 (P1_not, e), w
+  let make_prim2 p e1 e2 =
+    let size =
+      match p with
+      | P2_sub ->
+        if snd e1 <> snd e2 then failwith "make_prim2: width mismatch";
+        snd e1
+      | P2_eq | P2_below | P2_less ->
+        if snd e1 <> snd e2 then failwith "make_prim2: width mismatch";
+        1
+      | P2_shiftleft | P2_logshiftright | P2_arishiftright ->
+        snd e1
+    in
+    E_prim2 (p, e1, e2), size
+  let make_primn p es =
+    let size =
+      match es with
+      | [] -> failwith "make_primn: empty expression list"
+      | e::es' ->
+        begin match p with
+          | Pn_concat ->
+            es' |> List.fold_left (fun acc e' -> acc + snd e') (snd e)
+          | Pn_add | Pn_and | Pn_or | Pn_xor ->
+            es' |> List.iter begin fun (_, size) ->
+              if snd e <> size then failwith "make_primn: width mismatch"
+            end;
+            snd e
+        end
+    in
+    E_primn (p, es), size
+  let extend_expr sign e n =
+    E_extend (sign, e, n), n
 
   (* elaborated form of instructions *)
   type stmt =
     | S_set of var * expr
     | S_store of int * expr * expr * expr
     | S_jump of expr option * expr
+    | S_jumpout of expr * (Inst.reg * expr) list
     | S_phi of var * expr array
     (* the following do not occur after elaboration *)
     | S_call of proc * expr list * var list
@@ -167,6 +200,8 @@ module Make(V : VarType) = struct
     | E_extend (sign, e, n) ->
       let op_s = if sign then "sign_extend" else "zero_extend" in
       fprintf f "%s(%a, %d)" op_s pp_expr e n
+    | E_shrink (e, n) ->
+      fprintf f "shrink(%a, %d)" pp_expr e n
 
   let pp_stmt f = function
     | S_set (var, e) ->
@@ -179,6 +214,18 @@ module Make(V : VarType) = struct
         | None -> ()
       end;
       fprintf f "goto %a" pp_expr e
+    | S_jumpout (dst, l) ->
+      fprintf f "jumpout %a" pp_expr dst;
+      let pp_pair f (r, v) =
+        fprintf f "%s=%a" (Inst.string_of_reg r) pp_expr v
+      in
+      begin match l with
+        | [] -> ()
+        | hd::tl ->
+          fprintf f " [%a" pp_pair hd;
+          tl |> List.iter (fprintf f " %a" pp_pair);
+          fprintf f "]"
+      end
     | S_phi (lhs, rhs) ->
       fprintf f "%a = phi(%a)" V.pp lhs (pp_sep_list ", " pp_expr) (Array.to_list rhs)
     | S_call (proc, args, results) ->
@@ -233,6 +280,7 @@ module Make(V : VarType) = struct
       | E_load (size, seg, addr) -> E_load (size, subst f seg, subst f addr)
       | E_nondet _ as e -> e
       | E_extend (sign, e, n) -> E_extend (sign, subst f e, n)
+      | E_shrink (e, n) -> E_shrink (subst f e, n)
     in
     expr', w
 
@@ -244,8 +292,12 @@ module Make(V : VarType) = struct
       let cond_opt' = Option.map f cond_opt in
       let dest' = f dest in
       S_jump (cond_opt', dest')
+    | S_jumpout (dest, l) ->
+      let dest' = f dest in
+      let l' = l |> List.map (fun (r,v) -> r, f v) in
+      S_jumpout (dest', l')
     | S_phi (lhs, rhs) -> S_phi (lhs, Array.map f rhs)
-    | _ -> failwith "map_stmt: not implemented"
+    | _ -> invalid_arg "map_stmt"
 
   let subst_stmt f stmt = map_stmt (subst f) stmt
 
