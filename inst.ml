@@ -4,10 +4,10 @@ type reg =
   | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH
   | R_AX | R_CX | R_DX | R_BX | R_SP | R_BP | R_SI | R_DI
   | R_EAX | R_ECX | R_EDX | R_EBX | R_ESP | R_EBP | R_ESI | R_EDI
-  | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS
+  | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS | R_S6 | R_S7
+  | R_CF | R_PF | R_AF | R_ZF | R_SF | R_IF | R_DF | R_OF
   | R_ST0 | R_ST1 | R_ST2 | R_ST3 | R_ST4 | R_ST5 | R_ST6 | R_ST7
   | R_XMM0 | R_XMM1 | R_XMM2 | R_XMM3 | R_XMM4 | R_XMM5 | R_XMM6 | R_XMM7
-  | R_CF | R_PF | R_AF | R_ZF | R_SF | R_DF | R_OF
 
 let number_of_registers = 56
 
@@ -41,6 +41,7 @@ let string_of_reg = function
   | R_AF -> "AF"
   | R_ZF -> "ZF"
   | R_SF -> "SF"
+  | R_IF -> "IF"
   | R_DF -> "DF"
   | R_OF -> "OF"
   | R_ES -> "ES"
@@ -49,6 +50,8 @@ let string_of_reg = function
   | R_DS -> "DS"
   | R_FS -> "FS"
   | R_GS -> "GS"
+  | R_S6 -> "S6"
+  | R_S7 -> "S7"
   | R_ST0 -> "ST0"
   | R_ST1 -> "ST1"
   | R_ST2 -> "ST2"
@@ -70,10 +73,10 @@ let size_of_reg = function
   | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH -> 8
   | R_AX | R_CX | R_DX | R_BX | R_SI | R_DI | R_SP | R_BP -> 16
   | R_EAX | R_ECX | R_EDX | R_EBX | R_ESI | R_EDI | R_ESP | R_EBP -> 32
-  | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS -> 16
+  | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS | R_S6 | R_S7 -> 16
+  | R_CF | R_PF | R_AF | R_ZF | R_SF | R_IF | R_DF | R_OF -> 1
   | R_ST0 | R_ST1 | R_ST2 | R_ST3 | R_ST4 | R_ST5 | R_ST6 | R_ST7 -> 80
   | R_XMM0 | R_XMM1 | R_XMM2 | R_XMM3 | R_XMM4 | R_XMM5 | R_XMM6 | R_XMM7 -> 128
-  | R_CF | R_PF | R_AF | R_ZF | R_SF | R_DF | R_OF -> 1
 
 let lookup_reg name =
   match name with
