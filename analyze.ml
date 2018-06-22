@@ -36,6 +36,8 @@ let find_stack_ref db va =
     match ep with
     | E_primn (Pn_add, [E_var (Var.Global R_ESP), _; E_lit bv, _]) ->
       set := S.add (Bitvec.to_nativeint bv) !set
+    | E_var (Var.Global R_ESP) ->
+      set := S.add 0n !set
     | _ -> ()
   and visit_expr (ep, _) =
     match ep with
