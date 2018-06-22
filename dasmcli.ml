@@ -79,6 +79,7 @@ let cmd_ssa args =
   let final_cfg = Dataflow.convert_from_ssa cfg' in
   let final_cs = Fold_cfg.fold_cfg final_cfg in
   let final_il = Pseudocode.Plain.(convert final_cs (*|> remove_unused_labels*)) in
+  proc.il <- final_il;
   final_il |> List.iter (Pseudocode.Plain.pp_pstmt Format.std_formatter)
 
 let cmd_inst args =
@@ -96,6 +97,12 @@ let cmd_load args =
   let path = List.hd args in
   Database.load_image db path
 
+let cmd_stackref args =
+  let module S = Set.Nativeint in
+  let va = List.hd args |> parse_hex in
+  let refs = Analyze.find_stack_ref db va in
+  refs |> S.iter (Printf.printf "%nd\n")
+
 let unknown_cmd _ =
   print_endline "unknown command"
 
@@ -106,6 +113,7 @@ let cmd_table = [
   "pcode", cmd_pcode;
   "ssa", cmd_ssa;
   "scan", cmd_scan;
+  "stackref", cmd_stackref;
 ] |> List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
 
 let () =
