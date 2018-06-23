@@ -2,38 +2,45 @@ open Batteries
 open Cfg
 open Inst
 
-type string_iter = {
-  str : string;
-  mutable pos : int;
-}
-
 let build_cfg db init_pc =
   Printf.printf "building CFG for %nx\n" init_pc;
   let open Database in
   let module S = Set.Nativeint in
   let code = get_code db in
   let span = ref Itree.empty in
-  let edges = ref [] in (* from end of basic block to start of basic block *)
+  (* from end of basic block to start of basic block *)
+  let succ_raw = Hashtbl.create 0 in
+  let add_edge src dst attr =
+    match Hashtbl.Exceptionless.find succ_raw src with
+    | Some succ ->
+      Hashtbl.replace succ_raw src ((dst, attr) :: succ)
+    | None ->
+      Hashtbl.add succ_raw src [dst, attr]
+  in
   let exits = ref S.empty in
   let conc_table = Hashtbl.create 0 in
+  let inst_table = Hashtbl.create 0 in
   let q = Queue.create () in
   Queue.add init_pc q;
-  let s = { str = code; pos = 0 } in
+  let pos = ref 0 in (* initial value not used *)
   while not (Queue.is_empty q) do
     let pc = Queue.pop q in
+    (* If 'pc' is strictly between start(b) and end(b) for some basic
+       block b, then split b at 'pc'.  If 'pc' equals start(b) for some b,
+       then do nothing.  Otherwise add 'pc' to queue. *)
     begin match Itree.find pc !span with
       | Itree.Start -> ()
       | Itree.Middle ->
         span := Itree.split pc !span;
         Hashtbl.add conc_table pc false;
-        edges := (pc, pc, Edge_neutral) :: !edges
+        add_edge pc pc Edge_neutral
       | Itree.Nowhere ->
-        s.pos <- translate_va db pc;
-        let rec loop (pc:Nativeint.t) =
+        pos := translate_va db pc;
+        let rec loop pc =
           let config = Dasm.{ mode = Mode32bit; pc_opt = Some pc } in
-          let inst = Dasm.(disassemble config s.str s.pos) in
-          s.pos <- s.pos + String.length inst.bytes;
-          Hashtbl.add db.inst_table pc inst;
+          let inst = Dasm.(disassemble config code !pos) in
+          pos := !pos + String.length inst.bytes;
+          Hashtbl.add inst_table pc inst;
           let l = length_of inst in
           let pc' = Nativeint.(pc + of_int l) in
           match inst.operation with
@@ -77,97 +84,82 @@ let build_cfg db init_pc =
         span := Itree.add (pc,pc') !span;
         Hashtbl.add conc_table pc' conc;
         dests |> List.iter begin fun (dest, attr) ->
-          edges := (pc', dest, attr) :: !edges;
-          (* If dest is strictly between start(b) and end(b) for some basic
-             block b, then split b at dest.  If dest equals start(b) for some b,
-             then do nothing.  Otherwise add dest to queue.  *)
+          add_edge pc' dest attr;
           Queue.add dest q
         end
     end
   done;
-  let span = !span in
-  let start_end_list = Itree.to_list span in
-  let entry_bb =
-    { start = init_pc; stop = init_pc; stmts = []; has_final_jump = false }
+  let start_to_end =
+    Itree.to_list !span |> List.enum |> Map.Nativeint.of_enum
   in
-  let basic_blocks =
-    entry_bb :: (start_end_list |> List.map begin fun (start, stop) ->
-        let rec loop pc insts =
-          let inst = Hashtbl.find db.inst_table pc in
-          let insts' = inst :: insts in
-          let pc' = Nativeint.(pc + of_int (length_of inst)) in
-          if pc' = stop then insts' else loop pc' insts'
+  let rpo =
+    let module S = Set.Nativeint in
+    let temp = ref [] in
+    let visited = ref S.empty in
+    let rec visit start =
+      if not (S.mem start !visited) then begin
+        visited := S.add start !visited;
+        let stop = Map.Nativeint.find start start_to_end in
+        let succ =
+          Hashtbl.Exceptionless.find succ_raw stop |> Option.default []
         in
-        let insts = List.rev (loop start []) in
-        let has_final_jump =
-          try Hashtbl.find conc_table stop with Not_found ->
-            Printf.printf "missing entry in conclusion table: %nx\n" stop;
-            raise Not_found
-        in
-        { start; stop; stmts = insts; has_final_jump }
-      end)
+        succ |> List.iter (fun (a, _) -> visit a);
+        temp := (start, stop) :: !temp
+      end
+    in
+    visit init_pc;
+    !temp
   in
-  let n = List.length basic_blocks in
-  let start_table = Hashtbl.create 0 in
-  let end_table = Hashtbl.create 0 in
-  basic_blocks |> List.iteri begin fun i bb ->
-    if i > 0 then begin
-      Hashtbl.add start_table bb.start i;
-      Hashtbl.add end_table bb.stop i
-    end
+  (* Procedure entry is always basic block #0 *)
+  let node =
+    rpo |> List.mapi begin fun i (start, stop) ->
+      let rec loop pc insts =
+        let inst = Hashtbl.find inst_table pc in
+        let insts' = inst :: insts in
+        let pc' = Nativeint.(pc + of_int (length_of inst)) in
+        if pc' = stop then insts' else loop pc' insts'
+      in
+      let insts = List.rev (loop start []) in
+      let has_final_jump =
+        try Hashtbl.find conc_table stop with Not_found ->
+          Printf.printf "missing entry in conclusion table: %nx\n" stop;
+          raise Not_found
+      in
+      { start; stop; stmts = insts; has_final_jump }
+    end |> Array.of_list
+  in
+  let n = Array.length node in
+  let start_to_id = Hashtbl.create n in
+  let end_to_id = Hashtbl.create n in
+  node |> Array.iteri begin fun i bb ->
+    Hashtbl.add start_to_id bb.start i;
+    Hashtbl.add end_to_id bb.stop i
   end;
-  let entry = Hashtbl.find start_table init_pc in
   let succ = Array.make n [] in
   let pred = Array.make n [] in
   let edges =
-    (0, entry, Edge_neutral) :: begin
-      !edges |> List.map begin fun (stop, start, attr) ->
-        let from_id = Hashtbl.find end_table stop in
-        let to_id = Hashtbl.find start_table start in
+    succ_raw |> Hashtbl.to_list |> List.map begin fun (stop, l) ->
+      l |> List.map begin fun (start, attr) ->
+        let from_id = Hashtbl.find end_to_id stop in
+        let to_id = Hashtbl.find start_to_id start in
         from_id, to_id, attr
       end
-    end
+    end |> List.concat
   in
   edges |> List.iter begin fun (from_id, to_id, attr) ->
     succ.(from_id) <- to_id :: succ.(from_id);
     pred.(to_id) <- from_id :: pred.(to_id);
   end;
-  for i=0 to n-1 do
-    succ.(i) <- List.rev succ.(i);
-    pred.(i) <- List.rev pred.(i)
-  done;
   let exits =
     let temp = ref Set.Int.empty in
-    !exits |> S.iter begin fun i ->
-      temp := Set.Int.add (Hashtbl.find end_table i) !temp
+    !exits |> S.iter begin fun a ->
+      temp := Set.Int.add (Hashtbl.find end_to_id a) !temp
     end;
     !temp
   in
-(*
-  Printf.printf "exits:";
-  exits |> Set.Int.iter (Printf.printf " %d");
-  print_endline "";
-*)
   let inst_cfg =
-    { node = Array.of_list basic_blocks; succ; pred; edges; exits; n_var = 0 }
+    { node; succ; pred; edges; exits; temp_tab = [||] }
   in
-  let nbb = Array.length inst_cfg.node in
-  Printf.printf "%nx: %d basic %s\n" init_pc nbb (if nbb=1 then "block" else "blocks");
-  let env = Env.create db in
-  let stmt_node =
-    basic_blocks |>
-    List.map (Elaborate.elaborate_basic_block env) |>
-    Array.of_list
-  in
-  let n_temp = Env.temp_count env in
-  let n_var = number_of_registers + n_temp in
-  let stmt_cfg = { node = stmt_node; succ; pred; edges; exits; n_var } in
-  Dataflow.remove_dead_code_plain stmt_cfg;
-(*   print_cfg Semant.Plain.pp_stmt stmt_cfg; *)
-  let stmt_cs = Fold_cfg.fold_cfg stmt_cfg in
-  let il = Pseudocode.Plain.(convert stmt_cs) in
-  let temp_tab = Array.make n_temp 0 in
-  for i=0 to n_temp-1 do
-    temp_tab.(i) <- Env.width_of_temp i env
-  done;
-  { inst_cfg; stmt_cfg; span; il; temp_tab }
+  Printf.printf "%nx: %d basic %s\n" init_pc n
+    (if n=1 then "block" else "blocks");
+  inst_cfg

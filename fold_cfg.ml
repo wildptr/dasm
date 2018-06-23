@@ -64,7 +64,13 @@ let check_consistency g =
   end;
   let parent' = compute_idom g.succ g.pred in
   parent' |> Array.iteri begin fun i p ->
-    if reachable.(i) then assert (g.parent.(i) = p)
+    if reachable.(i) then begin
+      if g.parent.(i) <> p then begin
+        Printf.printf "parent of %nx is %nx ,should be %nx\n"
+          (address_of g i) (address_of g g.parent.(i)) (address_of g p);
+        assert false
+      end
+    end
   end;
   let children' = Array.make g.size [] in
   parent' |> Array.iteri begin fun i p ->
@@ -180,7 +186,7 @@ let try_fold_if g entry body =
     end;
     g.node.(entry) <- If (g.node.(entry), t, g.node.(body), has_exit, address_of g exit);
     remove_edge g entry body;
-    remove_edge g body exit;
+    if has_exit then remove_edge g body exit;
     g.children.(entry) <- List.remove g.children.(entry) body;
     if debug then check_consistency g;
     true
@@ -251,7 +257,7 @@ let rec fold_cfg_rec g entry =
           try_fold_if_else g entry i j ||
           try_fold_do_while g entry
         end
-      | _ -> failwith "fold_cfg: basic block with more than 2 successors"
+      | _ -> false
     end
     then loop ()
   in
@@ -278,15 +284,15 @@ let rec fold_cfg_rec g entry =
 *)
     end
 
-and fold_generic g entry nodes_set =
-  let rest = S.remove entry nodes_set in
+and fold_generic g entry nodes =
+  let rest = S.remove entry nodes in
   (* already fully reduced? *)
   if not (S.equal rest S.empty) then begin
     let exits =
       let temp = ref S.empty in
-      nodes_set |> S.iter begin fun i ->
+      nodes |> S.iter begin fun i ->
         g.succ.(i) |> List.iter begin fun j ->
-          if not (S.mem j nodes_set) then temp := S.add j !temp
+          if not (S.mem j nodes) then temp := S.add j !temp
         end
       end;
       !temp
@@ -421,10 +427,9 @@ and fold_generic g entry nodes_set =
     g.node.(entry) <- new_node;
     g.succ.(entry) |> List.iter (remove_edge g entry);
     exit_list |> List.iter (add_edge g entry);
-    let removed = S.remove entry nodes_set in
-    removed |> S.iter begin fun i ->
-      g.pred.(i) |> List.iter (fun j -> if not (S.mem j removed) then remove_edge g j i);
-      g.succ.(i) |> List.iter (fun j -> if not (S.mem j removed) then remove_edge g i j);
+    rest |> S.iter begin fun i ->
+      g.pred.(i) |> List.iter (fun j -> if not (S.mem j rest) then remove_edge g j i);
+      g.succ.(i) |> List.iter (fun j -> if not (S.mem j rest) then remove_edge g i j);
     end;
     g.children.(entry) <- [];
     if debug then check_consistency g

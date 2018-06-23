@@ -36,84 +36,10 @@ let parse_cmd s =
 let parse_hex s =
   Nativeint.of_string ("0x"^s)
 
-let db = Database.create ()
-
-let cmd_analyze args =
-  let va = List.hd args |> parse_hex in
-  let proc = Build_cfg.build_cfg db va in
-  Database.set_proc db va proc
-
-let cmd_scan args =
-  let va = List.hd args |> parse_hex in
-  Analyze.scan db va
-
-let cmd_pcode args =
-  let va = List.hd args |> parse_hex in
-  let proc = Database.get_proc db va in
-  let stmts = proc.Database.il in
-  stmts |> List.iter (Pseudocode.Plain.pp_pstmt Format.std_formatter)
-
-let cmd_ssa args =
-  let va = List.hd args |> parse_hex in
-  let proc = Database.get_proc db va in
-  let cfg = proc.Database.stmt_cfg in
-  let temp_tab = proc.Database.temp_tab in
-  let cfg' = Dataflow.convert_to_ssa temp_tab cfg in
-  let changed = ref false in
-  let rec loop () =
-    if Dataflow.auto_subst cfg' then changed := true;
-    if Simplify.SSA.simplify_cfg cfg' then changed := true;
-    if Dataflow.remove_dead_code_ssa cfg' then changed := true;
-    if !changed then begin
-      changed := false;
-      loop ()
-    end
-  in
-  loop ();
-(*
-  let cs = Fold_cfg.fold_cfg ~debug:false cfg' in
-  let il = Pseudocode.SSA.(convert cs (*|> remove_unused_labels*)) in
-  il |> List.iter (Pseudocode.SSA.pp_pstmt Format.std_formatter);
-*)
-  print_endline (String.make 80 '=');
-  let final_cfg = Dataflow.convert_from_ssa cfg' in
-  let final_cs = Fold_cfg.fold_cfg final_cfg in
-  let final_il = Pseudocode.Plain.(convert final_cs (*|> remove_unused_labels*)) in
-  proc.il <- final_il;
-  final_il |> List.iter (Pseudocode.Plain.pp_pstmt Format.std_formatter)
-
-let cmd_inst args =
-  let va = List.hd args |> parse_hex in
-  let inst = Database.get_inst db va in
-  let bytes = inst.Inst.bytes in
-  let n = String.length bytes in
-  for i=0 to n-1 do
-    Printf.printf "%02x" (int_of_char bytes.[i])
-  done;
-  print_string "  ";
-  Inst.to_string inst |> print_endline
-
-let cmd_load args =
-  let path = List.hd args in
-  Database.load_image db path
-
-let cmd_stackref args =
-  let module S = Set.Nativeint in
-  let va = List.hd args |> parse_hex in
-  let refs = Analyze.find_stack_ref db va in
-  refs |> S.iter (Printf.printf "%nd\n")
-
 let unknown_cmd _ =
   print_endline "unknown command"
 
 let cmd_table = [
-  "analyze", cmd_analyze;
-  "inst", cmd_inst;
-  "load", cmd_load;
-  "pcode", cmd_pcode;
-  "ssa", cmd_ssa;
-  "scan", cmd_scan;
-  "stackref", cmd_stackref;
 ] |> List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
 
 let () =

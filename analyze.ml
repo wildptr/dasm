@@ -4,11 +4,10 @@ open Plain
 open Pseudocode.Plain
 
 let rec scan db va =
-  if not (Database.has_proc db va) then begin
-    let proc = Build_cfg.build_cfg db va in
-    Database.set_proc db va proc;
+  if not (Database.has_cfg db va) then begin
+    let cfg = Build_cfg.build_cfg db va in
+    Database.set_cfg db va cfg;
     let is_leaf = ref true in
-    let cfg = proc.Database.inst_cfg in
     let n = Array.length cfg.node in
     for i=0 to n-1 do
       cfg.node.(i).stmts |> List.iter begin fun inst ->
@@ -16,7 +15,9 @@ let rec scan db va =
         | I_CALL ->
           is_leaf := false;
           begin match List.hd inst.Inst.operands with
-            | O_imm (dst, _) -> scan db dst
+            | O_imm (dst, _) ->
+              Printf.printf "%nx calls %nx\n" va dst;
+              scan db dst
             | _ -> ()
           end
         | _ -> ()
@@ -27,9 +28,8 @@ let rec scan db va =
     end
   end
 
-let find_stack_ref db va =
+let find_stack_ref il =
   let module S = Set.Nativeint in
-  let proc = Database.get_proc db va in
   let set = ref S.empty in
   let rec visit_addr_expr (ep, _ as e) =
     visit_expr e;
@@ -67,5 +67,28 @@ let find_stack_ref db va =
       List.iter visit body; visit_expr cond
     | _ -> ()
   in
-  proc.il |> List.iter visit;
+  il |> List.iter visit;
   !set
+
+let ssa cfg =
+  let ssa_cfg = Dataflow.convert_to_ssa cfg in
+  let changed = ref false in
+  let rec loop () =
+    if Dataflow.auto_subst ssa_cfg then changed := true;
+    if Simplify.SSA.simplify_cfg ssa_cfg then changed := true;
+    if Dataflow.remove_dead_code_ssa ssa_cfg then changed := true;
+    if !changed then begin
+      changed := false;
+      loop ()
+    end
+  in
+  loop ();
+  let final_cfg = Dataflow.convert_from_ssa ssa_cfg in
+  let final_cs = Fold_cfg.fold_cfg final_cfg in
+  Pseudocode.Plain.(convert final_cs)
+
+let print_il il =
+  il |> List.iter (Pseudocode.Plain.pp_pstmt Format.std_formatter)
+
+let () =
+  Elaborate.load_spec "spec"

@@ -1,5 +1,5 @@
 open Batteries
-open Env
+open Elab_env
 open Inst
 open Semant
 open Plain
@@ -422,11 +422,11 @@ let elaborate_basic_block env bb =
 
 let elaborate_cfg db cfg =
   let open Cfg in
-  let env = Env.create db in
+  let env = Elab_env.create db in
   let node = cfg.node |> Array.map (elaborate_basic_block env) in
   let succ = Array.copy cfg.succ in
   let pred = Array.copy cfg.pred in
-  { cfg with node; succ; pred }, env
+  { cfg with node; succ; pred; temp_tab = env.temp_size_tab }
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in

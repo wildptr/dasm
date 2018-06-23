@@ -5,6 +5,9 @@ open Semant
 
 module S = Set.Int
 
+let var_count cfg =
+  Inst.number_of_registers + Array.length cfg.temp_tab
+
 module DefUse(V : VarType) = struct
 
   module Sem = Semant.Make(V)
@@ -74,7 +77,7 @@ module DefUse(V : VarType) = struct
 
   let compute_defsites cfg =
     let size = Array.length cfg.node in
-    let n_var = cfg.n_var in
+    let n_var = var_count cfg in
     let defsites = Array.make n_var S.empty in
     for i=0 to size-1 do
       cfg.node.(i).stmts |> iter begin fun stmt ->
@@ -126,7 +129,7 @@ let liveness cfg =
   done;
   let live_in = Array.make n [||] in
   let live_out = Array.make n [||] in
-  let n_var = cfg.n_var in
+  let n_var = var_count cfg in
   for i=0 to n-1 do
     live_in.(i) <- Array.make n_var false;
 (*     live_out.(i) <- Array.make n_var (S.mem i cfg.exits) *)
@@ -187,7 +190,8 @@ let remove_dead_code_plain cfg =
   done
 
 let count_uses cfg =
-  let use_count = Array.make cfg.n_var 0 in
+  let n_var = var_count cfg in
+  let use_count = Array.make n_var 0 in
   let n = Array.length cfg.node in
   for i=0 to n-1 do
     cfg.node.(i).stmts |> iter begin fun s ->
@@ -200,7 +204,8 @@ let count_uses cfg =
 let auto_subst cfg =
   let open SSA in
   let n = Array.length cfg.node in
-  let rep = Array.make cfg.n_var None in
+  let n_var = var_count cfg in
+  let rep = Array.make n_var None in
   let use_count = count_uses cfg in
   for i=0 to n-1 do
     cfg.node.(i).stmts |> iter begin function
@@ -324,7 +329,7 @@ let rec rename_from_ssa f (expr, w) =
 let plain_dummy = Plain.E_nondet (0, 0), 0
 let ssa_dummy = SSA.E_nondet (0, 0), 0
 
-let convert_to_ssa temp_tab cfg =
+let convert_to_ssa cfg =
   let size = Array.length cfg.node in
   (* fields of the resulting CFG *)
   let node = cfg.node |> Array.map (fun bb -> { bb with stmts = [] }) in
@@ -354,7 +359,7 @@ let convert_to_ssa temp_tab cfg =
     df.(n) <- !s
   in
   compute_df 0;
-  let n_var = cfg.n_var in
+  let n_var = var_count cfg in
   let defsites = PlainDefUse.compute_defsites cfg in
   let live_in, live_out = liveness cfg in
   for v = 0 to n_var - 1 do
@@ -380,6 +385,7 @@ let convert_to_ssa temp_tab cfg =
   let count = Array.make n_var 0 in
   let stack = Array.make n_var [0] in
   let svid_table = Hashtbl.create 0 in
+  let sv_table = Hashtbl.create 0 in
   let next_svid = ref 0 in
   let get_svid k =
     try Hashtbl.find svid_table k
@@ -387,6 +393,7 @@ let convert_to_ssa temp_tab cfg =
       let uid = !next_svid in
       incr next_svid;
       Hashtbl.add svid_table k uid;
+      Hashtbl.add sv_table uid k;
       uid
   in
   let rename_lhs sv =
@@ -477,8 +484,8 @@ let convert_to_ssa temp_tab cfg =
           let open SSAVar in
           let w =
             match lhs.orig with
-            | Var.Global reg -> Inst.(size_of_reg reg)
-            | Var.Temp i -> temp_tab.(i)
+            | Var.Global reg -> Inst.size_of_reg reg
+            | Var.Temp i -> cfg.temp_tab.(i)
             | _ -> failwith "???"
           in
           assert (rhs.(j) == ssa_dummy);
@@ -497,7 +504,16 @@ let convert_to_ssa temp_tab cfg =
     end
   in
   rename_bb 0;
-  { node; succ; pred; edges = cfg.edges; exits = cfg.exits; n_var = !next_svid }
+  let temp_tab =
+    Array.init !next_svid begin fun i ->
+      let orig, ver = Hashtbl.find sv_table i in
+      if orig < Inst.number_of_registers then
+        Inst.size_of_reg (Obj.magic orig)
+      else
+        cfg.temp_tab.(orig - Inst.number_of_registers)
+    end
+  in
+  { node; succ; pred; edges = cfg.edges; exits = cfg.exits; temp_tab }
 
 let convert_stmt_from_ssa f s =
   let rename = rename_from_ssa f in

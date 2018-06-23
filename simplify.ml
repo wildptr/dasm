@@ -1,5 +1,4 @@
 open Batteries
-open Env
 open Semant
 
 module Make(V : VarType) = struct
