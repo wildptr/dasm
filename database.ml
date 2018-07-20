@@ -43,3 +43,6 @@ let get_code db =
 
 let get_jump_info db va =
   Hashtbl.find db.jump_info va
+
+let get_proc_entry_list db =
+  Hashtbl.keys db.cfg_table |> List.of_enum |> List.sort Nativeint.compare
