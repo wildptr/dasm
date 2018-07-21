@@ -138,7 +138,7 @@ module Make(V : VarType) = struct
     | S_set of var * expr
     | S_store of int * expr * expr * expr
     | S_jump of expr option * expr
-    | S_jumpout of expr * (Inst.reg * expr) list
+    | S_jumpout of expr * (Inst.reg * expr) list * (Inst.reg * var) list
     | S_phi of var * expr array
     (* the following do not occur after elaboration *)
     | S_call of proc * expr list * var list
@@ -173,11 +173,11 @@ module Make(V : VarType) = struct
       begin match p with
         | P2_sub -> fprintf f "(%a - %a)" pp_expr e1 pp_expr e2
         | P2_eq ->  fprintf f "(%a == %a)" pp_expr e1 pp_expr e2
-        | P2_shiftleft -> fprintf f "shift_left(%a, %a)" pp_expr e1 pp_expr e2
-        | P2_logshiftright -> fprintf f "log_shift_right(%a, %a)" pp_expr e1 pp_expr e2
-        | P2_arishiftright -> fprintf f "ari_shift_right(%a, %a)" pp_expr e1 pp_expr e2
-        | P2_less -> fprintf f "(%a <s %a)" pp_expr e1 pp_expr e2
-        | P2_below -> fprintf f "(%a <u %a)" pp_expr e1 pp_expr e2
+        | P2_shiftleft -> fprintf f "(%a << %a)" pp_expr e1 pp_expr e2
+        | P2_logshiftright -> fprintf f "(%a >> %a)" pp_expr e1 pp_expr e2
+        | P2_arishiftright -> fprintf f "(%a ±>> %a)" pp_expr e1 pp_expr e2
+        | P2_less -> fprintf f "(%a ±< %a)" pp_expr e1 pp_expr e2
+        | P2_below -> fprintf f "(%a < %a)" pp_expr e1 pp_expr e2
       end
     | E_prim3 (p, e1, e2, e3) ->
       begin match p with
@@ -214,12 +214,15 @@ module Make(V : VarType) = struct
         | None -> ()
       end;
       fprintf f "goto %a" pp_expr e
-    | S_jumpout (dst, l) ->
-      fprintf f "jumpout %a" pp_expr dst;
+    | S_jumpout (dst, arglist, retlist) ->
+      retlist |> List.iter begin fun (r,v) ->
+        fprintf f "%a=%s " V.pp v (Inst.string_of_reg r)
+      end;
+      fprintf f "call %a" pp_expr dst;
       let pp_pair f (r, v) =
         fprintf f "%s=%a" (Inst.string_of_reg r) pp_expr v
       in
-      begin match l with
+      begin match arglist with
         | [] -> ()
         | hd::tl ->
           fprintf f " [%a" pp_pair hd;
@@ -292,10 +295,10 @@ module Make(V : VarType) = struct
       let cond_opt' = Option.map f cond_opt in
       let dest' = f dest in
       S_jump (cond_opt', dest')
-    | S_jumpout (dest, l) ->
+    | S_jumpout (dest, arglist, retlist) ->
       let dest' = f dest in
-      let l' = l |> List.map (fun (r,v) -> r, f v) in
-      S_jumpout (dest', l')
+      let arglist' = arglist |> List.map (fun (r,v) -> r, f v) in
+      S_jumpout (dest', arglist', retlist)
     | S_phi (lhs, rhs) -> S_phi (lhs, Array.map f rhs)
     | _ -> invalid_arg "map_stmt"
 

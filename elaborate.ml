@@ -179,11 +179,18 @@ let fnname_of_op = function
   | I_XOR -> "xor"
   | _ -> failwith "fnname_of_op: not implemented"
 
-let jumpout_value_list =
+let jumpout_arglist =
   List.range 16 `To (Inst.number_of_registers-1) |>
   List.map begin fun rid ->
     let (r:Inst.reg) = Obj.magic rid in
     r, expr_of_reg r
+  end
+
+let call_retlist =
+  List.range 0 `To (Inst.number_of_registers-1) |>
+  List.map begin fun rid ->
+    let r = Obj.magic rid in
+    r, Var.Global r
   end
 
 let rec expand_stmt env pc stmt =
@@ -227,9 +234,10 @@ let rec expand_stmt env pc stmt =
     emit env (S_store (size, seg, rename addr, rename data))
   | S_jump (c, e) ->
     begin match Database.get_jump_info env.db pc with
-      | J_call | J_ret ->
+      | (J_call | J_ret as j) ->
         assert (c = None);
-        emit env (S_jumpout (rename e, jumpout_value_list))
+        let retlist = if j = J_call then call_retlist else [] in
+        emit env (S_jumpout (rename e, jumpout_arglist, retlist))
       | _ ->
         emit env (S_jump (Option.map rename c, rename e))
     end

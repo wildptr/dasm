@@ -1,6 +1,5 @@
 open Batteries
 open Cfg
-open List
 open Semant
 
 module S = Set.Int
@@ -14,9 +13,11 @@ module DefUse(V : VarType) = struct
   open Sem
 
   let def_of_stmt = function
-    | S_set (lhs, _) -> Some (V.to_int lhs)
-    | S_phi (lhs, _) -> Some (V.to_int lhs)
-    | _ -> None
+    | S_set (lhs, _) -> S.singleton (V.to_int lhs)
+    | S_phi (lhs, _) -> S.singleton (V.to_int lhs)
+    | S_jumpout (_, _, retlist) ->
+      retlist |> List.map (fun (r,v) -> V.to_int v) |> S.of_list
+    | _ -> S.empty
 
   let rec use_of_expr (ep, _) =
     match ep with
@@ -33,7 +34,7 @@ module DefUse(V : VarType) = struct
     | E_load (_, seg, off) -> S.union (use_of_expr seg) (use_of_expr off)
 
   and uses_expr_list es =
-    es |> map (use_of_expr) |> fold_left S.union S.empty
+    es |> List.map (use_of_expr) |> List.fold_left S.union S.empty
 
   let use_of_stmt = function
     | S_set (_, e) -> use_of_expr e
@@ -46,7 +47,7 @@ module DefUse(V : VarType) = struct
         | Some cond -> S.union (use_of_expr cond) (use_of_expr e)
         | None -> use_of_expr e
       end
-    | S_jumpout (e, l) ->
+    | S_jumpout (e, l, _) ->
       l |> List.fold_left (fun acc (_, v) -> S.union acc (use_of_expr v))
         (use_of_expr e)
     | S_phi (_, rhs) -> Array.to_list rhs |> uses_expr_list
@@ -60,11 +61,9 @@ module DefUse(V : VarType) = struct
       let live = Array.copy live_out in
       for i=n-1 downto 0 do
         let s = stmt_arr.(i) in
-        def_of_stmt s |> begin function
-          | Some uid ->
-            if not live.(uid) then keep.(i) <- false;
-            live.(uid) <- false
-          | None -> ()
+        def_of_stmt s |> S.iter begin fun uid ->
+          if not live.(uid) then keep.(i) <- false;
+          live.(uid) <- false
         end;
         use_of_stmt s |> S.iter (fun uid -> live.(uid) <- true)
       done
@@ -80,10 +79,9 @@ module DefUse(V : VarType) = struct
     let n_var = var_count cfg in
     let defsites = Array.make n_var S.empty in
     for i=0 to size-1 do
-      cfg.node.(i).stmts |> iter begin fun stmt ->
-        def_of_stmt stmt |> begin function
-          | Some uid -> defsites.(uid) <- S.add i defsites.(uid)
-          | None -> ()
+      cfg.node.(i).stmts |> List.iter begin fun stmt ->
+        def_of_stmt stmt |> S.iter begin fun uid ->
+          defsites.(uid) <- S.add i defsites.(uid)
         end
       end
     done;
@@ -94,10 +92,7 @@ module DefUse(V : VarType) = struct
     let uses = ref S.empty in
     stmts |> List.iter begin fun s ->
       uses := S.union !uses (S.diff (use_of_stmt s) !defs);
-      def_of_stmt s |> begin function
-        | Some v -> defs := S.add v !defs
-        | None -> ()
-      end;
+      def_of_stmt s |> S.iter (fun v -> defs := S.add v !defs);
     end;
     !defs, !uses
 
@@ -194,7 +189,7 @@ let count_uses cfg =
   let use_count = Array.make n_var 0 in
   let n = Array.length cfg.node in
   for i=0 to n-1 do
-    cfg.node.(i).stmts |> iter begin fun s ->
+    cfg.node.(i).stmts |> List.iter begin fun s ->
       s |> SSADefUse.use_of_stmt |>
       S.iter (fun v -> use_count.(v) <- use_count.(v) + 1)
     end
@@ -208,7 +203,7 @@ let auto_subst cfg =
   let rep = Array.make n_var None in
   let use_count = count_uses cfg in
   for i=0 to n-1 do
-    cfg.node.(i).stmts |> iter begin function
+    cfg.node.(i).stmts |> List.iter begin function
       | S_set (lhs, rhs) ->
         let v = SSAVar.to_int lhs in
         let ok =
@@ -238,7 +233,7 @@ let auto_subst cfg =
   let changed = ref false in
   for i=0 to n-1 do
     cfg.node.(i).stmts <-
-      cfg.node.(i).stmts |> filter_map begin fun stmt ->
+      cfg.node.(i).stmts |> List.filter_map begin fun stmt ->
         let stmt' =
           match stmt with
           | S_set (lhs, rhs) when rep.(SSAVar.to_int lhs) <> None -> None
@@ -257,7 +252,7 @@ let remove_dead_code_ssa cfg =
   let use_count = count_uses cfg in
   for i=0 to n-1 do
     cfg.node.(i).stmts <-
-      cfg.node.(i).stmts |> filter begin fun stmt ->
+      cfg.node.(i).stmts |> List.filter begin fun stmt ->
         let live =
           match stmt with
           | S_set (lhs, _) ->
@@ -351,10 +346,10 @@ let convert_to_ssa cfg =
   end;
   let rec compute_df n =
     let s = ref [] in
-    succ.(n) |> iter (fun y -> if idom.(y) <> n then s := y :: !s);
-    children.(n) |> iter begin fun c ->
+    succ.(n) |> List.iter (fun y -> if idom.(y) <> n then s := y :: !s);
+    children.(n) |> List.iter begin fun c ->
       compute_df c;
-      df.(c) |> iter (fun w -> if not (dominates n w) then s := w :: !s)
+      df.(c) |> List.iter (fun w -> if not (dominates n w) then s := w :: !s)
     end;
     df.(n) <- !s
   in
@@ -368,9 +363,9 @@ let convert_to_ssa cfg =
     defsites.(v) |> S.iter (fun defsite -> Queue.add defsite q);
     while not (Queue.is_empty q) do
       let i = Queue.pop q in
-      df.(i) |> iter begin fun y ->
+      df.(i) |> List.iter begin fun y ->
         if not phi_inserted_at.(y) && live_in.(i).(v) then begin
-          let n_pred = length pred.(y) in
+          let n_pred = List.length pred.(y) in
           let lhs = Var.of_int v in
           let phi = Plain.(S_phi (lhs, Array.make n_pred plain_dummy)) in
           (* actually insert phi function *)
@@ -410,14 +405,14 @@ let convert_to_ssa cfg =
     let open SSAVar in
     let orig = sv.orig in
     let orig_uid = Var.to_int orig in
-    let ver = hd stack.(orig_uid) in
+    let ver = List.hd stack.(orig_uid) in
     let uid = get_svid (orig_uid, ver) in
     SSAVar.{ orig; ver; uid }
   in
   for i=0 to size-1 do
     let f orig = SSAVar.{ orig; ver=0; uid=0 } in
     let stmts' = ref [] in
-    cfg.node.(i).stmts |> iter begin fun stmt ->
+    cfg.node.(i).stmts |> List.iter begin fun stmt ->
       let stmt' =
         match stmt with
         | Plain.S_set (name, e) ->
@@ -433,10 +428,13 @@ let convert_to_ssa cfg =
           let c' = Option.map (rename_to_ssa f) c in
           let dst' = rename_to_ssa f dst in
           SSA.S_jump (c', dst')
-        | Plain.S_jumpout (dst, l) ->
+        | Plain.S_jumpout (dst, arglist, retlist) ->
           let dst' = rename_to_ssa f dst in
-          let l' = l |> List.map (fun (r,v) -> r, rename_to_ssa f v) in
-          SSA.S_jumpout (dst', l')
+          let arglist' =
+            arglist |> List.map (fun (r,v) -> r, rename_to_ssa f v)
+          in
+          let retlist' = retlist |> List.map (fun (r,v) -> r, f v) in
+          SSA.S_jumpout (dst', arglist', retlist')
         | Plain.S_phi (lhs, rhs) ->
           let lhs' = f lhs in
           let n = Array.length rhs in
@@ -465,10 +463,11 @@ let convert_to_ssa cfg =
           let c' = Option.map sub c in
           let dst' = sub dst in
           S_jump (c', dst')
-        | S_jumpout (dst, l) ->
+        | S_jumpout (dst, arglist, retlist) ->
           let dst' = sub dst in
-          let l' = l |> List.map (fun (r,v) -> r, sub v) in
-          S_jumpout (dst', l')
+          let arglist' = arglist |> List.map (fun (r,v) -> r, sub v) in
+          let retlist' = retlist |> List.map (fun (r,v) -> r, rename_lhs v) in
+          S_jumpout (dst', arglist', retlist')
         | S_phi (lhs, rhs) ->
           let lhs' = rename_lhs lhs in
           S_phi (lhs', rhs)
@@ -476,10 +475,10 @@ let convert_to_ssa cfg =
       end
     end;
     (* rename variables in RHS of phi-functions *)
-    succ.(i) |> iter begin fun y ->
+    succ.(i) |> List.iter begin fun y ->
       (* i is the j-th predecessor of y *)
-      let j = index_of i pred.(y) |> Option.get in
-      node.(y).stmts |> iter begin function
+      let j = List.index_of i pred.(y) |> Option.get in
+      node.(y).stmts |> List.iter begin function
         | SSA.S_phi (lhs, rhs) ->
           let open SSAVar in
           let w =
@@ -495,11 +494,10 @@ let convert_to_ssa cfg =
         | _ -> ()
       end
     end;
-    children.(i) |> iter rename_bb;
-    cfg.node.(i).stmts |> iter begin fun stmt ->
-      PlainDefUse.def_of_stmt stmt |> begin function
-        | Some uid -> stack.(uid) <- tl stack.(uid)
-        | None -> ()
+    children.(i) |> List.iter rename_bb;
+    cfg.node.(i).stmts |> List.iter begin fun stmt ->
+      PlainDefUse.def_of_stmt stmt |> S.iter begin fun uid ->
+        stack.(uid) <- List.tl stack.(uid)
       end
     end
   in
@@ -526,10 +524,11 @@ let convert_stmt_from_ssa f s =
     let cond_opt' = Option.map rename cond_opt in
     let dest' = rename dest in
     Plain.S_jump (cond_opt', dest')
-  | SSA.S_jumpout (dest, l) ->
+  | SSA.S_jumpout (dest, arglist, retlist) ->
     let dest' = rename dest in
-    let l' = l |> List.map (fun (r,v) -> r, rename v) in
-    Plain.S_jumpout (dest', l')
+    let arglist' = arglist |> List.map (fun (r,v) -> r, rename v) in
+    let retlist' = retlist |> List.map (fun (r,v) -> r, f v) in
+    Plain.S_jumpout (dest', arglist', retlist')
   | _ -> invalid_arg "convert_stmt_from_ssa"
 
 let convert_from_ssa cfg =
@@ -548,13 +547,17 @@ let convert_from_ssa cfg =
       | s ->
         let emit s = new_stmts.(i) <- s :: new_stmts.(i) in
         begin
+          let open Plain in
           match convert_stmt_from_ssa svar_to_pvar s with
-          | S_jumpout (dst, l) ->
-            l |> List.iter begin fun (r, v) ->
-              if fst v <> Plain.E_var (Var.Global r) then
-                emit (Plain.S_set (Var.Global r, v))
+          | S_jumpout (dst, arglist, retlist) ->
+            arglist |> List.iter begin fun (r, v) ->
+              if fst v <> E_var (Var.Global r) then
+                emit (S_set (Var.Global r, v))
             end;
-            emit (Plain.S_jump (None, dst))
+            emit (S_jump (None, dst));
+            retlist |> List.iter begin fun (r, v) ->
+              emit (S_set (v, (E_var (Var.Global r), Inst.size_of_reg r)))
+            end
           | s' -> emit s'
         end
     end
