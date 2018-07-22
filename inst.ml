@@ -69,6 +69,9 @@ let string_of_reg = function
   | R_XMM6 -> "XMM6"
   | R_XMM7 -> "XMM7"
 
+let int_of_reg r = let (i:int) = Obj.magic r in i
+let reg_of_int i = let (r:reg) = Obj.magic i in r
+
 let size_of_reg = function
   | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH -> 8
   | R_AX | R_CX | R_DX | R_BX | R_SI | R_DI | R_SP | R_BP -> 16

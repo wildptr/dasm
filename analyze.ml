@@ -2,6 +2,7 @@ open Batteries
 open Semant
 open Plain
 open Pseudocode.Plain
+open Cfg
 
 let rec scan db va =
   if not (Database.has_cfg db va) then begin
@@ -89,6 +90,77 @@ let ssa cfg =
 
 let print_il il =
   il |> List.iter (Pseudocode.Plain.pp_pstmt Format.std_formatter)
+
+let get_stack_offset e =
+  let open SSA in
+  match e with
+  | E_primn (Pn_add, [E_var { orig = Var.Global R_ESP; ver = 0; _ }, _;
+                      E_lit offset, _]), _ -> Some (Bitvec.to_nativeint offset)
+  | _ -> None
+
+let def_stmt_table (cfg : SSA.stmt cfg) =
+  let nvar = Array.length cfg.temp_tab in
+  let tab = Array.create nvar None in
+  let n = Array.length cfg.node in
+  for i=0 to n-1 do
+    cfg.node.(i).stmts |> List.iter begin fun s ->
+      Dataflow.SSADefUse.def_of_stmt s |> Set.Int.iter begin fun uid ->
+        tab.(uid) <- Some s
+      end
+    end
+  done;
+  tab
+
+let preserved_registers (cfg : SSA.stmt cfg) =
+  let open SSA in
+  let n = Array.length cfg.node in
+  let offset_table = Array.create Inst.number_of_registers 0n in
+  let ok = Array.create Inst.number_of_registers false in
+  for i=0 to n-1 do
+    cfg.node.(i).stmts |> List.iter begin function
+      | S_store (_, _, addr, (E_var { orig = Var.Global r; ver = 0; _ }, _)) ->
+        begin match get_stack_offset addr with
+          | Some offset ->
+            Printf.printf "%s is stored at %nd\n" (Inst.string_of_reg r) offset;
+            let rid = Inst.int_of_reg r in
+            offset_table.(rid) <- offset;
+            ok.(rid) <- true
+          | None -> ()
+        end
+      | _ -> ()
+    end
+  done;
+  let deftab = def_stmt_table cfg in
+  cfg.exits |> Set.Int.iter begin fun i ->
+    match List.last cfg.node.(i).stmts with
+    | S_jumpout (_, arglist, _) ->
+      arglist |> List.iter begin fun (r,e) ->
+        let rid = Inst.int_of_reg r in
+        if ok.(rid) then begin
+          Format.printf "final value of %s is %a@." (Inst.string_of_reg r)
+            pp_expr e;
+          let ok' =
+            match fst e with
+            | E_var v ->
+              begin match deftab.(SSAVar.to_int v) with
+                | Some (S_set (_, (E_load (_, _, addr), _))) ->
+                  begin match get_stack_offset addr with
+                    | Some offset -> offset_table.(rid) = offset
+                    | None -> false
+                  end
+                | _ -> false
+              end
+            | _ -> false
+          in
+          ok.(rid) <- ok'
+        end
+      end
+    | _ -> failwith "last statement is not jumpout"
+  end;
+  List.range 0 `To (Inst.number_of_registers-1) |>
+  List.filter_map begin fun i ->
+    if ok.(i) then Some (Inst.reg_of_int i) else None
+  end
 
 let () =
   Elaborate.load_spec "spec"

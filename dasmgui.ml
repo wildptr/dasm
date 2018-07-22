@@ -10,9 +10,11 @@ let show_il db va32 =
 
   let title = Printf.sprintf "%nx" va in
   let window = GWindow.window ~width:640 ~height:480 ~title () in
+  let box = GPack.vbox ~packing:window#add () in
+  let toolbar = GButton.toolbar ~packing:box#pack () in
   let sw =
     GBin.scrolled_window ~hpolicy:`AUTOMATIC ~vpolicy:`AUTOMATIC
-      ~packing:window#add ()
+      ~packing:box#add ()
   in
   let text_view = GText.view ~packing:sw#add () in
   text_view#buffer#set_text il_text;
