@@ -5,9 +5,10 @@ open Pseudocode.Plain
 open Cfg
 
 let rec scan db va =
-  if not (Database.has_cfg db va) then begin
+  if not (Database.has_proc db va) then begin
     let cfg = Build_cfg.build_cfg db va in
-    Database.set_cfg db va cfg;
+    let proc = Database.create_proc db va cfg in
+    let is_complete = ref true in
     let is_leaf = ref true in
     let n = Array.length cfg.node in
     for i=0 to n-1 do
@@ -24,9 +25,14 @@ let rec scan db va =
         | _ -> ()
       end
     done;
-    if !is_leaf then begin
-      Printf.printf "leaf function: %nx\n" va
-    end
+    cfg.exits |> Set.Int.iter begin fun i ->
+      let last_inst = List.last cfg.node.(i).stmts in
+      match last_inst.operation with
+      | I_RET -> ()
+      | _ -> is_complete := false
+    end;
+    proc.is_complete <- !is_complete;
+    proc.is_leaf <- !is_leaf
   end
 
 let find_stack_ref il =
@@ -71,19 +77,27 @@ let find_stack_ref il =
   il |> List.iter visit;
   !set
 
-let ssa cfg =
-  let ssa_cfg = Dataflow.convert_to_ssa cfg in
+let plain_il cfg =
+  Dataflow.remove_dead_code_plain cfg;
+  let cs = Fold_cfg.fold_cfg cfg in
+  Pseudocode.Plain.(convert cs)
+
+let simplify_ssa_cfg cfg =
   let changed = ref false in
   let rec loop () =
-    if Dataflow.auto_subst ssa_cfg then changed := true;
-    if Simplify.SSA.simplify_cfg ssa_cfg then changed := true;
-    if Dataflow.remove_dead_code_ssa ssa_cfg then changed := true;
+    if Dataflow.auto_subst cfg then changed := true;
+    if Simplify.SSA.simplify_cfg cfg then changed := true;
+    if Dataflow.remove_dead_code_ssa cfg then changed := true;
     if !changed then begin
       changed := false;
       loop ()
     end
   in
-  loop ();
+  loop ()
+
+let ssa cfg =
+  let ssa_cfg = Dataflow.convert_to_ssa cfg in
+  simplify_ssa_cfg ssa_cfg;
   let final_cfg = Dataflow.convert_from_ssa ssa_cfg in
   let final_cs = Fold_cfg.fold_cfg final_cfg in
   Pseudocode.Plain.(convert final_cs)
@@ -131,6 +145,20 @@ let preserved_registers (cfg : SSA.stmt cfg) =
     end
   done;
   let deftab = def_stmt_table cfg in
+  let rec ok' rid e =
+    match fst e with
+    | E_var v ->
+      begin match deftab.(SSAVar.to_int v) with
+        | Some (S_set (_, e')) -> ok' rid e'
+        | _ -> false
+      end
+    | E_load (_, _, addr) ->
+      begin match get_stack_offset addr with
+        | Some offset -> offset_table.(rid) = offset
+        | None -> false
+      end
+    | _ -> false
+  in
   cfg.exits |> Set.Int.iter begin fun i ->
     match List.last cfg.node.(i).stmts with
     | S_jumpout (_, arglist, _) ->
@@ -139,20 +167,7 @@ let preserved_registers (cfg : SSA.stmt cfg) =
         if ok.(rid) then begin
           Format.printf "final value of %s is %a@." (Inst.string_of_reg r)
             pp_expr e;
-          let ok' =
-            match fst e with
-            | E_var v ->
-              begin match deftab.(SSAVar.to_int v) with
-                | Some (S_set (_, (E_load (_, _, addr), _))) ->
-                  begin match get_stack_offset addr with
-                    | Some offset -> offset_table.(rid) = offset
-                    | None -> false
-                  end
-                | _ -> false
-              end
-            | _ -> false
-          in
-          ok.(rid) <- ok'
+          ok.(rid) <- ok' rid e
         end
       end
     | _ -> failwith "last statement is not jumpout"
@@ -160,6 +175,43 @@ let preserved_registers (cfg : SSA.stmt cfg) =
   List.range 0 `To (Inst.number_of_registers-1) |>
   List.filter_map begin fun i ->
     if ok.(i) then Some (Inst.reg_of_int i) else None
+  end
+
+let def_of_proc (cfg : SSA.stmt cfg) =
+  let open SSA in
+  let def = Array.create Inst.number_of_registers false in
+  cfg.exits |> Set.Int.iter begin fun i ->
+    match List.last cfg.node.(i).stmts with
+    | S_jumpout (_, arglist, _) ->
+      arglist |> List.iter begin fun (r,e) ->
+        let rid = Inst.int_of_reg r in
+        match fst e with
+        | E_var { orig; ver = 0; _ } when orig = Var.Global r -> ()
+        | _ -> def.(rid) <- true
+      end
+    | _ -> failwith "last statement is not jumpout"
+  end;
+  preserved_registers cfg |> List.iter begin fun r ->
+    def.(Inst.int_of_reg r) <- false
+  end;
+  List.range 0 `To (Inst.number_of_registers-1) |>
+  List.filter_map begin fun i ->
+    if def.(i) then Some (Inst.reg_of_int i) else None
+  end
+
+let auto_analyze db entry =
+  scan db entry;
+  Database.get_proc_entry_list db |> List.iter begin fun va ->
+    let proc = Database.get_proc db va in
+    if proc.is_complete && proc.is_leaf then begin
+      let ssa_cfg =
+        proc.inst_cfg |>
+        Elaborate.elaborate_cfg db |>
+        Dataflow.convert_to_ssa
+      in
+      simplify_ssa_cfg ssa_cfg;
+      proc.defs <- def_of_proc ssa_cfg
+    end
   end
 
 let () =

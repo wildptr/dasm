@@ -61,8 +61,17 @@ module DefUse(V : VarType) = struct
       let live = Array.copy live_out in
       for i=n-1 downto 0 do
         let s = stmt_arr.(i) in
+        s |> begin function
+          | S_set (lhs, _) -> Some lhs
+          | S_phi (lhs, _) -> Some lhs
+          | _ -> None
+        end |> begin function
+          | Some lhs ->
+            let uid = V.to_int lhs in
+            if not live.(uid) then keep.(i) <- false
+          | None -> ()
+        end;
         def_of_stmt s |> S.iter begin fun uid ->
-          if not live.(uid) then keep.(i) <- false;
           live.(uid) <- false
         end;
         use_of_stmt s |> S.iter (fun uid -> live.(uid) <- true)
@@ -131,8 +140,9 @@ let liveness cfg =
     live_out.(i) <- Array.make n_var false;
   done;
   cfg.exits |> S.iter begin fun i ->
-    live_out.(i).(Obj.magic Inst.R_EAX) <- true;
-    live_out.(i).(Obj.magic Inst.R_ESP) <- true;
+    for rid = 0 to Inst.number_of_registers - 1 do
+      live_out.(i).(rid) <- true
+    done
   end;
   let changed = ref false in
   let rec loop () =

@@ -1,3 +1,4 @@
+open Batteries
 open Format
 
 type reg =
@@ -71,6 +72,9 @@ let string_of_reg = function
 
 let int_of_reg r = let (i:int) = Obj.magic r in i
 let reg_of_int i = let (r:reg) = Obj.magic i in r
+
+let all_registers =
+  List.range 0 `To (number_of_registers-1) |> List.map reg_of_int
 
 let size_of_reg = function
   | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH -> 8
