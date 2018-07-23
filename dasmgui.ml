@@ -169,6 +169,10 @@ let show_il db va32 =
       in
       let layout = Layout.layout_node conf 0 0 cs in
       let _ = canvas#event#connect#expose (expose canvas layout) in
+      let layout_margin = 32 in
+      canvas#misc#set_size_request
+        ~width:(layout.right - layout.left + layout_margin*2)
+        ~height:(layout.height + layout_margin*2) ();
       cfg_window#show ()
     end
   in

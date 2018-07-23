@@ -81,29 +81,9 @@ let color_of_attr attr =
   | Edge_true -> Green
   | Edge_false -> Red
 
-(*
-type 'a layout_ctlstruct =
-  | BBNode of 'a basic_block
-  | SeqNode of 'a layout_ctlstruct * 'a layout_ctlstruct
-  | IfNode of 'a layout_ctlstruct * bool * 'a layout_ctlstruct * bool
-  | IfElseNode of 'a layout_ctlstruct * bool * 'a layout_ctlstruct * 'a layout_ctlstruct
-  | DoWhileNode of 'a layout_ctlstruct * bool
-  | GenericNode of 'a layout_ctlstruct
-
-let rec convert_ctlstruct cs =
-  match cs with
-  | BB (bb, _) -> BBNode bb
-  | Seq (a, b) -> SeqNode (convert_ctlstruct a, convert_ctlstruct b)
-  | If (a, t, b, has_exit, _) ->
-    IfNode (convert_ctlstruct a, t, convert_ctlstruct b, has_exit)
-  | IfElse (a, t, b, c, _) ->
-    IfElseNode (convert_ctlstruct a, t, convert_ctlstruct b,
-                convert_ctlstruct c)
-  | DoWhile (a, t, _) ->
-    DoWhileNode (convert_ctlstruct a, t)
-  | Generic arr ->
-    GenericNode (arr |> Array.map convert_ctlstruct)
-*)
+let layout_virtual nentry =
+  { left = 0; right = 0; height = 0; entry = Array.create nentry 0;
+    exit = [||]; shape = Layout_virtual }
 
 let rec layout_node conf nentry nexit = function
 (*
@@ -142,13 +122,17 @@ let rec layout_node conf nentry nexit = function
       Array.init nexit (fun i -> i*line_spacing-(nexit-1)*line_spacing/2)
     in
     { left; right; height; entry; exit; shape = Layout_box { text } }
-  | Generic _ ->
-(*     layout_generic conf nentry exits cs edges *)
+  | Generic (cs, exits, edges) ->
+    assert (nexit = List.length exits);
+    layout_generic conf nentry exits cs edges
+(*
     { left = -conf.char_width*8; right = conf.char_width*8;
       height = conf.char_height*4; entry = Array.create nentry 0;
       exit = Array.create nexit 0;
       shape = Layout_box { text = ["GENERIC"] } }
+*)
   | If (a, t, b, b_has_exit, _) ->
+    assert (nexit = 1);
     let a', a_is_bb = layout_fork conf nentry t a in
     let b' = layout_node conf 1 (if b_has_exit then 1 else 0) b in
     let bx = a'.exit.(0) + line_spacing - b'.left in
@@ -186,6 +170,7 @@ let rec layout_node conf nentry nexit = function
     { left; right; height; entry = a'.entry; exit = [|0|];
       shape = Layout_composite { nodes; connections } }
   | IfElse (a, t, b, c, _) ->
+    assert (nexit = 1);
     let a', a_is_bb = layout_fork conf nentry t a in
     let b' = layout_node conf 1 1 b in
     let c' = layout_node conf 1 nexit c in
@@ -222,13 +207,14 @@ let rec layout_node conf nentry nexit = function
     in
     let connections = [con1;con2;con3] in
     let height = lane2 in
-    let exit = [|0|] in
-    { left; right; height; entry = a'.entry; exit; shape = Layout_composite { nodes; connections } }
+    { left; right; height; entry = a'.entry; exit = [|0|];
+      shape = Layout_composite { nodes; connections } }
   | Seq (a, b) ->
     let a' = layout_node conf nentry 1 a in
     let b' = layout_node conf 1 nexit b in
     layout_seq conf a' b'
   | DoWhile (a, t, _) ->
+    assert (nexit = 1);
     let a', is_bb = layout_fork conf (nentry+1) t a in
     let ay = line_spacing in
     let ay1 = ay + a'.height in
@@ -280,7 +266,6 @@ and layout_fork conf nentry t = function
     let a' = layout_node conf nentry 2 a in
     let b', is_bb = layout_fork conf 1 t b in
     layout_seq conf a' b', is_bb
-  | Generic _ -> assert false
 (*
   | Fork1 (a, t1, b, t2) ->
     let a', a_is_bb = layout_fork conf nentry (t=t1) a in
@@ -349,30 +334,72 @@ and layout_seq conf a' b' =
   { left; right; height; entry = a'.entry; exit = b'.exit;
     shape = Layout_composite { nodes; connections } }
 
-(*
 and layout_generic conf nentry exits cs edges =
   let n = Array.length cs in
+  let lookup_va =
+    let t = Hashtbl.create n in
+    cs |> Array.iteri begin fun i c ->
+      Hashtbl.add t (start_of_ctlstruct c) i
+    end;
+    exits |> List.iteri begin fun i va ->
+      Hashtbl.add t va (n+i)
+    end;
+    Hashtbl.find t
+  in
+  let n' = n + (List.length exits) in
   let cs' =
-    Array.init (n+nentry) begin fun i ->
-      if i < n then cs.(i) else Virtual
+    Array.init n' begin fun i ->
+      if i < n then Some cs.(i) else None
     end
   in
-  let n' = n + nentry in
   let edges' =
-    edges |> List.fold_right begin fun i edges' ->
-      (i, 0, Edge_neutral) :: edges'
-    end (if nentry > 0 then List.range n `To (n'-1) else [])
+    edges |> List.map begin fun (s, d, a) ->
+      lookup_va s, lookup_va d, a
+    end
   in
+  let succ = Array.make n' [] in
+  let pred = Array.make n' [] in
+  edges' |> List.iter begin fun (src, dst, _) ->
+    succ.(src) <- dst :: succ.(src);
+    pred.(dst) <- src :: pred.(dst)
+  end;
   let dag_succ = convert_to_dag n' edges' in
   let dag_npred = Array.make n' 0 in
-  dag_succ |> Array.iter (List.iter (fun dst -> dag_npred.(dst) <- dag_npred.(dst) + 1));
+  dag_succ |> Array.iter
+    (List.iter (fun dst -> dag_npred.(dst) <- dag_npred.(dst) + 1));
+  let npred i = List.length pred.(i) in
+  let nsucc i = List.length succ.(i) in
   let node_layout =
-    let npred = Array.make n' 0 in
-    edges' |> List.iter (fun (_, dst, _) -> npred.(dst) <- npred.(dst) + 1);
-    cs' |> Array.mapi (fun i node -> layout_node conf npred.(i) node)
+    cs' |> Array.mapi begin fun i node_opt ->
+      match node_opt with
+      | Some node ->
+        layout_node conf (if i=0 then nentry else npred i) (nsucc i) node
+      | None -> layout_virtual (npred i)
+    end
   in
+  let node_kind = function
+    | None -> "Virtual"
+    | Some x ->
+      begin match x with
+        | BB _ -> "BB"
+        | Seq _ -> "Seq"
+        | If _ -> "If"
+        | IfElse _ -> "IfElse"
+        | DoWhile _ -> "DoWhile"
+        | Generic _ -> "Generic"
+      end
+  in
+  for i=0 to n'-1 do
+    if i>0 && Array.length node_layout.(i).entry <> npred i then begin
+      failwith (Printf.sprintf "wrong number of entries: %s" (node_kind cs'.(i)))
+    end;
+    if Array.length node_layout.(i).exit <> nsucc i then begin
+      failwith (Printf.sprintf "wrong number of exits: %s" (node_kind cs'.(i)))
+    end;
+  done;
   let node_col = Array.make n' 0 in
   let node_rank = Array.make n' 0 in
+
   (* topological sort *)
   let rec loop cur_rank nodes =
     let nodes_in_cur_rank, rest = List.partition (fun i -> dag_npred.(i) = 0) nodes in
@@ -391,7 +418,8 @@ and layout_generic conf nentry exits cs edges =
       loop next_rank rest
   in
   let nrank = loop 0 (List.range 0 `To (n'-1)) in
-  exits |> List.iter begin fun i ->
+  let exits' = exits |> List.map lookup_va in
+  exits' |> List.iter begin fun i ->
     node_rank.(i) <- nrank-1
   end;
   let rank_nodes = Array.make nrank [] in
@@ -441,22 +469,14 @@ and layout_generic conf nentry exits cs edges =
     end;
     rank_rightmost.(r) <- !x + node_layout.(cur_rank_nodes.(cur_rank_ncol-1)).right
   done;
-  let succ = Array.make n' [] in
-  let pred = Array.make n' [] in
-  edges' |> List.iter begin fun (src, dst, _) ->
-    succ.(src) <- dst :: succ.(src);
-    pred.(dst) <- src :: pred.(dst)
-  end;
 
   let con_rev = ref [] in
 
   let con = Array.make (nrank+1) [] in
   let vpath_info = ref [] in
-  edges' |> List.map begin fun (src, dst, attr) ->
+  edges' |> List.iter begin fun (src, dst, attr) ->
     let sj = List.index_of dst succ.(src) |> Option.get in
     let dj = List.index_of src pred.(dst) |> Option.get in
-    src, dst, sj, dj, attr
-  end |> List.iter begin fun (src, dst, sj, dj, attr) ->
     let sr = node_rank.(src) in
     let dr = node_rank.(dst) in
     let vnode_ranks =
@@ -467,21 +487,9 @@ and layout_generic conf nentry exits cs edges =
     in
     let color = color_of_attr attr in
     let sx =
-      let exit_arr = node_layout.(src).exit in
-      let nexit = Array.length exit_arr in
-      if sj >= nexit then begin
-        Format.eprintf "src=%d sj=%d nexit=%d@." src sj nexit;
-        assert false
-      end;
       node_x.(src) + node_layout.(src).exit.(sj)
     in
     let dx =
-      let entry_arr = node_layout.(dst).entry in
-      let nentry = Array.length entry_arr in
-      if dj >= nentry then begin
-        Format.eprintf "dst=%d dj=%d nentry=%d@." dst dj nentry;
-        assert false
-      end;
       node_x.(dst) + node_layout.(dst).entry.(dj)
     in
     let src_tail_len = tail_len src in
@@ -582,13 +590,9 @@ and layout_generic conf nentry exits cs edges =
   in
   let connections = List.rev !con_rev in
 
-  let entry =
-    (if nentry > 0 then List.range n `To (n'-1) else []) |>
-    List.map (fun i -> node_x.(i)) |> Array.of_list
-  in
+  let entry = node_layout.(0).entry in
   let exit =
-    exits |> List.map (fun i -> node_x.(i)) |> Array.of_list
+    exits' |> List.map (fun i -> node_x.(i)) |> Array.of_list
   in
   { left; right; height; entry; exit;
     shape = Layout_composite { nodes; connections } }
-*)

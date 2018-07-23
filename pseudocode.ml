@@ -97,7 +97,7 @@ module Make(V : VarType) = struct
       in
       P_do_while (cond_stmts, make_cond cond_expr t) |> emit;
       conclude emit next_opt succ
-    | Generic l ->
+    | Generic (l, _, _) ->
       let n = Array.length l in
       let next =
         Array.init n begin fun i ->

@@ -422,7 +422,21 @@ and fold_generic g entry nodes =
           exit_list |> List.map (address_of g) |> List.iter (printf " %nx");
           printf " ]\n";
         end;
-        Generic (node_list |> List.map (Array.get g.node) |> Array.of_list)
+        let edges' =
+          let temp = ref [] in
+          node_list |> List.iter begin fun i ->
+            let i_va = address_of g i in
+            g.succ.(i) |> List.iter begin fun j ->
+              let j_va = address_of g j in
+              let a = get_edge_attr g i j in
+              temp := (i_va, j_va, a) :: !temp
+            end
+          end;
+          !temp
+        in
+        Generic (node_list |> List.map (Array.get g.node) |> Array.of_list,
+                 exit_list |> List.map (address_of g),
+                 edges')
     in
     g.node.(entry) <- new_node;
     g.succ.(entry) |> List.iter (remove_edge g entry);

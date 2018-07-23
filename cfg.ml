@@ -37,7 +37,8 @@ type 'a ctlstruct =
   | If of 'a ctlstruct * bool * 'a ctlstruct * bool * nativeint
   | IfElse of 'a ctlstruct * bool * 'a ctlstruct * 'a ctlstruct * nativeint
   | DoWhile of 'a ctlstruct * bool * nativeint
-  | Generic of 'a ctlstruct array
+  | Generic of 'a ctlstruct array * nativeint list *
+               (nativeint * nativeint * edge_attr) list
 
 let rec start_of_ctlstruct = function
   | BB (bb, _) -> bb.start
@@ -45,4 +46,4 @@ let rec start_of_ctlstruct = function
   | If (a, _, _, _, _) -> start_of_ctlstruct a
   | IfElse (a, _, _, _, _) -> start_of_ctlstruct a
   | DoWhile (a, _, _) -> start_of_ctlstruct a
-  | Generic l -> start_of_ctlstruct l.(0)
+  | Generic (l, _, _) -> start_of_ctlstruct l.(0)
