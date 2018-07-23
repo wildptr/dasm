@@ -374,7 +374,7 @@ let fmtgroup_8c =
   |]
 
 let fmtgroup_f6 =
-  E_grp [| [RM;I]; [];     [RM];   [RM];   [RM];   [RM;I]; [RM];   [RM;I]  |]
+  E_grp [| [RM;I]; [];     [RM];   [RM];   [RM];   [RM];   [RM];   [RM];   |]
 
 let fmtgroup_fe =
   E_grp [| [RM];   [RM];   [RM];   [M];    [RM];   [M];    [RM];   []      |]
