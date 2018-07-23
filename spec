@@ -205,8 +205,10 @@ proc ret32()
 
 proc retn32(n:16)
 {
+	var ra:32;
+	ra = pop32();
 	ESP = ESP + (n:32);
-	jump pop32();
+	jump ra;
 }
 
 proc leave32()

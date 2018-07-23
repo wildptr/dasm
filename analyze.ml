@@ -28,7 +28,7 @@ let rec scan db va =
     cfg.exits |> Set.Int.iter begin fun i ->
       let last_inst = List.last cfg.node.(i).stmts in
       match last_inst.operation with
-      | I_RET -> ()
+      | I_RET | I_RETN -> ()
       | _ -> is_complete := false
     end;
     proc.is_complete <- !is_complete;
@@ -49,12 +49,13 @@ let find_stack_ref il =
   and visit_expr (ep, _) =
     match ep with
     | E_lit _ -> ()
+    | E_const _ -> ()
     | E_var _ -> ()
     | E_prim1 (_, e) -> visit_expr e
     | E_prim2 (_, e1, e2) -> visit_expr e1; visit_expr e2
     | E_prim3 (_, e1, e2, e3) -> visit_expr e1; visit_expr e2; visit_expr e3
     | E_primn (_, es) -> List.iter visit_expr es
-    | E_load (_, _, off) -> visit_addr_expr off
+    | E_load (_, off) -> visit_addr_expr off
     | E_nondet _ -> ()
     | E_extend (_, e, _) -> visit_expr e
     | E_shrink (e, _) -> visit_expr e
@@ -63,7 +64,7 @@ let find_stack_ref il =
     | P_set (lv, e) ->
       begin match lv with
         | L_var _ -> ()
-        | L_mem (_, off, _) -> visit_addr_expr off
+        | L_mem (off, _) -> visit_addr_expr off
       end;
       visit_expr e
     | P_goto e -> visit_expr e
@@ -95,8 +96,8 @@ let simplify_ssa_cfg cfg =
   in
   loop ()
 
-let ssa cfg =
-  let ssa_cfg = Dataflow.convert_to_ssa cfg in
+let ssa db cfg =
+  let ssa_cfg = Dataflow.convert_to_ssa db cfg in
   simplify_ssa_cfg ssa_cfg;
   let final_cfg = Dataflow.convert_from_ssa ssa_cfg in
   let final_cs = Fold_cfg.fold_cfg final_cfg in
@@ -132,7 +133,7 @@ let preserved_registers (cfg : SSA.stmt cfg) =
   let ok = Array.create Inst.number_of_registers false in
   for i=0 to n-1 do
     cfg.node.(i).stmts |> List.iter begin function
-      | S_store (_, _, addr, (E_var { orig = Var.Global r; ver = 0; _ }, _)) ->
+      | S_store (_, addr, (E_var { orig = Var.Global r; ver = 0; _ }, _)) ->
         begin match get_stack_offset addr with
           | Some offset ->
             Printf.printf "%s is stored at %nd\n" (Inst.string_of_reg r) offset;
@@ -152,7 +153,7 @@ let preserved_registers (cfg : SSA.stmt cfg) =
         | Some (S_set (_, e')) -> ok' rid e'
         | _ -> false
       end
-    | E_load (_, _, addr) ->
+    | E_load (_, addr) ->
       begin match get_stack_offset addr with
         | Some offset -> offset_table.(rid) = offset
         | None -> false
@@ -161,7 +162,7 @@ let preserved_registers (cfg : SSA.stmt cfg) =
   in
   cfg.exits |> Set.Int.iter begin fun i ->
     match List.last cfg.node.(i).stmts with
-    | S_jumpout (_, arglist, _) ->
+    | S_jumpout_ret (_, arglist) ->
       arglist |> List.iter begin fun (r,e) ->
         let rid = Inst.int_of_reg r in
         if ok.(rid) then begin
@@ -172,17 +173,18 @@ let preserved_registers (cfg : SSA.stmt cfg) =
       end
     | _ -> failwith "last statement is not jumpout"
   end;
-  List.range 0 `To (Inst.number_of_registers-1) |>
-  List.filter_map begin fun i ->
+  Inst.all_registers |> List.filter_map begin fun r ->
+    let i = Inst.int_of_reg r in
     if ok.(i) then Some (Inst.reg_of_int i) else None
   end
 
-let def_of_proc (cfg : SSA.stmt cfg) =
+let defuse_of_proc (cfg : SSA.stmt cfg) =
   let open SSA in
   let def = Array.create Inst.number_of_registers false in
+  let use = Array.create Inst.number_of_registers false in
   cfg.exits |> Set.Int.iter begin fun i ->
     match List.last cfg.node.(i).stmts with
-    | S_jumpout (_, arglist, _) ->
+    | S_jumpout_ret (_, arglist) ->
       arglist |> List.iter begin fun (r,e) ->
         let rid = Inst.int_of_reg r in
         match fst e with
@@ -191,13 +193,69 @@ let def_of_proc (cfg : SSA.stmt cfg) =
       end
     | _ -> failwith "last statement is not jumpout"
   end;
+  let n = Array.length cfg.node in
+  (* TODO: reduce code duplication *)
+  let rec update_use (ep, _) =
+    match ep with
+    | E_lit _ -> ()
+    | E_const _ -> ()
+    | E_var sv ->
+      begin match sv with
+        | { orig = Var.Global r; ver = 0; _ } ->
+          use.(Inst.int_of_reg r) <- true
+        | _ -> ()
+      end
+    | E_prim1 (_, e) -> update_use e
+    | E_prim2 (_, e1, e2) ->
+      update_use e1; update_use e2
+    | E_prim3 (_, e1, e2, e3) ->
+      update_use e1; update_use e2; update_use e3
+    | E_primn (_, es) -> List.iter update_use es
+    | E_nondet _ -> ()
+    | E_extend (_, e, _) -> update_use e
+    | E_shrink (e, _) -> update_use e
+    | E_load (_, off) ->
+      update_use off
+  in
+  for i=0 to n-1 do
+    cfg.node.(i).stmts |> List.iter begin function
+      | S_set (_, e) -> update_use e
+      | S_setpart (_, _, e) -> update_use e
+      | S_store (_, off, data) ->
+        update_use off; update_use data
+      | S_jump (cond_opt, e) ->
+        begin match cond_opt with
+          | Some cond -> update_use cond
+          | None -> ()
+        end;
+        update_use e
+      | S_jumpout_call (e, arglist, _) ->
+        update_use e;
+        arglist |> List.iter (fun (r,v) -> update_use v)
+      | S_jumpout_ret _ -> ()
+      | S_phi (_, rhs) ->
+        rhs |> Array.iter update_use
+      | _ -> assert false
+    end
+  done;
   preserved_registers cfg |> List.iter begin fun r ->
-    def.(Inst.int_of_reg r) <- false
+    let rid = Inst.int_of_reg r in
+    def.(rid) <- false;
+    use.(rid) <- false
   end;
-  List.range 0 `To (Inst.number_of_registers-1) |>
-  List.filter_map begin fun i ->
-    if def.(i) then Some (Inst.reg_of_int i) else None
-  end
+  let deflist =
+    Inst.all_registers |> List.filter_map begin fun r ->
+      let i = Inst.int_of_reg r in
+      if def.(i) then Some r else None
+    end
+  in
+  let uselist =
+    Inst.all_registers |> List.filter_map begin fun r ->
+      let i = Inst.int_of_reg r in
+      if use.(i) then Some r else None
+    end
+  in
+  deflist, uselist
 
 let auto_analyze db entry =
   scan db entry;
@@ -207,10 +265,12 @@ let auto_analyze db entry =
       let ssa_cfg =
         proc.inst_cfg |>
         Elaborate.elaborate_cfg db |>
-        Dataflow.convert_to_ssa
+        Dataflow.convert_to_ssa db
       in
       simplify_ssa_cfg ssa_cfg;
-      proc.defs <- def_of_proc ssa_cfg
+      let defs, uses = defuse_of_proc ssa_cfg in
+      proc.defs <- defs;
+      proc.uses <- uses
     end
   end
 

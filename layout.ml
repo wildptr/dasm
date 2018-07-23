@@ -39,7 +39,7 @@ let line_spacing = 8
 type vpath_info = {
   x : int;
   top : int; (* rank *)
-  bot : int; (* rank, insclusive *)
+  bot : int; (* rank, inclusive *)
   color : color;
 }
 
@@ -81,13 +81,40 @@ let color_of_attr attr =
   | Edge_true -> Green
   | Edge_false -> Red
 
-let rec layout_node conf nentry = function
+(*
+type 'a layout_ctlstruct =
+  | BBNode of 'a basic_block
+  | SeqNode of 'a layout_ctlstruct * 'a layout_ctlstruct
+  | IfNode of 'a layout_ctlstruct * bool * 'a layout_ctlstruct * bool
+  | IfElseNode of 'a layout_ctlstruct * bool * 'a layout_ctlstruct * 'a layout_ctlstruct
+  | DoWhileNode of 'a layout_ctlstruct * bool
+  | GenericNode of 'a layout_ctlstruct
+
+let rec convert_ctlstruct cs =
+  match cs with
+  | BB (bb, _) -> BBNode bb
+  | Seq (a, b) -> SeqNode (convert_ctlstruct a, convert_ctlstruct b)
+  | If (a, t, b, has_exit, _) ->
+    IfNode (convert_ctlstruct a, t, convert_ctlstruct b, has_exit)
+  | IfElse (a, t, b, c, _) ->
+    IfElseNode (convert_ctlstruct a, t, convert_ctlstruct b,
+                convert_ctlstruct c)
+  | DoWhile (a, t, _) ->
+    DoWhileNode (convert_ctlstruct a, t)
+  | Generic arr ->
+    GenericNode (arr |> Array.map convert_ctlstruct)
+*)
+
+let rec layout_node conf nentry nexit = function
+(*
   | Virtual ->
     let h = min 0 (nentry-1) * line_spacing / 2 in
     let entry = Array.init nentry (fun i -> i*line_spacing-h) in
     { left = -h; right = h; height = 0; entry; exit = [||];
       shape = Layout_virtual }
-  | BB (bb, nexit) ->
+*)
+  | BB (bb, _) ->
+(*
     let insts = bb.stmts in
     let text, maxw =
       List.fold_right begin fun inst (text, maxw) ->
@@ -101,9 +128,13 @@ let rec layout_node conf nentry = function
       end insts ([], 0)
     in
     let width = max conf.char_width @@ maxw * conf.char_width in
+    let height = max conf.char_height @@ List.length text * conf.char_height in
+*)
+    let text = [Printf.sprintf "%nx" bb.start] in
+    let width = conf.char_width * 16 in
     let left = -width/2 in
     let right = left+width in
-    let height = max conf.char_height @@ List.length text * conf.char_height in
+    let height = conf.char_height * 4 in
     let entry =
       Array.init nentry (fun i -> i*line_spacing-(nentry-1)*line_spacing/2)
     in
@@ -111,11 +142,15 @@ let rec layout_node conf nentry = function
       Array.init nexit (fun i -> i*line_spacing-(nexit-1)*line_spacing/2)
     in
     { left; right; height; entry; exit; shape = Layout_box { text } }
-  | Generic (exits, cs, edges) ->
-    layout_generic conf nentry exits cs edges
-  | If (a, t, b, b_has_exit) ->
+  | Generic _ ->
+(*     layout_generic conf nentry exits cs edges *)
+    { left = -conf.char_width*8; right = conf.char_width*8;
+      height = conf.char_height*4; entry = Array.create nentry 0;
+      exit = Array.create nexit 0;
+      shape = Layout_box { text = ["GENERIC"] } }
+  | If (a, t, b, b_has_exit, _) ->
     let a', a_is_bb = layout_fork conf nentry t a in
-    let b' = layout_node conf 1 b in
+    let b' = layout_node conf 1 (if b_has_exit then 1 else 0) b in
     let bx = a'.exit.(0) + line_spacing - b'.left in
     let by = a'.height + line_spacing*2 in
     let left = a'.left in
@@ -150,10 +185,10 @@ let rec layout_node conf nentry = function
     in
     { left; right; height; entry = a'.entry; exit = [|0|];
       shape = Layout_composite { nodes; connections } }
-  | If_else (a, t, b, c) ->
+  | IfElse (a, t, b, c, _) ->
     let a', a_is_bb = layout_fork conf nentry t a in
-    let b' = layout_node conf 1 b in
-    let c' = layout_node conf 1 c in
+    let b' = layout_node conf 1 1 b in
+    let c' = layout_node conf 1 nexit c in
     let w = b'.right + node_spacing - c'.left in
     let bx = -w/2 in
     let cx = bx + w in
@@ -189,13 +224,11 @@ let rec layout_node conf nentry = function
     let height = lane2 in
     let exit = [|0|] in
     { left; right; height; entry = a'.entry; exit; shape = Layout_composite { nodes; connections } }
-  | Fork1 _
-  | Fork2 _ -> assert false
   | Seq (a, b) ->
-    let a' = layout_node conf nentry a in
-    let b' = layout_node conf 1 b in
+    let a' = layout_node conf nentry 1 a in
+    let b' = layout_node conf 1 nexit b in
     layout_seq conf a' b'
-  | Do_while (a, t) ->
+  | DoWhile (a, t, _) ->
     let a', is_bb = layout_fork conf (nentry+1) t a in
     let ay = line_spacing in
     let ay1 = ay + a'.height in
@@ -220,6 +253,7 @@ let rec layout_node conf nentry = function
     let connections = con1 :: con2 :: top_con in
     { left; right; height; entry; exit = [|con1x|];
       shape = Layout_composite { nodes = [|0,ay,a'|]; connections } }
+(*
   | While_true a ->
     let a' = layout_node conf (nentry+1) a in
     let ay = line_spacing in
@@ -237,16 +271,17 @@ let rec layout_node conf nentry = function
     let connections = con2 :: top_con in
     { left; right; height; entry; exit = [||];
       shape = Layout_composite { nodes = [|0,ay,a'|]; connections } }
+*)
 
 and layout_fork conf nentry t = function
-  | BB (_, nexit) as b ->
-    assert (nexit = 2);
-    layout_node conf nentry b, true
+  | BB _ as a ->
+    layout_node conf nentry 2 a, true
   | Seq (a, b) ->
-    let a' = layout_node conf nentry a in
+    let a' = layout_node conf nentry 2 a in
     let b', is_bb = layout_fork conf 1 t b in
     layout_seq conf a' b', is_bb
   | Generic _ -> assert false
+(*
   | Fork1 (a, t1, b, t2) ->
     let a', a_is_bb = layout_fork conf nentry (t=t1) a in
     let b', b_is_bb = layout_fork conf 1 (t=t2) b in
@@ -287,6 +322,7 @@ and layout_fork conf nentry t = function
     { left; right; height; entry = a'.entry; exit;
       shape = Layout_composite { nodes; connections } }, false
   | Fork2 _ -> failwith "not implemented"
+*)
   | _ -> assert false
 
 and layout_seq conf a' b' =
@@ -313,6 +349,7 @@ and layout_seq conf a' b' =
   { left; right; height; entry = a'.entry; exit = b'.exit;
     shape = Layout_composite { nodes; connections } }
 
+(*
 and layout_generic conf nentry exits cs edges =
   let n = Array.length cs in
   let cs' =
@@ -554,3 +591,4 @@ and layout_generic conf nentry exits cs edges =
   in
   { left; right; height; entry; exit;
     shape = Layout_composite { nodes; connections } }
+*)

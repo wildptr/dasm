@@ -8,6 +8,7 @@ module Make(V : VarType) = struct
 
   let rec simplify = function
     | E_lit _ as e -> e
+    | E_const _ as e -> e
     | E_var _ as e -> e
     | E_prim1 (p, e) ->
       let (ep', _ as e') = simplify' e in
@@ -96,17 +97,24 @@ module Make(V : VarType) = struct
         | [e] -> fst e
         | _ -> E_primn (p, es')
       end
-    | E_load (size, seg, off) ->
-      let seg' = simplify' seg in
+    | E_load (size, off) ->
       let off' = simplify' off in
-      E_load (size, seg', off')
+      E_load (size, off')
     | E_nondet _ as e -> e
     | E_extend (sign, e, n) ->
       let e' = simplify' e in
-      E_extend (sign, e', n)
+      begin match fst e' with
+        | E_lit bv ->
+          E_lit ((if sign then Bitvec.sign_extend else Bitvec.zero_extend) n bv)
+        | _ -> E_extend (sign, e', n)
+      end
     | E_shrink (e, n) ->
       let e' = simplify' e in
-      E_shrink (e', n)
+      begin match fst e' with
+        | E_lit bv ->
+          E_lit (Bitvec.truncate n bv)
+        | _ -> E_shrink (e', n)
+      end
 
   and simplify' (ep, w) = simplify ep, w
 

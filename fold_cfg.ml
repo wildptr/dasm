@@ -5,7 +5,7 @@ open Printf
 
 exception Break
 
-type 'a cfg' = {
+type 'a folding_cfg = {
   size : int;
   node : 'a ctlstruct array;
   succ : int list array;
@@ -17,7 +17,7 @@ type 'a cfg' = {
 
 module S = Set.Int
 
-let debug = true
+let debug = false
 
 let address_of g i =
   start_of_ctlstruct g.node.(i)

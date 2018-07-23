@@ -1,12 +1,20 @@
 open Batteries
 open Format
 
+type reg_part = LoByte | HiByte | LoWord
+
+let string_of_reg_part = function
+  | LoByte -> "LoByte"
+  | HiByte -> "HiByte"
+  | LoWord -> "LoWord"
+
 type prim1 =
   | P1_not
   | P1_neg
   | P1_foldand
   | P1_foldxor
   | P1_foldor
+  | P1_part of reg_part
 
 type prim2 =
   | P2_sub
@@ -50,7 +58,7 @@ module Var = struct
     | Nondet w -> fprintf f "?%d" w
 
   let to_int = function
-    | Global r -> Obj.magic r
+    | Global r -> Inst.int_of_reg r
     | Temp i -> Inst.number_of_registers + i
     | Local name -> failwith ("Var.to_int: Local " ^ name)
     | PC -> failwith "Var.to_int: PC"
@@ -58,7 +66,7 @@ module Var = struct
 
   let of_int uid =
     if uid < Inst.number_of_registers then
-      Global (Obj.magic uid)
+      Global (Inst.reg_of_int uid)
     else
       Temp (uid - Inst.number_of_registers)
 
@@ -86,12 +94,13 @@ module Make(V : VarType) = struct
 
   type expr_proper =
     | E_lit of Bitvec.t
+    | E_const of string
     | E_var of var
     | E_prim1 of prim1 * expr
     | E_prim2 of prim2 * expr * expr
     | E_prim3 of prim3 * expr * expr * expr
     | E_primn of primn * expr list
-    | E_load of int * expr * expr
+    | E_load of int * expr
     | E_nondet of int * int
     | E_extend of bool * expr * int
     | E_shrink of expr * int
@@ -136,9 +145,12 @@ module Make(V : VarType) = struct
   (* elaborated form of instructions *)
   type stmt =
     | S_set of var * expr
-    | S_store of int * expr * expr * expr
+    | S_setpart of var * reg_part * expr
+    | S_store of int * expr * expr
     | S_jump of expr option * expr
-    | S_jumpout of expr * (Inst.reg * expr) list * (Inst.reg * var) list
+    | S_jumpout of expr * bool
+    | S_jumpout_call of expr * (Inst.reg * expr) list * (Inst.reg * var) list
+    | S_jumpout_ret of expr * (Inst.reg * expr) list
     | S_phi of var * expr array
     (* the following do not occur after elaboration *)
     | S_call of proc * expr list * var list
@@ -155,20 +167,30 @@ module Make(V : VarType) = struct
     p_var_tab : (string, int) Hashtbl.t;
   }
 
+  let pp_var_part f (var, part) =
+    fprintf f "%s(%a)" (string_of_reg_part part) V.pp var
+
   let rec pp_expr f (expr, _) =
     match expr with
     | E_lit bv -> fprintf f "%nd" (Bitvec.to_nativeint bv) (* width is lost *)
+    | E_const name -> pp_print_string f name
     | E_var var -> V.pp f var
     | E_prim1 (p, e) ->
-      let op_s =
-        match p with
-        | P1_not -> "~"
-        | P1_neg -> "-"
-        | P1_foldand -> "&"
-        | P1_foldxor -> "^"
-        | P1_foldor -> "|"
-      in
-      fprintf f "(%s%a)" op_s pp_expr e
+      let sym_pp op_s = fprintf f "(%s%a)" op_s pp_expr e in
+      let ident_pp op_s = fprintf f "%s(%a)" op_s pp_expr e in
+      begin match p with
+        | P1_not -> sym_pp "~"
+        | P1_neg -> sym_pp "-"
+        | P1_foldand -> sym_pp "&"
+        | P1_foldxor -> sym_pp "^"
+        | P1_foldor -> sym_pp "|"
+        | P1_part p ->
+          ident_pp
+            (match p with
+             | LoByte -> "LoByte"
+             | HiByte -> "HiByte"
+             | LoWord -> "LoWord")
+      end
     | E_prim2 (p, e1, e2) ->
       begin match p with
         | P2_sub -> fprintf f "(%a - %a)" pp_expr e1 pp_expr e2
@@ -194,7 +216,7 @@ module Make(V : VarType) = struct
         | Pn_or -> "|"
       in
       fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") pp_expr) es
-    | E_load (size, seg, addr) ->
+    | E_load (size, addr) ->
       fprintf f "[%a]" pp_expr addr
     | E_nondet (n, id) -> fprintf f "nondet(%d)#%d" n id
     | E_extend (sign, e, n) ->
@@ -206,19 +228,35 @@ module Make(V : VarType) = struct
   let pp_stmt f = function
     | S_set (var, e) ->
       fprintf f "%a = %a" V.pp var pp_expr e
-    | S_store (size, seg, e_addr, e_data) ->
-      fprintf f "%a:[%a]@%d = %a" pp_expr seg pp_expr e_addr size pp_expr e_data
+    | S_setpart (var, part, e) ->
+      fprintf f "%a = %a" pp_var_part (var, part) pp_expr e
+    | S_store (size, e_addr, e_data) ->
+      fprintf f "[%a]@%d = %a" pp_expr e_addr size pp_expr e_data
     | S_jump (cond_opt, e) ->
       begin match cond_opt with
         | Some cond -> fprintf f "if (%a) " pp_expr cond
         | None -> ()
       end;
       fprintf f "goto %a" pp_expr e
-    | S_jumpout (dst, arglist, retlist) ->
+    | S_jumpout (e, _) ->
+      fprintf f "jumpout %a" pp_expr e
+    | S_jumpout_call (dst, arglist, retlist) ->
       retlist |> List.iter begin fun (r,v) ->
         fprintf f "%a=%s " V.pp v (Inst.string_of_reg r)
       end;
       fprintf f "call %a" pp_expr dst;
+      let pp_pair f (r, v) =
+        fprintf f "%s=%a" (Inst.string_of_reg r) pp_expr v
+      in
+      begin match arglist with
+        | [] -> ()
+        | hd::tl ->
+          fprintf f " [%a" pp_pair hd;
+          tl |> List.iter (fprintf f " %a" pp_pair);
+          fprintf f "]"
+      end
+    | S_jumpout_ret (dst, arglist) ->
+      fprintf f "return_to %a" pp_expr dst;
       let pp_pair f (r, v) =
         fprintf f "%s=%a" (Inst.string_of_reg r) pp_expr v
       in
@@ -272,6 +310,7 @@ module Make(V : VarType) = struct
     let expr' =
       match expr with
       | E_lit _ as e -> e
+      | E_const _ as e -> e
       | E_var v -> f v
       | E_prim1 (p, e) -> E_prim1 (p, subst f e)
       | E_prim2 (p, e1, e2) ->
@@ -280,7 +319,7 @@ module Make(V : VarType) = struct
         E_prim3 (p, subst f e1, subst f e2, subst f e3)
       | E_primn (p, es) ->
         E_primn (p, List.map (subst f) es)
-      | E_load (size, seg, addr) -> E_load (size, subst f seg, subst f addr)
+      | E_load (size, addr) -> E_load (size, subst f addr)
       | E_nondet _ as e -> e
       | E_extend (sign, e, n) -> E_extend (sign, subst f e, n)
       | E_shrink (e, n) -> E_shrink (subst f e, n)
@@ -289,16 +328,23 @@ module Make(V : VarType) = struct
 
   let map_stmt f = function
     | S_set (lhs, rhs) -> S_set (lhs, f rhs)
-    | S_store (size, seg, addr, data) ->
-      S_store (size, f seg, f addr, f data)
+    | S_setpart (lhs, p, rhs) -> S_setpart (lhs, p, f rhs)
+    | S_store (size, addr, data) ->
+      S_store (size, f addr, f data)
     | S_jump (cond_opt, dest) ->
       let cond_opt' = Option.map f cond_opt in
       let dest' = f dest in
       S_jump (cond_opt', dest')
-    | S_jumpout (dest, arglist, retlist) ->
+    | S_jumpout (dest, j) ->
+      S_jumpout (f dest, j)
+    | S_jumpout_call (dest, arglist, retlist) ->
       let dest' = f dest in
       let arglist' = arglist |> List.map (fun (r,v) -> r, f v) in
-      S_jumpout (dest', arglist', retlist)
+      S_jumpout_call (dest', arglist', retlist)
+    | S_jumpout_ret (dest, arglist) ->
+      let dest' = f dest in
+      let arglist' = arglist |> List.map (fun (r,v) -> r, f v) in
+      S_jumpout_ret (dest', arglist')
     | S_phi (lhs, rhs) -> S_phi (lhs, Array.map f rhs)
     | _ -> invalid_arg "map_stmt"
 

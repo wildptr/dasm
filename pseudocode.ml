@@ -11,22 +11,27 @@ module Make(V : VarType) = struct
 
   type lvalue =
     | L_var of var
-    | L_mem of expr * expr * int
+    | L_mem of expr * int
 
   type pstmt =
     | P_set of lvalue * expr
+    | P_setpart of lvalue * reg_part * expr
     | P_goto of expr
     | P_if of expr * pstmt list
     | P_if_else of expr * pstmt list * pstmt list
     | P_do_while of pstmt list * expr
     | P_label of nativeint
     | P_comment of string
+    | P_call of expr * (Inst.reg * expr) list * (Inst.reg * V.t) list
+    | P_return of expr * (Inst.reg * expr) list
 
   let rec convert_stmt = function
     | S_set (var, e) ->
       P_set (L_var var, e)
-    | S_store (size, seg, off, data) ->
-      let lv = L_mem (seg, off, size) in
+    | S_setpart (var, p, e) ->
+      P_setpart (L_var var, p, e)
+    | S_store (size, off, data) ->
+      let lv = L_mem (off, size) in
       P_set (lv, data)
     | S_jump (cond_opt, dst) ->
       begin match cond_opt with
@@ -35,8 +40,12 @@ module Make(V : VarType) = struct
         | None ->
           P_goto dst
       end
-    | S_jumpout (dst, _, _) ->
+    | S_jumpout (dst, _) ->
       P_goto dst
+    | S_jumpout_call (dst, ins, outs) ->
+      P_call (dst, ins, outs)
+    | S_jumpout_ret (dst, ins) ->
+      P_return (dst, ins)
     | S_if (cond, body) ->
       P_if (cond, convert_stmt_list body)
     | S_if_else (cond, body1, body2) ->
@@ -145,7 +154,7 @@ module Make(V : VarType) = struct
 
   let pp_lvalue f = function
     | L_var var -> V.pp f var
-    | L_mem (seg, off, size) -> pp_expr f (E_load (size, seg, off), size*8)
+    | L_mem (off, size) -> pp_expr f (E_load (size, off), size*8)
 
   let pp_label_expr f (ep, _ as e) =
     match ep with
@@ -155,8 +164,41 @@ module Make(V : VarType) = struct
   let rec pp_pstmt' indent f = function
     | P_set (lv, e) ->
       fprintf f "%s%a = %a;\n" indent pp_lvalue lv pp_expr e
+    | P_setpart (lv, p, e) ->
+      fprintf f "%s%s(%a) = %a;\n" indent (string_of_reg_part p)
+        pp_lvalue lv pp_expr e
     | P_goto e ->
       fprintf f "%sgoto %a;\n" indent pp_label_expr e
+    | P_call (dst, ins, outs) ->
+      pp_print_string f indent;
+      outs |> List.iter begin fun (r,v) ->
+        fprintf f "%a=%s " V.pp v (Inst.string_of_reg r)
+      end;
+      fprintf f "call %a" pp_expr dst;
+      let pp_pair f (r, v) =
+        fprintf f "%s=%a" (Inst.string_of_reg r) pp_expr v
+      in
+      begin match ins with
+        | [] -> ()
+        | hd::tl ->
+          fprintf f " {%a" pp_pair hd;
+          tl |> List.iter (fprintf f ", %a" pp_pair);
+          fprintf f "}"
+      end;
+      pp_print_string f "\n"
+    | P_return (dst, ins) ->
+      fprintf f "%sreturn_to %a" indent pp_expr dst;
+      let pp_pair f (r, v) =
+        fprintf f "%s=%a" (Inst.string_of_reg r) pp_expr v
+      in
+      ins |> begin function
+        | [] -> ()
+        | hd::tl ->
+          fprintf f " {%a" pp_pair hd;
+          tl |> List.iter (fprintf f ", %a" pp_pair);
+          fprintf f "}"
+      end;
+      pp_print_string f "\n"
     | P_if (cond, body) ->
       fprintf f "%sif (%a) {\n" indent pp_expr cond;
       body |> List.iter (pp_pstmt' (indent^"\t") f);

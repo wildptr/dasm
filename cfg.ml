@@ -19,6 +19,8 @@ type 'a cfg = {
   temp_tab : int array;
 }
 
+let basic_block_count cfg = Array.length cfg.node
+
 let print_cfg pp_stmt cfg =
   let n = Array.length cfg.node in
   for i=0 to n-1 do

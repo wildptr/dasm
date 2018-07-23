@@ -20,3 +20,6 @@ val of_bytestring : string -> t
 val pp : Format.formatter -> t -> unit
 val to_bool : t -> bool
 val equal : t -> t -> bool
+val truncate : int -> t -> t
+val zero_extend : int -> t -> t
+val sign_extend : int -> t -> t

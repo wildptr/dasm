@@ -4,8 +4,6 @@ open Inst
 open Semant
 open Plain
 
-type reg_alias = LoByte | HiByte | LoWord
-
 let alias_table = [|
   LoByte, R_EAX;
   LoByte, R_ECX;
@@ -28,20 +26,11 @@ let alias_table = [|
 let expr_of_reg r = E_var (Var.Global r), size_of_reg r
 
 let elaborate_reg r =
-  let (rid:int) = Obj.magic r in
+  let rid = Inst.int_of_reg r in
   if rid < 16 then
-    let size = size_of_reg r in
-    let a, r' = alias_table.(rid) in
-    let ep =
-      match a with
-      | LoByte | LoWord -> E_shrink (expr_of_reg r', size)
-      | HiByte ->
-        let shifted =
-          make_prim2 P2_logshiftright (expr_of_reg r') (make_lit 4 8n)
-        in
-        E_shrink (shifted, size)
-    in
-    ep, size
+    let a, fullreg = alias_table.(rid) in
+    let ep = E_prim1 (P1_part a, expr_of_reg fullreg) in
+    ep, size_of_reg r
   else
     expr_of_reg r
 
@@ -85,8 +74,7 @@ let elaborate_mem_index (reg, scale) =
 let make_address addr = make_lit 32 addr
 
 let elaborate_mem_addr m =
-  let seg = elaborate_reg m.seg in
-  let off =
+  let addr =
     match m.base, m.index with
     | Some base, Some index ->
       let e_base = elaborate_reg base in
@@ -113,14 +101,18 @@ let elaborate_mem_addr m =
     | None, None ->
       make_address m.disp
   in
-  seg, off
+  match m.seg with
+  | R_ES | R_CS | R_SS | R_DS -> addr
+  | R_FS -> E_primn (Pn_add, [E_const "FS_BASE", 32; addr]), 32
+  | R_GS -> E_primn (Pn_add, [E_const "GS_BASE", 32; addr]), 32
+  | _ -> failwith "elaborate_mem_addr: invalid segment register"
 
 let elaborate_operand pc' = function
   | O_reg reg -> elaborate_reg reg
   | O_mem (mem, size) ->
     if size <= 0 then failwith "size of operand invalid";
-    let seg, off = elaborate_mem_addr mem in
-    E_load (size, seg, off), size*8
+    let off = elaborate_mem_addr mem in
+    E_load (size, off), size*8
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
     make_lit (size*8) imm
@@ -130,7 +122,15 @@ let elaborate_operand pc' = function
 let elaborate_writeback emit o_dst e_data =
   match o_dst with
   | O_reg r ->
-    let (rid:int) = Obj.magic r in
+    let rid = Inst.int_of_reg r in
+    if rid < 16 then
+      let a, fullreg = alias_table.(rid) in
+      emit (S_setpart (Var.Global fullreg, a, e_data))
+    else
+      emit (S_set (Var.Global r, e_data))
+(*
+    emit (S_set (Var.Global r, e_data));
+    let rid = Inst.int_of_reg r in
     if rid < 16 then
       let a, r' = alias_table.(rid) in
       let size' = size_of_reg r' in
@@ -146,12 +146,20 @@ let elaborate_writeback emit o_dst e_data =
       in
       let e2 = make_primn Pn_and [expr_of_reg r'; make_lit size' mask] in
       emit (S_set (Var.Global r', make_primn Pn_or [e1;e2]))
-    else
-      emit (S_set (Var.Global r, e_data))
+    else if rid < 24 then begin
+      let fullreg = expr_of_reg r in
+      if rid < 20 then begin
+        (* ExX *)
+        emit (S_set (Var.Global (Inst.reg_of_int (rid-16)), (E_shrink (fullreg, 8), 8)));
+        emit (S_set (Var.Global (Inst.reg_of_int (rid-12)), (E_shrink (make_prim2 P2_logshiftright fullreg (make_lit 4 8n), 8), 8)));
+      end;
+      emit (S_set (Var.Global (Inst.reg_of_int (rid-8)), (E_shrink (fullreg, 16), 16)))
+    end
+*)
   | O_mem (m, size) ->
     assert (size > 0);
-    let seg, off = elaborate_mem_addr m in
-    emit (S_store (size, seg, off, e_data))
+    let off = elaborate_mem_addr m in
+    emit (S_store (size, off, e_data))
   | _ -> failwith "elaborate_writeback: invalid operand type"
 
 let fnname_of_op = function
@@ -182,14 +190,14 @@ let fnname_of_op = function
 let jumpout_arglist =
   List.range 16 `To (Inst.number_of_registers-1) |>
   List.map begin fun rid ->
-    let (r:Inst.reg) = Obj.magic rid in
+    let r = Inst.reg_of_int rid in
     r, expr_of_reg r
   end
 
 let call_retlist =
   List.range 0 `To (Inst.number_of_registers-1) |>
   List.map begin fun rid ->
-    let r = Obj.magic rid in
+    let r = Inst.reg_of_int rid in
     r, Var.Global r
   end
 
@@ -204,7 +212,7 @@ let rec expand_stmt env pc stmt =
     | Var.Nondet w -> E_nondet (w, new_nondet_id env)
 (*
     | Var.Global r as v ->
-      let (rid:int) = Obj.magic r in
+      let rid = Inst.int_of_reg r in
       if rid < 16 then
         let size = size_of_reg r in
         let a, r' = alias_table.(rid) in
@@ -220,8 +228,7 @@ let rec expand_stmt env pc stmt =
     | v -> E_var v
   in
   let rename e = subst rename_var e in
-  match stmt with
-  | S_set (var, e) ->
+  let tr_assign var e =
     let var' =
       match rename_var var with
       | E_lit _ -> failwith "assignment to parameter (via ordinary assignment)"
@@ -229,15 +236,26 @@ let rec expand_stmt env pc stmt =
       | _ -> assert false
     in
     let e' = rename e in
+    var', e'
+  in
+  match stmt with
+  | S_set (var, e) ->
+    let var', e' = tr_assign var e in
     emit env (S_set (var', e'))
-  | S_store (size, seg, addr, data) ->
-    emit env (S_store (size, seg, rename addr, rename data))
+  | S_setpart (var, p, e) ->
+    let var', e' = tr_assign var e in
+    emit env (S_setpart (var', p, e'))
+  | S_store (size, addr, data) ->
+    emit env (S_store (size, rename addr, rename data))
   | S_jump (c, e) ->
     begin match Database.get_jump_info env.db pc with
       | (J_call | J_ret as j) ->
         assert (c = None);
+(*
         let retlist = if j = J_call then call_retlist else [] in
         emit env (S_jumpout (rename e, jumpout_arglist, retlist))
+*)
+        emit env (S_jumpout (rename e, j = J_call))
       | _ ->
         emit env (S_jump (Option.map rename c, rename e))
     end
@@ -375,7 +393,7 @@ let elaborate_inst env pc inst =
         | [d; s] -> d, s
         | _ -> assert false
       in
-      let _, addr =
+      let addr =
         match src with
         | O_mem (m, _size) -> elaborate_mem_addr m
         | _ -> assert false

@@ -135,6 +135,8 @@ let rec translate_cexpr st = function
     in
     f e'
 
+(* TODO: handle segment selectors *)
+
 let rec translate_expr env expr =
   let st = env.symtab in
   match expr with
@@ -237,7 +239,7 @@ let rec translate_expr env expr =
     E_var (Var.Nondet width), width
   | Expr_load memloc ->
     let seg', off', w = translate_memloc env memloc in
-    E_load (w lsr 3, seg', off'), w
+    E_load (w lsr 3, off'), w
   | Expr_extend (sign, data, size) ->
     let data' = translate_expr env data in
     let size' = translate_cexpr st size in
@@ -282,7 +284,7 @@ let translate_stmt env stmt =
         check_width mw w;
         if w land 7 <> 0 then
           failwith "width of memory location is not multiple of 8";
-        emit env (S_store (w lsr 3, seg, off, data))
+        emit env (S_store (w lsr 3, off, data))
     end
   in
   match stmt with

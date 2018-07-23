@@ -75,3 +75,25 @@ let to_bool bv =
   bv.bits <> 0n
 
 let equal b1 b2 = b1 = b2
+
+let truncate len bv =
+  let mask = Nativeint.(shift_left 1n len - 1n) in
+  { len; bits = Nativeint.(logand bv.bits mask) }
+
+let zero_extend len bv =
+  { len; bits = bv.bits }
+
+let sign_bit bv =
+  Nativeint.logand (Nativeint.shift_right bv.bits (bv.len-1)) 1n = 1n
+
+let sign_extend len bv =
+  let s = sign_bit bv in
+  let bits =
+    if s then
+      let lmask = Nativeint.(shift_left 1n len - 1n) in
+      let smask = Nativeint.(shift_left 1n bv.len - 1n) in
+      Nativeint.(logor bv.bits (logxor lmask smask))
+    else
+      bv.bits
+  in
+  { len; bits }
