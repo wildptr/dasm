@@ -14,7 +14,6 @@ module DefUse(V : VarType) = struct
 
   let def_of_stmt = function
     | S_set (lhs, _) -> S.singleton (V.to_int lhs)
-    | S_setpart (lhs, _, _) -> S.singleton (V.to_int lhs)
     | S_phi (lhs, _) -> S.singleton (V.to_int lhs)
     | S_jumpout_call (_, _, retlist) ->
       retlist |> List.map (fun (r,v) -> V.to_int v) |> S.of_list
@@ -40,7 +39,6 @@ module DefUse(V : VarType) = struct
 
   let use_of_stmt = function
     | S_set (_, e) -> use_of_expr e
-    | S_setpart (_, _, e) -> use_of_expr e
     | S_store (_, addr, data) ->
       use_of_expr data |>
       S.union (use_of_expr addr)
@@ -71,9 +69,6 @@ module DefUse(V : VarType) = struct
         let s = stmt_arr.(i) in
         s |> begin function
           | S_set (lhs, _) ->
-            let uid = V.to_int lhs in
-            if live.(uid) then emit s
-          | S_setpart (lhs, _, _) ->
             let uid = V.to_int lhs in
             if live.(uid) then emit s
           | S_phi (lhs, _) ->
@@ -281,9 +276,6 @@ let remove_dead_code_ssa cfg =
           | S_set (lhs, _) ->
             let v = SSAVar.to_int lhs in
             use_count.(v) > 0
-          | S_setpart (lhs, _, _) ->
-            let v = SSAVar.to_int lhs in
-            use_count.(v) > 0
           | S_phi (lhs, _) ->
             let v = SSAVar.to_int lhs in
             use_count.(v) > 0
@@ -466,10 +458,6 @@ let convert_to_ssa db cfg =
           let e' = rename_to_ssa f e in
           let name' = f name in
           SSA.S_set (name', e')
-        | Plain.S_setpart (name, p, e) ->
-          let e' = rename_to_ssa f e in
-          let name' = f name in
-          SSA.S_setpart (name', p, e')
         | Plain.S_store (size, off, data) ->
           let off' = rename_to_ssa f off in
           let data' = rename_to_ssa f data in
@@ -518,10 +506,6 @@ let convert_to_ssa db cfg =
           let e' = sub e in
           let name' = rename_lhs sv in
           S_set (name', e')
-        | S_setpart (sv, p, e) ->
-          let e' = sub e in
-          let name' = rename_lhs sv in
-          S_setpart (name', p, e')
         | S_store (size, off, data) ->
           let off' = sub off in
           let data' = sub data in
@@ -589,8 +573,6 @@ let convert_stmt_from_ssa f s =
   match s with
   | SSA.S_set (lhs, rhs) ->
     Plain.S_set (f lhs, rename rhs)
-  | SSA.S_setpart (lhs, p, rhs) ->
-    Plain.S_setpart (f lhs, p, rename rhs)
   | SSA.S_store (size, addr, data) ->
     Plain.S_store (size, rename addr, rename data)
   | SSA.S_jump (cond_opt, dest) ->

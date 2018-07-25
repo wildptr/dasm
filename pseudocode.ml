@@ -15,7 +15,6 @@ module Make(V : VarType) = struct
 
   type pstmt =
     | P_set of lvalue * expr
-    | P_setpart of lvalue * reg_part * expr
     | P_goto of expr
     | P_if of expr * pstmt list
     | P_if_else of expr * pstmt list * pstmt list
@@ -28,8 +27,6 @@ module Make(V : VarType) = struct
   let rec convert_stmt = function
     | S_set (var, e) ->
       P_set (L_var var, e)
-    | S_setpart (var, p, e) ->
-      P_setpart (L_var var, p, e)
     | S_store (size, off, data) ->
       let lv = L_mem (off, size) in
       P_set (lv, data)
@@ -164,9 +161,6 @@ module Make(V : VarType) = struct
   let rec pp_pstmt' indent f = function
     | P_set (lv, e) ->
       fprintf f "%s%a = %a;\n" indent pp_lvalue lv pp_expr e
-    | P_setpart (lv, p, e) ->
-      fprintf f "%s%s(%a) = %a;\n" indent (string_of_reg_part p)
-        pp_lvalue lv pp_expr e
     | P_goto e ->
       fprintf f "%sgoto %a;\n" indent pp_label_expr e
     | P_call (dst, ins, outs) ->

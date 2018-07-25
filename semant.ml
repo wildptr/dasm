@@ -24,6 +24,7 @@ type prim2 =
   | P2_arishiftright
   | P2_less
   | P2_below
+  | P2_updatepart of reg_part
 
 type prim3 =
   | P3_carry
@@ -121,6 +122,7 @@ module Make(V : VarType) = struct
         1
       | P2_shiftleft | P2_logshiftright | P2_arishiftright ->
         snd e1
+      | P2_updatepart _ -> snd e1
     in
     E_prim2 (p, e1, e2), size
   let make_primn p es =
@@ -145,7 +147,6 @@ module Make(V : VarType) = struct
   (* elaborated form of instructions *)
   type stmt =
     | S_set of var * expr
-    | S_setpart of var * reg_part * expr
     | S_store of int * expr * expr
     | S_jump of expr option * expr
     | S_jumpout of expr * bool
@@ -184,12 +185,7 @@ module Make(V : VarType) = struct
         | P1_foldand -> sym_pp "&"
         | P1_foldxor -> sym_pp "^"
         | P1_foldor -> sym_pp "|"
-        | P1_part p ->
-          ident_pp
-            (match p with
-             | LoByte -> "LoByte"
-             | HiByte -> "HiByte"
-             | LoWord -> "LoWord")
+        | P1_part p -> ident_pp (string_of_reg_part p)
       end
     | E_prim2 (p, e1, e2) ->
       begin match p with
@@ -200,6 +196,9 @@ module Make(V : VarType) = struct
         | P2_arishiftright -> fprintf f "(%a ±>> %a)" pp_expr e1 pp_expr e2
         | P2_less -> fprintf f "(%a ±< %a)" pp_expr e1 pp_expr e2
         | P2_below -> fprintf f "(%a < %a)" pp_expr e1 pp_expr e2
+        | P2_updatepart p ->
+          fprintf f "Update%s(%a, %a)" (string_of_reg_part p)
+            pp_expr e1 pp_expr e2
       end
     | E_prim3 (p, e1, e2, e3) ->
       begin match p with
@@ -228,8 +227,6 @@ module Make(V : VarType) = struct
   let pp_stmt f = function
     | S_set (var, e) ->
       fprintf f "%a = %a" V.pp var pp_expr e
-    | S_setpart (var, part, e) ->
-      fprintf f "%a = %a" pp_var_part (var, part) pp_expr e
     | S_store (size, e_addr, e_data) ->
       fprintf f "[%a]@%d = %a" pp_expr e_addr size pp_expr e_data
     | S_jump (cond_opt, e) ->
@@ -328,7 +325,6 @@ module Make(V : VarType) = struct
 
   let map_stmt f = function
     | S_set (lhs, rhs) -> S_set (lhs, f rhs)
-    | S_setpart (lhs, p, rhs) -> S_setpart (lhs, p, f rhs)
     | S_store (size, addr, data) ->
       S_store (size, f addr, f data)
     | S_jump (cond_opt, dest) ->

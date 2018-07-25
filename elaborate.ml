@@ -125,7 +125,8 @@ let elaborate_writeback emit o_dst e_data =
     let rid = Inst.int_of_reg r in
     if rid < 16 then
       let a, fullreg = alias_table.(rid) in
-      emit (S_setpart (Var.Global fullreg, a, e_data))
+      emit (S_set (Var.Global fullreg,
+                   make_prim2 (P2_updatepart a) (expr_of_reg fullreg) e_data))
     else
       emit (S_set (Var.Global r, e_data))
 (*
@@ -242,9 +243,6 @@ let rec expand_stmt env pc stmt =
   | S_set (var, e) ->
     let var', e' = tr_assign var e in
     emit env (S_set (var', e'))
-  | S_setpart (var, p, e) ->
-    let var', e' = tr_assign var e in
-    emit env (S_setpart (var', p, e'))
   | S_store (size, addr, data) ->
     emit env (S_store (size, rename addr, rename data))
   | S_jump (c, e) ->

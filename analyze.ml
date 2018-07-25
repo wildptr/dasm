@@ -220,7 +220,6 @@ let defuse_of_proc (cfg : SSA.stmt cfg) =
   for i=0 to n-1 do
     cfg.node.(i).stmts |> List.iter begin function
       | S_set (_, e) -> update_use e
-      | S_setpart (_, _, e) -> update_use e
       | S_store (_, off, data) ->
         update_use off; update_use data
       | S_jump (cond_opt, e) ->
