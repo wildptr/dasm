@@ -1,5 +1,5 @@
+open Batteries
 open Analyze
-open Layout
 
 let asm_listing (cfg : Inst.inst Cfg.cfg) =
   let open Format in
@@ -10,6 +10,7 @@ let asm_listing (cfg : Inst.inst Cfg.cfg) =
   done;
   flush_str_formatter ()
 
+(*
 type rect = { x : int; y : int; width : int; height : int }
 
 let layout_margin = 32
@@ -77,18 +78,18 @@ let expose canvas layout ev =
   let y = Gdk.Rectangle.y area in
   let width = Gdk.Rectangle.width area in
   let height = Gdk.Rectangle.height area in
-
-  let cr = Cairo_gtk.create canvas#misc#window in
-
-  set_source_rgb cr 1.0 1.0 1.0;
-  rectangle cr (float_of_int x) (float_of_int y)
-    (float_of_int width) (float_of_int height);
-  fill cr;
-
-  draw_object cr { x; y; width; height }
-    (layout_margin - layout.left) layout_margin layout;
-
+  begin
+    let cr = Cairo_gtk.create canvas#misc#window in
+    set_source_rgb cr 1.0 1.0 1.0;
+    rectangle cr (float_of_int x) (float_of_int y)
+      (float_of_int width) (float_of_int height);
+    fill cr;
+    draw_object cr { x; y; width; height }
+      (layout_margin - layout.left) layout_margin layout;
+    finalize cr
+  end;
   true
+*)
 
 let show_il db va32 =
   let va = Nativeint.of_int32 va32 in
@@ -152,7 +153,7 @@ let show_il db va32 =
     end
   in
   (* "CFG" button *)
-  let _ =
+  (* let _ =
     let btn = GButton.button ~label:"CFG" ~packing:toolbar#add () in
     btn#connect#clicked begin fun () ->
       let cfg_window =
@@ -167,13 +168,29 @@ let show_il db va32 =
       let conf =
         { char_width = 8; char_height = 16 }
       in
-      let layout = Layout.layout_node conf 0 0 cs in
+      let layout = Layout.layout_node conf 0 cs in
       let _ = canvas#event#connect#expose (expose canvas layout) in
       let layout_margin = 32 in
       canvas#misc#set_size_request
         ~width:(layout.right - layout.left + layout_margin*2)
         ~height:(layout.height + layout_margin*2) ();
       cfg_window#show ()
+    end
+  in *)
+  let _ =
+    let btn = GButton.button ~label:"CFG" ~packing:toolbar#add () in
+    btn#connect#clicked begin fun () ->
+      let exitcode =
+        File.with_temporary_out begin fun oc filepath ->
+          let out_filepath = filepath ^ ".pdf" in
+          Graphviz_intf.write_dot (Format.formatter_of_output oc) icfg;
+          Sys.command
+            (Printf.sprintf "dot -Tpdf %s > %s && open %s"
+               filepath out_filepath out_filepath)
+        end;
+      in
+      Printf.eprintf "exited with %d\n" exitcode;
+      flush stderr
     end
   in
   text_view#buffer#set_text il_text;

@@ -1,13 +1,16 @@
 open Cfg
 
-let lca parent a b =
-  let visited = Array.make (Array.length parent) false in
+let lca idom a b =
+  let parent i =
+    let tmp = idom.(i) in if tmp >= 0 then tmp else 0
+  in
+  let visited = Array.make (Array.length idom) false in
   let rec loop a b =
     if visited.(a) then a else begin
       visited.(a) <- true;
       if visited.(b) then b else begin
         visited.(b) <- true;
-        loop parent.(a) parent.(b)
+        loop (parent a) (parent b)
       end
     end
   in
@@ -74,3 +77,6 @@ let compute_idom succ pred =
     if samedom.(i) >= 0 then idom.(i) <- idom.(samedom.(i))
   done;
   idom
+
+let domtree_of_cfg cfg =
+  compute_idom cfg.succ cfg.pred

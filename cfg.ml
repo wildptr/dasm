@@ -34,16 +34,15 @@ let print_cfg pp_stmt cfg =
 type 'a ctlstruct =
   | BB of 'a basic_block * nativeint option
   | Seq of 'a ctlstruct * 'a ctlstruct
-  | If of 'a ctlstruct * bool * 'a ctlstruct * bool * nativeint
+  | If of 'a ctlstruct * bool * 'a ctlstruct * nativeint
   | IfElse of 'a ctlstruct * bool * 'a ctlstruct * 'a ctlstruct * nativeint
   | DoWhile of 'a ctlstruct * bool * nativeint
-  | Generic of 'a ctlstruct array * nativeint list *
-               (nativeint * nativeint * edge_attr) list
+  | Generic of 'a ctlstruct array
 
 let rec start_of_ctlstruct = function
   | BB (bb, _) -> bb.start
   | Seq (a, _) -> start_of_ctlstruct a
-  | If (a, _, _, _, _) -> start_of_ctlstruct a
+  | If (a, _, _, _) -> start_of_ctlstruct a
   | IfElse (a, _, _, _, _) -> start_of_ctlstruct a
   | DoWhile (a, _, _) -> start_of_ctlstruct a
-  | Generic (l, _, _) -> start_of_ctlstruct l.(0)
+  | Generic l -> start_of_ctlstruct l.(0)

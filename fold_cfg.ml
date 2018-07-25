@@ -184,7 +184,7 @@ let try_fold_if g entry body =
     if debug then begin
       printf "if (%nx,%b,%nx,%b) -> %nx\n" (address_of g entry) t (address_of g body) has_exit (address_of g exit)
     end;
-    g.node.(entry) <- If (g.node.(entry), t, g.node.(body), has_exit, address_of g exit);
+    g.node.(entry) <- If (g.node.(entry), t, g.node.(body), address_of g exit);
     remove_edge g entry body;
     if has_exit then remove_edge g body exit;
     g.children.(entry) <- List.remove g.children.(entry) body;
@@ -232,7 +232,9 @@ let try_fold_do_while g entry =
       | _ -> raise Break
     in
     let t = get_edge_attr g entry entry = Edge_true in
-    printf "do-while (%nx,%b) -> %nx\n" (address_of g entry) t (address_of g exit);
+    if debug then
+      printf "do-while (%nx,%b) -> %nx\n" (address_of g entry) t
+        (address_of g exit);
     g.node.(entry) <- DoWhile (g.node.(entry), t, address_of g exit);
     (* just remove the backward edge *)
     remove_edge g entry entry;
@@ -422,7 +424,7 @@ and fold_generic g entry nodes =
           exit_list |> List.map (address_of g) |> List.iter (printf " %nx");
           printf " ]\n";
         end;
-        let edges' =
+        (* let edges' =
           let temp = ref [] in
           node_list |> List.iter begin fun i ->
             let i_va = address_of g i in
@@ -433,10 +435,8 @@ and fold_generic g entry nodes =
             end
           end;
           !temp
-        in
-        Generic (node_list |> List.map (Array.get g.node) |> Array.of_list,
-                 exit_list |> List.map (address_of g),
-                 edges')
+        in *)
+        Generic (node_list |> List.map (Array.get g.node) |> Array.of_list)
     in
     g.node.(entry) <- new_node;
     g.succ.(entry) |> List.iter (remove_edge g entry);

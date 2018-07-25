@@ -77,7 +77,7 @@ module Make(V : VarType) = struct
     | Seq (v1, v2) ->
       convert_seq emit (Some (start_of_ctlstruct v2)) v1;
       convert_seq emit next_opt v2
-    | If (cond, t, body, _, succ) ->
+    | If (cond, t, body, succ) ->
       let cond_expr = convert_cond emit cond in
       let body' = convert_seq' (Some succ) body in
       P_if (make_cond cond_expr t, body') |> emit;
@@ -97,7 +97,7 @@ module Make(V : VarType) = struct
       in
       P_do_while (cond_stmts, make_cond cond_expr t) |> emit;
       conclude emit next_opt succ
-    | Generic (l, _, _) ->
+    | Generic l ->
       let n = Array.length l in
       let next =
         Array.init n begin fun i ->
