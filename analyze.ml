@@ -38,23 +38,21 @@ let rec scan db va =
 let find_stack_ref il =
   let module S = Set.Nativeint in
   let set = ref S.empty in
-  let rec visit_addr_expr (ep, _ as e) =
+  let rec visit_addr_expr e =
     visit_expr e;
-    match ep with
-    | E_primn (Pn_add, [E_var (Var.Global R_ESP), _; E_lit bv, _]) ->
+    match e with
+    | E_prim2 (P2_add, (E_var (Var.Global R_ESP)), (E_lit bv)) ->
       set := S.add (Bitvec.to_nativeint bv) !set
     | E_var (Var.Global R_ESP) ->
       set := S.add 0n !set
     | _ -> ()
-  and visit_expr (ep, _) =
-    match ep with
+  and visit_expr = function
     | E_lit _ -> ()
     | E_const _ -> ()
     | E_var _ -> ()
     | E_prim1 (_, e) -> visit_expr e
     | E_prim2 (_, e1, e2) -> visit_expr e1; visit_expr e2
     | E_prim3 (_, e1, e2, e3) -> visit_expr e1; visit_expr e2; visit_expr e3
-    | E_primn (_, es) -> List.iter visit_expr es
     | E_load (_, off) -> visit_addr_expr off
     | E_nondet _ -> ()
     | E_extend (_, e, _) -> visit_expr e
@@ -109,8 +107,11 @@ let print_il il =
 let get_stack_offset e =
   let open SSA in
   match e with
-  | E_primn (Pn_add, [E_var { orig = Var.Global R_ESP; ver = 0; _ }, _;
-                      E_lit offset, _]), _ -> Some (Bitvec.to_nativeint offset)
+  | E_prim2 (P2_add, (E_var { orig = Var.Global R_ESP; ver = 0; _ }),
+             (E_lit offset)) -> Some (Bitvec.to_nativeint offset)
+  | E_prim2 (P2_add, E_lit offset,
+             E_var { orig = Var.Global R_ESP; ver = 0; _ }) ->
+    Some (Bitvec.to_nativeint offset)
   | _ -> None
 
 let def_stmt_table (cfg : SSA.stmt cfg) =
@@ -133,7 +134,7 @@ let preserved_registers (cfg : SSA.stmt cfg) =
   let ok = Array.create Inst.number_of_registers false in
   for i=0 to n-1 do
     cfg.node.(i).stmts |> List.iter begin function
-      | S_store (_, addr, (E_var { orig = Var.Global r; ver = 0; _ }, _)) ->
+      | S_store (_, addr, (E_var { orig = Var.Global r; ver = 0; _ })) ->
         begin match get_stack_offset addr with
           | Some offset ->
             Printf.printf "%s is stored at %nd\n" (Inst.string_of_reg r) offset;
@@ -147,7 +148,7 @@ let preserved_registers (cfg : SSA.stmt cfg) =
   done;
   let deftab = def_stmt_table cfg in
   let rec ok' rid e =
-    match fst e with
+    match e with
     | E_var v ->
       begin match deftab.(SSAVar.to_int v) with
         | Some (S_set (_, e')) -> ok' rid e'
@@ -187,7 +188,7 @@ let defuse_of_proc (cfg : SSA.stmt cfg) =
     | S_jumpout_ret (_, arglist) ->
       arglist |> List.iter begin fun (r,e) ->
         let rid = Inst.int_of_reg r in
-        match fst e with
+        match e with
         | E_var { orig; ver = 0; _ } when orig = Var.Global r -> ()
         | _ -> def.(rid) <- true
       end
@@ -195,7 +196,7 @@ let defuse_of_proc (cfg : SSA.stmt cfg) =
   end;
   let n = Array.length cfg.node in
   (* TODO: reduce code duplication *)
-  let rec update_use (ep, _) =
+  let rec update_use (ep) =
     match ep with
     | E_lit _ -> ()
     | E_const _ -> ()
@@ -210,7 +211,6 @@ let defuse_of_proc (cfg : SSA.stmt cfg) =
       update_use e1; update_use e2
     | E_prim3 (_, e1, e2, e3) ->
       update_use e1; update_use e2; update_use e3
-    | E_primn (_, es) -> List.iter update_use es
     | E_nondet _ -> ()
     | E_extend (_, e, _) -> update_use e
     | E_shrink (e, _) -> update_use e

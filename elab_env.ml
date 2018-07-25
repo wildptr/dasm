@@ -8,7 +8,7 @@ type env = {
   mutable temp_tab_cap : int;
   mutable n_temp : int;
   mutable stmts_rev : Plain.stmt list;
-  rename_table : (string, Plain.expr_proper) Hashtbl.t;
+  rename_table : (string, Plain.expr) Hashtbl.t;
   mutable next_nondet_id : int;
   db : Database.db;
 }

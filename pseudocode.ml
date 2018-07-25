@@ -53,9 +53,9 @@ module Make(V : VarType) = struct
 
   and convert_stmt_list stmts = stmts |> List.map convert_stmt
 
-  let make_cond (condp, _ as cond) t =
+  let make_cond cond t =
     if t then cond else
-      match condp with
+      match cond with
       | E_prim1 (P1_not, e) -> e
       | _ -> not_expr cond
 
@@ -151,12 +151,11 @@ module Make(V : VarType) = struct
 
   let pp_lvalue f = function
     | L_var var -> V.pp f var
-    | L_mem (off, size) -> pp_expr f (E_load (size, off), size*8)
+    | L_mem (off, size) -> pp_expr f (E_load (size, off))
 
-  let pp_label_expr f (ep, _ as e) =
-    match ep with
+  let pp_label_expr f = function
     | E_lit bv -> fprintf f "%nx" (Bitvec.to_nativeint bv)
-    | _ -> pp_expr f e
+    | e -> pp_expr f e
 
   let rec pp_pstmt' indent f = function
     | P_set (lv, e) ->

@@ -17,29 +17,30 @@ type prim1 =
   | P1_part of reg_part
 
 type prim2 =
+  | P2_concat
+  | P2_add
   | P2_sub
-  | P2_eq
   | P2_shiftleft
   | P2_logshiftright
   | P2_arishiftright
   | P2_less
   | P2_below
+  | P2_eq
+  | P2_and
+  | P2_xor
+  | P2_or
   | P2_updatepart of reg_part
 
 type prim3 =
   | P3_carry
 
-type primn =
-  | Pn_concat
-  | Pn_add
-  | Pn_and
-  | Pn_xor
-  | Pn_or
-
 module type VarType = sig
   type t
   val pp : Format.formatter -> t -> unit
   val to_int : t -> int
+  val to_string : t -> string
+  val of_string : string -> t
+  val size_in_cfg : 'a Cfg.cfg -> t -> int
 end
 
 module Var = struct
@@ -57,6 +58,30 @@ module Var = struct
     | Local s -> pp_print_string f s
     | PC -> pp_print_string f "PC"
     | Nondet w -> fprintf f "?%d" w
+
+  let to_string =
+    Printf.(function
+        | Global r -> sprintf "R:%s" (Inst.string_of_reg r)
+        | Temp i -> sprintf "T:%d" i
+        | Local s -> sprintf "L:%s" s
+        | PC -> "PC"
+        | Nondet w -> sprintf "N:%d" w
+      )
+
+  let of_string s =
+    let tl = String.tail s 2 in
+    match String.left s 2 with
+    | "R:" -> Global (Inst.lookup_reg tl)
+    | "T:" -> Temp (int_of_string tl)
+    | "L:" -> Local tl
+    | "PC" -> PC
+    | "N:" -> Nondet (int_of_string tl)
+    | _ -> invalid_arg ("Var.of_string: " ^ s)
+
+  let size_in_cfg cfg = function
+    | Global r -> Inst.size_of_reg r
+    | Temp i -> cfg.Cfg.temp_tab.(i)
+    | _ -> invalid_arg "Var.size_in_cfg"
 
   let to_int = function
     | Global r -> Inst.int_of_reg r
@@ -77,6 +102,18 @@ module SSAVar = struct
   type t = { orig : Var.t; ver : int; uid : int }
   let pp f { orig; ver; uid } = fprintf f "%a#%d" Var.pp orig ver
   let to_int sv = sv.uid
+  let to_string { orig; ver; uid } =
+    Printf.sprintf "%s,%d,%d" (Var.to_string orig) ver uid
+  let of_string s =
+    let fields = String.split_on_char ',' s in
+    match fields with
+    | [orig_s;ver_s;uid_s] ->
+      let orig = Var.of_string orig_s in
+      let ver = int_of_string ver_s in
+      let uid = int_of_string uid_s in
+      { orig; ver; uid }
+    | _ -> invalid_arg ("SSAVar.of_string: " ^ s)
+  let size_in_cfg cfg { uid; _ } = cfg.Cfg.temp_tab.(uid)
 end
 (*
   | SV_global of string * int
@@ -93,40 +130,38 @@ module Make(V : VarType) = struct
 
   type var = V.t
 
-  type expr_proper =
+  type expr =
     | E_lit of Bitvec.t
-    | E_const of string
+    | E_const of string * int
     | E_var of var
     | E_prim1 of prim1 * expr
     | E_prim2 of prim2 * expr * expr
     | E_prim3 of prim3 * expr * expr * expr
-    | E_primn of primn * expr list
     | E_load of int * expr
     | E_nondet of int * int
     | E_extend of bool * expr * int
     | E_shrink of expr * int
 
-  and expr = expr_proper * int (* width *)
-
-  let make_lit width value = E_lit (Bitvec.of_nativeint width value), width
-  let expr_of_bitvec bv = E_lit bv, Bitvec.length bv
-  let not_expr (_, w as e) = E_prim1 (P1_not, e), w
+  let make_lit width value = E_lit (Bitvec.of_nativeint width value)
+  let expr_of_bitvec bv = E_lit bv
+  let not_expr e = E_prim1 (P1_not, e)
   let make_prim2 p e1 e2 =
-    let size =
-      match p with
-      | P2_sub ->
+    (* let size =
+       match p with
+       | P2_concat -> snd e1 + snd e2
+       | P2_add | P2_sub | P2_and | P2_xor | P2_or ->
         if snd e1 <> snd e2 then failwith "make_prim2: width mismatch";
         snd e1
-      | P2_eq | P2_below | P2_less ->
+       | P2_eq | P2_below | P2_less ->
         if snd e1 <> snd e2 then failwith "make_prim2: width mismatch";
         1
-      | P2_shiftleft | P2_logshiftright | P2_arishiftright ->
+       | P2_shiftleft | P2_logshiftright | P2_arishiftright ->
         snd e1
-      | P2_updatepart _ -> snd e1
-    in
-    E_prim2 (p, e1, e2), size
-  let make_primn p es =
-    let size =
+       | P2_updatepart _ -> snd e1
+       in *)
+    E_prim2 (p, e1, e2)
+  (* let make_primn p es =
+     let size =
       match es with
       | [] -> failwith "make_primn: empty expression list"
       | e::es' ->
@@ -139,10 +174,10 @@ module Make(V : VarType) = struct
             end;
             snd e
         end
-    in
-    E_primn (p, es), size
+     in
+     E_primn (p, es), size *)
   let extend_expr sign e n =
-    E_extend (sign, e, n), n
+    E_extend (sign, e, n)
 
   (* elaborated form of instructions *)
   type stmt =
@@ -171,10 +206,9 @@ module Make(V : VarType) = struct
   let pp_var_part f (var, part) =
     fprintf f "%s(%a)" (string_of_reg_part part) V.pp var
 
-  let rec pp_expr f (expr, _) =
-    match expr with
+  let rec pp_expr f = function
     | E_lit bv -> fprintf f "%nd" (Bitvec.to_nativeint bv) (* width is lost *)
-    | E_const name -> pp_print_string f name
+    | E_const (name, _) -> pp_print_string f name
     | E_var var -> V.pp f var
     | E_prim1 (p, e) ->
       let sym_pp op_s = fprintf f "(%s%a)" op_s pp_expr e in
@@ -189,13 +223,18 @@ module Make(V : VarType) = struct
       end
     | E_prim2 (p, e1, e2) ->
       begin match p with
+        | P2_concat -> fprintf f "(%a.%a)" pp_expr e1 pp_expr e2
+        | P2_add -> fprintf f "(%a + %a)" pp_expr e1 pp_expr e2
         | P2_sub -> fprintf f "(%a - %a)" pp_expr e1 pp_expr e2
-        | P2_eq ->  fprintf f "(%a == %a)" pp_expr e1 pp_expr e2
         | P2_shiftleft -> fprintf f "(%a << %a)" pp_expr e1 pp_expr e2
         | P2_logshiftright -> fprintf f "(%a >> %a)" pp_expr e1 pp_expr e2
         | P2_arishiftright -> fprintf f "(%a ±>> %a)" pp_expr e1 pp_expr e2
         | P2_less -> fprintf f "(%a ±< %a)" pp_expr e1 pp_expr e2
         | P2_below -> fprintf f "(%a < %a)" pp_expr e1 pp_expr e2
+        | P2_eq ->  fprintf f "(%a == %a)" pp_expr e1 pp_expr e2
+        | P2_and -> fprintf f "(%a & %a)" pp_expr e1 pp_expr e2
+        | P2_xor -> fprintf f "(%a ^ %a)" pp_expr e1 pp_expr e2
+        | P2_or -> fprintf f "(%a | %a)" pp_expr e1 pp_expr e2
         | P2_updatepart p ->
           fprintf f "Update%s(%a, %a)" (string_of_reg_part p)
             pp_expr e1 pp_expr e2
@@ -205,16 +244,16 @@ module Make(V : VarType) = struct
         | P3_carry ->
           fprintf f "carry(%a, %a, %a)" pp_expr e1 pp_expr e2 pp_expr e3
       end
-    | E_primn (p, es) ->
-      let op_s =
+    (* | E_primn (p, es) ->
+       let op_s =
         match p with
         | Pn_concat -> "."
         | Pn_add -> "+"
         | Pn_and -> "&"
         | Pn_xor -> "^"
         | Pn_or -> "|"
-      in
-      fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") pp_expr) es
+       in
+       fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") pp_expr) es *)
     | E_load (size, addr) ->
       fprintf f "[%a]" pp_expr addr
     | E_nondet (n, id) -> fprintf f "nondet(%d)#%d" n id
@@ -303,25 +342,19 @@ module Make(V : VarType) = struct
     fprintf f "@]@ ";
     fprintf f "}@]"
 
-  let rec subst f (expr, w) =
-    let expr' =
-      match expr with
-      | E_lit _ as e -> e
-      | E_const _ as e -> e
-      | E_var v -> f v
-      | E_prim1 (p, e) -> E_prim1 (p, subst f e)
-      | E_prim2 (p, e1, e2) ->
-        E_prim2 (p, subst f e1, subst f e2)
-      | E_prim3 (p, e1, e2, e3) ->
-        E_prim3 (p, subst f e1, subst f e2, subst f e3)
-      | E_primn (p, es) ->
-        E_primn (p, List.map (subst f) es)
-      | E_load (size, addr) -> E_load (size, subst f addr)
-      | E_nondet _ as e -> e
-      | E_extend (sign, e, n) -> E_extend (sign, subst f e, n)
-      | E_shrink (e, n) -> E_shrink (subst f e, n)
-    in
-    expr', w
+  let rec subst f = function
+    | E_lit _ as e -> e
+    | E_const _ as e -> e
+    | E_var v -> f v
+    | E_prim1 (p, e) -> E_prim1 (p, subst f e)
+    | E_prim2 (p, e1, e2) ->
+      E_prim2 (p, subst f e1, subst f e2)
+    | E_prim3 (p, e1, e2, e3) ->
+      E_prim3 (p, subst f e1, subst f e2, subst f e3)
+    | E_load (size, addr) -> E_load (size, subst f addr)
+    | E_nondet _ as e -> e
+    | E_extend (sign, e, n) -> E_extend (sign, subst f e, n)
+    | E_shrink (e, n) -> E_shrink (subst f e, n)
 
   let map_stmt f = function
     | S_set (lhs, rhs) -> S_set (lhs, f rhs)
@@ -345,6 +378,193 @@ module Make(V : VarType) = struct
     | _ -> invalid_arg "map_stmt"
 
   let subst_stmt f stmt = map_stmt (subst f) stmt
+
+  let rec size_of_expr cfg = function
+    | E_lit bv -> Bitvec.length bv
+    | E_const (_, size) -> size
+    | E_var v -> V.size_in_cfg cfg v
+    | E_prim1 (p, e) ->
+      begin match p with
+        | P1_not | P1_neg -> size_of_expr cfg e
+        | P1_foldand | P1_foldxor | P1_foldor -> 1
+        | P1_part LoByte | P1_part HiByte -> 8
+        | P1_part LoWord -> 16
+      end
+    | E_prim2 (p, e1, e2) ->
+      begin match p with
+        | P2_concat -> size_of_expr cfg e1 + size_of_expr cfg e2
+        | P2_add | P2_sub
+        | P2_shiftleft | P2_logshiftright | P2_arishiftright
+        | P2_and | P2_xor | P2_or | P2_updatepart _ ->
+          size_of_expr cfg e1
+        | P2_eq | P2_less | P2_below -> 1
+      end
+    | E_prim3 (p, e1, e2, e3) ->
+      begin match p with
+        | P3_carry -> 1
+      end
+    | E_load (nbyte, _) -> nbyte * 8
+    | E_nondet (size, _) -> size
+    | E_extend (_, _, size) -> size
+    | E_shrink (_, size) -> size
+
+  let rec to_z3expr z3 cfg e =
+    let open Z3 in
+    let open Expr in
+    let open BitVector in
+    let size = size_of_expr cfg e in
+    match e with
+    | E_lit bv ->
+      let i = Bitvec.to_nativeint bv in
+      let s = Nativeint.to_string i in
+      mk_numeral z3 s size
+    | E_const (s, _) -> mk_const_s z3 s size
+    | E_var v ->
+      mk_const_s z3 (V.to_string v) size
+    | E_prim1 (p, e) ->
+      let mk =
+        match p with
+        | P1_not -> mk_not
+        | P1_neg -> mk_neg
+        | P1_foldand -> mk_redand
+        | P1_foldxor -> failwith "to_z3expr: P1_foldxor"
+        | P1_foldor -> mk_redor
+        | P1_part p ->
+          let lo, hi =
+            match p with
+            | LoByte -> 0, 7
+            | HiByte -> 8, 15
+            | LoWord -> 0, 15
+          in
+          fun z3 -> mk_extract z3 lo hi
+      in
+      mk z3 (to_z3expr z3 cfg e)
+    | E_prim2 (p, e1, e2) ->
+      let mk =
+        match p with
+        | P2_add -> mk_add
+        | P2_and -> mk_and
+        | P2_xor -> mk_xor
+        | P2_or -> mk_or
+        | P2_concat -> mk_concat
+        | P2_sub -> mk_sub
+        | P2_eq -> Boolean.mk_eq
+        | P2_shiftleft -> mk_shl
+        | P2_logshiftright -> mk_lshr
+        | P2_arishiftright -> mk_ashr
+        | P2_less -> mk_slt
+        | P2_below -> mk_ult
+        | P2_updatepart p ->
+          begin match p with
+            | LoByte ->
+              fun z3 e1 e2 -> mk_concat z3 e2 (mk_extract z3 8 (size-1) e1)
+            | LoWord ->
+              fun z3 e1 e2 -> mk_concat z3 e2 (mk_extract z3 16 (size-1) e1)
+            | HiByte ->
+              fun z3 e1 e2 ->
+                mk_concat z3 (mk_extract z3 0 7 e1)
+                  (mk_concat z3 e2 (mk_extract z3 16 (size-1) e1))
+          end
+      in
+      mk z3 (to_z3expr z3 cfg e1) (to_z3expr z3 cfg e2)
+    | E_prim3 (p, e1, e2, e3) ->
+      begin match p with
+        | P3_carry ->
+          let size = size_of_expr cfg e1 in
+          let sortn = mk_sort z3 size in
+          let sort1 = mk_sort z3 1 in
+          let carry_func =
+            FuncDecl.mk_func_decl_s z3 (Printf.sprintf "carry%d" size)
+              [sortn; sortn; sort1] sort1
+          in
+          mk_app z3 carry_func
+            [to_z3expr z3 cfg e1; to_z3expr z3 cfg e2; to_z3expr z3 cfg e3]
+      end
+    | E_load (nbyte, e) ->
+      let mem_func =
+        FuncDecl.mk_func_decl_s z3 (Printf.sprintf "mem%d" (nbyte*8))
+          [mk_sort z3 32] (mk_sort z3 (nbyte*8))
+      in
+      mk_app z3 mem_func [to_z3expr z3 cfg e]
+    | E_nondet (size, id) ->
+      let int_sort = Arithmetic.Integer.mk_sort z3 in
+      let nondet_func =
+        FuncDecl.mk_func_decl_s z3 (Printf.sprintf "nondet%d" id)
+          [int_sort] (mk_sort z3 size)
+      in
+      mk_app z3 nondet_func [mk_numeral_int z3 id int_sort]
+    | E_extend (sign, e, size)->
+      (if sign then mk_sign_ext else mk_zero_ext) z3 size (to_z3expr z3 cfg e)
+    | E_shrink (e, size)->
+      mk_extract z3 0 (size-1) (to_z3expr z3 cfg e)
+
+  let func_sym_table = [
+    "bvadd", (fun [a;b] -> E_prim2 (P2_add, a, b));
+    "bvsub", (fun [a;b] -> E_prim2 (P2_sub, a, b));
+    "bvand", (fun [a;b] -> E_prim2 (P2_and, a, b));
+    "bvxor", (fun [a;b] -> E_prim2 (P2_xor, a, b));
+    "bvsle", (fun [a;b] -> E_prim2 (P2_less, a, b));
+    "bvule", (fun [a;b] -> E_prim2 (P2_below, a, b));
+    "bvor", (fun [a;b] -> E_prim2 (P2_or, a, b));
+    "bvnot", (fun [a] -> E_prim1 (P1_not, a));
+    "not", (fun [a] -> E_prim1 (P1_not, a));
+    "=", (fun [a;b] -> E_prim2 (P2_eq, a, b));
+  ] |> List.enum |> Map.String.of_enum
+
+  let rec of_sexp = function
+    | Sexplib0.Sexp.Atom s ->
+      if s.[0] = '#' then
+        E_lit begin
+          match s.[1] with
+          | 'x' ->
+            "0x" ^ String.tail s 2 |> Nativeint.of_string |>
+            Bitvec.of_nativeint ((String.length s - 2) * 4)
+          | _ -> invalid_arg ("of_sexp: " ^ s)
+        end
+      else
+        let len = String.length s in
+        E_var begin
+          (if String.left s 1 = "|" && String.right s 1 = "|" then
+             String.sub s 1 (len-2)
+           else s) |> V.of_string
+        end
+    | Sexplib0.Sexp.List l ->
+      begin match l with
+        | Sexplib0.Sexp.Atom s :: tl ->
+          if String.left s 3 = "mem" then
+            let nbyte = (String.tail s 3 |> int_of_string)/8 in
+            let e =
+              match tl with
+              | [sexp] -> of_sexp sexp
+              | _ -> invalid_arg "of_sexp(mem)"
+            in
+            E_load (nbyte, e)
+          else if String.left s 6 = "nondet" then
+            let size = String.tail s 6 |> int_of_string in
+            let id =
+              match tl with
+              | [Sexplib0.Sexp.Atom s] -> int_of_string s
+              | _ -> invalid_arg "of_sexp(nondet)"
+            in
+            E_nondet (size, id)
+          (* else if String.left s 5 = "carry" then
+            let size = String.tail s 5 |> int_of_string in
+            let e1, e2, e3 =
+              match
+                E_
+            E_carry () *)
+          else
+            let f =
+              try Map.String.find s func_sym_table
+              with Not_found ->
+                invalid_arg ("of_sexp: unknown function symbol " ^ s)
+            in
+            tl |> List.map of_sexp |> f
+        | _ -> invalid_arg "of_sexp"
+      end
+
+  let from_z3expr z3e =
+    z3e |> Z3.Expr.to_string |> Parsexp.Single.parse_string_exn |> of_sexp
 
 end
 

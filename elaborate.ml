@@ -23,14 +23,13 @@ let alias_table = [|
   LoWord, R_EDI;
 |]
 
-let expr_of_reg r = E_var (Var.Global r), size_of_reg r
+let expr_of_reg r = E_var (Var.Global r)
 
 let elaborate_reg r =
   let rid = Inst.int_of_reg r in
   if rid < 16 then
     let a, fullreg = alias_table.(rid) in
-    let ep = E_prim1 (P1_part a, expr_of_reg fullreg) in
-    ep, size_of_reg r
+    E_prim1 (P1_part a, expr_of_reg fullreg)
   else
     expr_of_reg r
 
@@ -51,11 +50,11 @@ let cond_expr1 = function
   | 0 -> eOF
   | 1 -> eCF
   | 2 -> eZF
-  | 3 -> E_primn (Pn_or, [eCF; eZF]), 1 (* CF|ZF *)
+  | 3 -> E_prim2 (P2_or, eCF, eZF) (* CF|ZF *)
   | 4 -> eSF
   | 5 -> ePF
-  | 6 -> E_primn (Pn_xor, [eSF; eOF]), 1 (* SF^OF *)
-  | 7 -> E_primn (Pn_or, [eZF; E_primn (Pn_xor, [eSF; eOF]), 1]), 1 (* ZF|(SF^OF) *)
+  | 6 -> E_prim2 (P2_xor, eSF, eOF) (* SF^OF *)
+  | 7 -> E_prim2 (P2_or, eZF, (E_prim2 (P2_xor, eSF, eOF))) (* ZF|(SF^OF) *)
   | _ -> assert false
 
 let cond_expr code =
@@ -69,7 +68,7 @@ let elaborate_mem_index (reg, scale) =
   if scale = 0 then e_reg
   else
     let e_scale = make_lit 2 (Nativeint.of_int scale) in
-    E_prim2 (P2_shiftleft, e_reg, e_scale), 32
+    E_prim2 (P2_shiftleft, e_reg, e_scale)
 
 let make_address addr = make_lit 32 addr
 
@@ -79,40 +78,38 @@ let elaborate_mem_addr m =
     | Some base, Some index ->
       let e_base = elaborate_reg base in
       let e_index = elaborate_mem_index index in
-      let to_be_added =
-        if m.disp = 0n then [e_base; e_index]
-        else
-          let e_disp = make_address m.disp in
-          [e_base; e_index; e_disp]
-      in
-      E_primn (Pn_add, to_be_added), 32
+      if m.disp = 0n then
+        make_prim2 P2_add e_base e_index
+      else
+        let e_disp = make_address m.disp in
+        make_prim2 P2_add (make_prim2 P2_add e_base e_index) e_disp
     | Some base, None ->
       let e_base = elaborate_reg base in
       if m.disp = 0n then e_base
       else
         let e_disp = make_address m.disp in
-        E_primn (Pn_add, [e_base; e_disp]), 32
+        E_prim2 (P2_add, e_base, e_disp)
     | None, Some index ->
       let e_index = elaborate_mem_index index in
       if m.disp = 0n then e_index
       else
         let e_disp = make_address m.disp in
-        E_primn (Pn_add, [e_index; e_disp]), 32
+        E_prim2 (P2_add, e_index, e_disp)
     | None, None ->
       make_address m.disp
   in
   match m.seg with
   | R_ES | R_CS | R_SS | R_DS -> addr
-  | R_FS -> E_primn (Pn_add, [E_const "FS_BASE", 32; addr]), 32
-  | R_GS -> E_primn (Pn_add, [E_const "GS_BASE", 32; addr]), 32
+  | R_FS -> E_prim2 (P2_add, E_const ("FS_BASE", 32), addr)
+  | R_GS -> E_prim2 (P2_add, E_const ("GS_BASE", 32), addr)
   | _ -> failwith "elaborate_mem_addr: invalid segment register"
 
 let elaborate_operand pc' = function
   | O_reg reg -> elaborate_reg reg
-  | O_mem (mem, size) ->
-    if size <= 0 then failwith "size of operand invalid";
+  | O_mem (mem, nbyte) ->
+    if nbyte <= 0 then failwith "size of operand invalid";
     let off = elaborate_mem_addr mem in
-    E_load (size, off), size*8
+    E_load (nbyte, off)
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
     make_lit (size*8) imm
@@ -263,9 +260,7 @@ let rec expand_stmt env pc stmt =
     let arg_arr = Array.of_list args in
     let n_arg = Array.length arg_arr in
     let arg_is_const =
-      arg_arr |> Array.map begin fun (argp, _) ->
-        argp |> function E_lit _ -> true | _ -> false
-      end
+      arg_arr |> Array.map (function E_lit _ -> true | _ -> false)
     in
     let n_param = List.length proc.p_param_names in
     (* TODO: check widths *)
@@ -293,7 +288,7 @@ let rec expand_stmt env pc stmt =
     proc.p_var_tab |> Hashtbl.iter begin fun name width ->
       let var =
         match Map.String.Exceptionless.find name param_index_map with
-        | Some i when arg_is_const.(i) -> fst arg_arr.(i)
+        | Some i when arg_is_const.(i) -> arg_arr.(i)
         | _ ->
           let temp = acquire_temp env width in
           temps := temp :: !temps;
@@ -352,7 +347,7 @@ let elaborate_inst env pc inst =
       let temp = acquire_temp env size in
       let args = operands |> List.map (elaborate_operand pc') in
       emit' (S_call (fn inst, args, [temp]));
-      elaborate_writeback emit' (List.hd operands) (E_var temp, size);
+      elaborate_writeback emit' (List.hd operands) (E_var temp);
       release_temp env temp
     | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
       let proc = fn inst in
@@ -366,7 +361,7 @@ let elaborate_inst env pc inst =
     | I_POP ->
       let temp = acquire_temp env size in
       emit' (S_call (fn inst, [], [temp]));
-      elaborate_writeback emit' (List.hd operands) (E_var temp, size);
+      elaborate_writeback emit' (List.hd operands) (E_var temp);
       release_temp env temp
     | I_MOV ->
       let dst, src =
@@ -384,7 +379,7 @@ let elaborate_inst env pc inst =
       (*let lsize_src = inst.variant lsr 4 in*)
       (*let src_size = 8 lsl lsize_src in*)
       let src' = elaborate_operand pc' src in
-      elaborate_writeback emit' dst (E_extend (op = I_MOVSX, src', size), size)
+      elaborate_writeback emit' dst (E_extend (op = I_MOVSX, src', size))
     | I_LEA ->
       let dst, src =
         match operands with
@@ -412,7 +407,7 @@ let elaborate_inst env pc inst =
         | _ -> assert false
       in
       let cond = cond_expr (inst.variant lsr 4) in
-      let data = E_extend (false, cond, 8), 8 in
+      let data = E_extend (false, cond, 8) in
       elaborate_writeback emit' dst data
     | I_XCHG ->
       let dst, src =

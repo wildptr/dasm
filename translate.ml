@@ -153,12 +153,16 @@ let rec translate_expr env expr =
     E_lit (Bitvec.of_int w v), w
   | Expr_apply (func_name, args) ->
     let handle_builtin func_name =
-      let f1 prim =
-        let args' = args |> List.map (translate_expr env) in
-        let arg_widths = args' |> List.map snd in
-        let w = List.hd arg_widths in
-        arg_widths |> List.iter (check_width w);
-        E_primn (prim, args'), w
+      let f_bin prim =
+        let a1, a2 =
+          match args with
+          | [a1;a2] -> a1, a2
+          | _ -> raise (Wrong_arity (func_name, 2))
+        in
+        let a1', w1 = translate_expr env a1 in
+        let a2', w2 = translate_expr env a2 in
+        check_width w1 w2;
+        E_prim2 (prim, a1', a2'), w1
       in
       let f_shift prim =
         let a1, a2 =
@@ -166,8 +170,8 @@ let rec translate_expr env expr =
           | [a1;a2] -> a1, a2
           | _ -> raise (Wrong_arity (func_name, 2))
         in
-        let (_, w1 as a1') = translate_expr env a1 in
-        let (_, _  as a2') = translate_expr env a2 in
+        let a1', w1 = translate_expr env a1 in
+        let a2', _  = translate_expr env a2 in
         E_prim2 (prim, a1', a2'), w1
       in
       let f_pred prim =
@@ -176,8 +180,8 @@ let rec translate_expr env expr =
           | [a1;a2] -> a1, a2
           | _ -> raise (Wrong_arity (func_name, 2))
         in
-        let (_, w1) as a1' = translate_expr env a1 in
-        let (_, w2) as a2' = translate_expr env a2 in
+        let (a1', w1) = translate_expr env a1 in
+        let (a2', w2) = translate_expr env a2 in
         check_width w1 w2;
         E_prim2 (prim, a1', a2'), 1
       in
@@ -188,15 +192,15 @@ let rec translate_expr env expr =
           | [a1;a2;a3] -> a1, a2, a3
           | _ -> raise (Wrong_arity (func_name, 3))
         in
-        let (_, w1 as a1') = translate_expr env a1 in
-        let (_, w2 as a2') = translate_expr env a2 in
-        let (_, w3 as a3') = translate_expr env a3 in
+        let (a1', w1) = translate_expr env a1 in
+        let (a2', w2) = translate_expr env a2 in
+        let (a3', w3) = translate_expr env a3 in
         check_width w1 w2;
         check_width w3 1;
         E_prim3 (P3_carry, a1', a2', a3'), 1
-      | "and" -> f1 Pn_and
-      | "xor" -> f1 Pn_xor
-      | "or"  -> f1 Pn_or
+      | "and" -> f_bin P2_and
+      | "xor" -> f_bin P2_xor
+      | "or"  -> f_bin P2_or
       | "shift_left" -> f_shift P2_shiftleft
       | "log_shift_right" -> f_shift P2_logshiftright
       | "ari_shift_right" -> f_shift P2_arishiftright
@@ -219,19 +223,19 @@ let rec translate_expr env expr =
       | _ -> raise (Unknown_primitive func_name)
     end
   | Expr_unary (op, e) ->
-    let (_, w as e') = translate_expr env e in
+    let (e', w) = translate_expr env e in
     E_prim1 (prim_of_unary_op op, e'), width_of_unary_op (op, w)
   | Expr_binary (op, e1, e2) ->
-    let (_, w1 as e1') = translate_expr env e1 in
-    let (_, w2 as e2') = translate_expr env e2 in
+    let (e1', w1) = translate_expr env e1 in
+    let (e2', w2) = translate_expr env e2 in
     let e' = match op with
-      | Concat -> E_primn (Pn_concat, [e1';e2'])
-      | Add -> E_primn (Pn_add, [e1';e2'])
+      | Concat -> E_prim2 (P2_concat, e1', e2')
+      | Add -> E_prim2 (P2_add, e1', e2')
       | Sub -> E_prim2 (P2_sub, e1', e2')
       | Eq -> E_prim2 (P2_eq, e1', e2')
-      | And -> E_primn (Pn_and, [e1';e2'])
-      | Xor -> E_primn (Pn_xor, [e1';e2'])
-      | Or -> E_primn (Pn_or, [e1';e2'])
+      | And -> E_prim2 (P2_and, e1', e2')
+      | Xor -> E_prim2 (P2_xor, e1', e2')
+      | Or -> E_prim2 (P2_or, e1', e2')
     in
     e', width_of_binary_op (op, w1, w2)
   | Expr_undef c_width ->
@@ -241,14 +245,15 @@ let rec translate_expr env expr =
     let seg', off', w = translate_memloc env memloc in
     E_load (w lsr 3, off'), w
   | Expr_extend (sign, data, size) ->
-    let data' = translate_expr env data in
+    let data' = translate_expr env data |> fst in
     let size' = translate_cexpr st size in
     E_extend (sign, data', size'), size'
   | Expr_pc -> E_var Var.PC, 32 (* TODO *)
 
 and translate_call env proc args results =
-  let args' = List.map (translate_expr env) args in
-  let arg_widths = args' |> List.map snd in
+  let args', arg_widths =
+    args |> List.map (translate_expr env) |> List.split
+  in
   let n_param = List.length proc.p_param_names in
   let n_arg = List.length args in
   if n_param <> n_arg then raise (Wrong_arity ("???", n_param)); (* TODO *)
@@ -261,16 +266,16 @@ and translate_call env proc args results =
   emit env (S_call (proc, args', results))
 
 and translate_memloc env (seg, off, size) =
-  let (_, segw as seg') = translate_expr env seg in
+  let (seg', segw) = translate_expr env seg in
   check_width segw 16;
-  let (_, offw as off') = translate_expr env off in
+  let (off', offw) = translate_expr env off in
   (* TODO: check offset width *)
   let w = translate_cexpr env.symtab size in
   seg', off', w
 
 let translate_stmt env stmt =
   let st = env.symtab in
-  let do_assign loc (_, w as data) =
+  let do_assign loc (data, w) =
     begin match loc with
       | Lhs_var name ->
         begin match try_lookup st name with
@@ -298,7 +303,7 @@ let translate_stmt env stmt =
     in
     translate_call env proc args []
   | Stmt_jump addr ->
-    let addr' = translate_expr env addr in
+    let addr' = translate_expr env addr |> fst in
     emit env (S_jump (None, addr'))
 
 let translate_proc st proc =
