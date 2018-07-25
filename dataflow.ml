@@ -21,6 +21,7 @@ module DefUse(V : VarType) = struct
 
   let rec use_of_expr = function
     | E_lit _ -> S.empty
+    | E_lit_bool _ -> S.empty
     | E_const _ -> S.empty
     | E_var var -> S.singleton (V.to_int var)
     | E_prim1 (_, e) -> use_of_expr e
@@ -225,7 +226,7 @@ let auto_subst cfg =
         let ok =
           use_count.(v) = 1 ||
           begin match rhs with
-            | E_var _ | E_lit _ -> true
+            | E_var _ | E_lit _ | E_lit_bool _ -> true
             | _ -> lhs.SSAVar.orig = Var.Global R_ESP
           end
         in
@@ -288,6 +289,8 @@ let remove_dead_code_ssa cfg =
 let rec rename_to_ssa f = function
   | Plain.E_lit bv ->
     SSA.E_lit bv
+  | Plain.E_lit_bool b ->
+    SSA.E_lit_bool b
   | Plain.E_const (name, size) ->
     SSA.E_const (name, size)
   | Plain.E_var name ->
@@ -310,6 +313,8 @@ let rec rename_to_ssa f = function
 let rec rename_from_ssa f = function
   | SSA.E_lit bv ->
     Plain.E_lit bv
+  | SSA.E_lit_bool b ->
+    Plain.E_lit_bool b
   | SSA.E_const (name, size) ->
     Plain.E_const (name, size)
   | SSA.E_var name ->
@@ -329,8 +334,8 @@ let rec rename_from_ssa f = function
   | SSA.E_shrink (e, n) ->
     Plain.E_shrink (rename_from_ssa f e, n)
 
-let plain_dummy = Plain.E_nondet (0, 0)
-let ssa_dummy = SSA.E_nondet (0, 0)
+let plain_dummy = Plain.E_nondet (T_bool, 0)
+let ssa_dummy = SSA.E_nondet (T_bool, 0)
 
 let make_arglist =
   List.map (fun r -> r, Plain.E_var (Var.Global r))
@@ -522,12 +527,6 @@ let convert_to_ssa db cfg =
       node.(y).stmts |> List.iter begin function
         | SSA.S_phi (lhs, rhs) ->
           let open SSAVar in
-          (* let w =
-            match lhs.orig with
-            | Var.Global reg -> Inst.size_of_reg reg
-            | Var.Temp i -> cfg.temp_tab.(i)
-            | _ -> failwith "???"
-          in *)
           assert (rhs.(j) == ssa_dummy);
           rhs.(j) <-
             SSA.subst (fun sv -> SSA.E_var (rename_rhs sv))
@@ -547,7 +546,7 @@ let convert_to_ssa db cfg =
     Array.init !next_svid begin fun i ->
       let orig, ver = Hashtbl.find sv_table i in
       if orig < Inst.number_of_registers then
-        Inst.size_of_reg (Inst.reg_of_int orig)
+        type_of_reg (Inst.reg_of_int orig)
       else
         cfg.temp_tab.(orig - Inst.number_of_registers)
     end

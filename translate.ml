@@ -7,17 +7,16 @@ open Spec_ast
 (* "%s takes exactly %d arguments" *)
 exception Wrong_arity of string * int
 exception Index_out_of_bounds of (astexpr * int) * int
-exception Width_mismatch of int * int
 exception Unbound_symbol of string
 exception Invalid_assignment of string
 exception Unknown_primitive of string
 exception Redefinition of string
 
 let check_width w1 w2 =
-  if w1 <> w2 then raise (Width_mismatch (w1, w2)) else ()
+  if w1 <> w2 then failwith "type mismatch"
 
 type value =
-  | Var of var * int
+  | Var of var * typ
   | Proc of proc
   | Templ of proc_templ
   | IConst of int
@@ -28,7 +27,7 @@ type symtab = value Map.String.t
 
 type env = {
   mutable symtab : symtab;
-  var_tab : (string, int) Hashtbl.t;
+  var_tab : (string, typ) Hashtbl.t;
   mutable stmts_rev : stmt list;
 }
 
@@ -38,10 +37,10 @@ let new_env symtab =
 
 let emit env stmt = env.stmts_rev <- stmt :: env.stmts_rev
 
-let new_temp env width =
+let new_temp env typ =
   let n = Hashtbl.length env.var_tab in
   let id = Printf.sprintf "_%d" n in
-  Hashtbl.add env.var_tab id width;
+  Hashtbl.add env.var_tab id typ;
   id
 
 let prim_of_unary_op = function
@@ -51,19 +50,23 @@ let prim_of_unary_op = function
   | Reduce_xor -> P1_foldxor
   | Reduce_or -> P1_foldor
 
-let width_of_unary_op (op, w) =
+let type_of_unary_op (op, t) =
   match op with
-  | Not | Neg -> w
-  | Reduce_and | Reduce_xor | Reduce_or -> 1
+  | Not | Neg -> t
+  | Reduce_and | Reduce_xor | Reduce_or -> T_bitvec 1
 
-let width_of_binary_op (op, w1, w2) =
+let type_of_binary_op (op, t1, t2) =
   match op with
   | Concat ->
-    w1 + w2
+    begin
+      let T_bitvec w1 = t1 in
+      let T_bitvec w2 = t2 in
+      T_bitvec (w1 + w2)
+    end [@warning "-8"]
   | Add | Sub | And | Xor | Or ->
-    check_width w1 w2; w1
+    check_width t1 t2; t1
   | Eq ->
-    check_width w1 w2; 1
+    check_width t1 t2; T_bool
 
 let init_symtab = [
   Inst.R_EAX;
@@ -90,7 +93,7 @@ let init_symtab = [
   Inst.R_OF;
 ] |> List.fold_left begin fun map reg ->
     Map.String.add (Inst.string_of_reg reg)
-      (Var (Var.Global reg, Inst.size_of_reg reg)) map
+      (Var (Var.Global reg, type_of_reg reg)) map
   end Map.String.empty
 
 let extend_symtab (name, value) st =
@@ -135,22 +138,31 @@ let rec translate_cexpr st = function
     in
     f e'
 
+let translate_typ st = function
+  | Typ_bool -> T_bool
+  | Typ_bitvec c -> T_bitvec (translate_cexpr st c)
+
 (* TODO: handle segment selectors *)
 
+let debug = false
+
 let rec translate_expr env expr =
+  (* if debug then
+    Format.printf "translating expression %a@." pp_astexpr expr; *)
   let st = env.symtab in
   match expr with
   | Expr_sym s ->
     begin match lookup st s with
       | Var (var, w) -> E_var var, w
-      | BVConst bv -> E_lit bv, Bitvec.length bv
+      | BVConst bv -> E_lit bv, T_bitvec (Bitvec.length bv)
       | _ -> failwith ("not a Var or BVConst value: "^s)
     end
-  | Expr_literal bv -> E_lit bv, Bitvec.length bv
+  | Expr_literal bv -> E_lit bv, T_bitvec (Bitvec.length bv)
   | Expr_literal2 (c_v, c_w) ->
     let v = translate_cexpr st c_v in
     let w = translate_cexpr st c_w in
-    E_lit (Bitvec.of_int w v), w
+    E_lit (Bitvec.of_int w v), T_bitvec w
+  | Expr_literal_bool b -> E_lit_bool b, T_bool
   | Expr_apply (func_name, args) ->
     let handle_builtin func_name =
       let f_bin prim =
@@ -183,7 +195,7 @@ let rec translate_expr env expr =
         let (a1', w1) = translate_expr env a1 in
         let (a2', w2) = translate_expr env a2 in
         check_width w1 w2;
-        E_prim2 (prim, a1', a2'), 1
+        E_prim2 (prim, a1', a2'), T_bool
       in
       match func_name with
       | "carry" ->
@@ -196,8 +208,8 @@ let rec translate_expr env expr =
         let (a2', w2) = translate_expr env a2 in
         let (a3', w3) = translate_expr env a3 in
         check_width w1 w2;
-        check_width w3 1;
-        E_prim3 (P3_carry, a1', a2', a3'), 1
+        check_width w3 T_bool;
+        E_prim3 (P3_carry, a1', a2', a3'), T_bool
       | "and" -> f_bin P2_and
       | "xor" -> f_bin P2_xor
       | "or"  -> f_bin P2_or
@@ -224,7 +236,7 @@ let rec translate_expr env expr =
     end
   | Expr_unary (op, e) ->
     let (e', w) = translate_expr env e in
-    E_prim1 (prim_of_unary_op op, e'), width_of_unary_op (op, w)
+    E_prim1 (prim_of_unary_op op, e'), type_of_unary_op (op, w)
   | Expr_binary (op, e1, e2) ->
     let (e1', w1) = translate_expr env e1 in
     let (e2', w2) = translate_expr env e2 in
@@ -237,18 +249,18 @@ let rec translate_expr env expr =
       | Xor -> E_prim2 (P2_xor, e1', e2')
       | Or -> E_prim2 (P2_or, e1', e2')
     in
-    e', width_of_binary_op (op, w1, w2)
-  | Expr_undef c_width ->
-    let width = translate_cexpr st c_width in
-    E_var (Var.Nondet width), width
+    e', type_of_binary_op (op, w1, w2)
+  | Expr_undef typ ->
+    let typ' = translate_typ st typ in
+    E_var (Var.Nondet typ'), typ'
   | Expr_load memloc ->
     let seg', off', w = translate_memloc env memloc in
-    E_load (w lsr 3, off'), w
+    E_load (w lsr 3, off'), T_bitvec w
   | Expr_extend (sign, data, size) ->
     let data' = translate_expr env data |> fst in
     let size' = translate_cexpr st size in
-    E_extend (sign, data', size'), size'
-  | Expr_pc -> E_var Var.PC, 32 (* TODO *)
+    E_extend (sign, data', size'), T_bitvec size'
+  | Expr_pc -> E_var Var.PC, T_bitvec 32 (* TODO *)
 
 and translate_call env proc args results =
   let args', arg_widths =
@@ -267,15 +279,17 @@ and translate_call env proc args results =
 
 and translate_memloc env (seg, off, size) =
   let (seg', segw) = translate_expr env seg in
-  check_width segw 16;
+  check_width segw (T_bitvec 16);
   let (off', offw) = translate_expr env off in
   (* TODO: check offset width *)
   let w = translate_cexpr env.symtab size in
   seg', off', w
 
 let translate_stmt env stmt =
+  if debug then
+    Format.printf "translating statement %a@." pp_aststmt stmt;
   let st = env.symtab in
-  let do_assign loc (data, w) =
+  let do_assign loc (data, t) =
     begin match loc with
       | Lhs_var name ->
         begin match try_lookup st name with
@@ -286,6 +300,7 @@ let translate_stmt env stmt =
         end
       | Lhs_mem memloc ->
         let seg, off, mw = translate_memloc env memloc in
+        let [@warning "-8"] T_bitvec w = t in
         check_width mw w;
         if w land 7 <> 0 then
           failwith "width of memory location is not multiple of 8";
@@ -307,28 +322,30 @@ let translate_stmt env stmt =
     emit env (S_jump (None, addr'))
 
 let translate_proc st proc =
+  if debug then
+    Format.printf "translating procedure %s@." proc.ap_name;
   (* construct static environment to translate function body in *)
   let proc_env = new_env st in
-  let register_var (name, c_width) =
-    let width = translate_cexpr proc_env.symtab c_width in
+  let register_var (name, te) =
+    let typ = translate_typ proc_env.symtab te in
     proc_env.symtab <-
-      extend_symtab (name, Var (Var.Local name, width))
+      extend_symtab (name, Var (Var.Local name, typ))
         proc_env.symtab;
-    Hashtbl.add proc_env.var_tab name width
+    Hashtbl.add proc_env.var_tab name typ
   in
   proc.ap_params |> List.iter register_var;
-  proc.ap_results |> List.iter begin fun (name, c_width) ->
-    let width = translate_cexpr proc_env.symtab c_width in
+  proc.ap_results |> List.iter begin fun (name, te) ->
+    let typ = translate_typ proc_env.symtab te in
     proc_env.symtab <-
-      extend_symtab (name, Var (Var.Local name, width))
+      extend_symtab (name, Var (Var.Local name, typ))
         proc_env.symtab
   end;
   let vardecls, stmts = proc.ap_body in
   vardecls |> List.iter register_var;
   let param_names = proc.ap_params |> List.map fst in
   let results =
-    proc.ap_results |> List.map begin fun (name, width_cexpr) ->
-      name, translate_cexpr st width_cexpr
+    proc.ap_results |> List.map begin fun (name, te) ->
+      name, translate_typ st te
     end
   in
   stmts |> List.iter (translate_stmt proc_env);
@@ -383,8 +400,8 @@ let translate_ast ast =
   end (* init: *) init_symtab
 
 let pp_value f = function
-  | Var (var, w) ->
-    fprintf f "Var %a:%d" Var.pp var w
+  | Var (var, t) ->
+    fprintf f "Var %a:%a" Var.pp var pp_typ t
   | Proc p ->
     fprintf f "Proc %a" pp_proc p
   | Templ _ ->

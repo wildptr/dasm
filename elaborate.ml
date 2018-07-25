@@ -100,8 +100,8 @@ let elaborate_mem_addr m =
   in
   match m.seg with
   | R_ES | R_CS | R_SS | R_DS -> addr
-  | R_FS -> E_prim2 (P2_add, E_const ("FS_BASE", 32), addr)
-  | R_GS -> E_prim2 (P2_add, E_const ("GS_BASE", 32), addr)
+  | R_FS -> E_prim2 (P2_add, E_const ("FS_BASE", T_bitvec 32), addr)
+  | R_GS -> E_prim2 (P2_add, E_const ("GS_BASE", T_bitvec 32), addr)
   | _ -> failwith "elaborate_mem_addr: invalid segment register"
 
 let elaborate_operand pc' = function
@@ -285,12 +285,12 @@ let rec expand_stmt env pc stmt =
     in
     let temps = ref [] in
     (* bind local variables *)
-    proc.p_var_tab |> Hashtbl.iter begin fun name width ->
+    proc.p_var_tab |> Hashtbl.iter begin fun name typ ->
       let var =
         match Map.String.Exceptionless.find name param_index_map with
         | Some i when arg_is_const.(i) -> arg_arr.(i)
         | _ ->
-          let temp = acquire_temp env width in
+          let temp = acquire_temp env typ in
           temps := temp :: !temps;
           E_var temp
       in
@@ -298,7 +298,7 @@ let rec expand_stmt env pc stmt =
     end;
     (* bind return values *)
     List.combine proc.p_results results' |>
-    List.iter begin fun ((name, width), var) ->
+    List.iter begin fun ((name, _), var) ->
       Hashtbl.add env.rename_table name (E_var var)
     end;
     (* pass arguments *)
@@ -329,6 +329,7 @@ let elaborate_inst env pc inst =
   let op = operation_of inst in
   let lsize = inst.variant land 15 in (* log size in bytes *)
   let size = 8 lsl lsize in
+  let size_typ = T_bitvec size in
   let operands = operands_of inst in
   let fn inst =
     let fnname_base = fnname_of_op op in
@@ -344,7 +345,7 @@ let elaborate_inst env pc inst =
     match op with
     | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR
     | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
-      let temp = acquire_temp env size in
+      let temp = acquire_temp env size_typ in
       let args = operands |> List.map (elaborate_operand pc') in
       emit' (S_call (fn inst, args, [temp]));
       elaborate_writeback emit' (List.hd operands) (E_var temp);
@@ -359,7 +360,7 @@ let elaborate_inst env pc inst =
       (* no writeback *)
       temps |> List.iter (release_temp env)
     | I_POP ->
-      let temp = acquire_temp env size in
+      let temp = acquire_temp env size_typ in
       emit' (S_call (fn inst, [], [temp]));
       elaborate_writeback emit' (List.hd operands) (E_var temp);
       release_temp env temp
@@ -445,7 +446,7 @@ let elaborate_cfg db cfg =
   let node = cfg.node |> Array.map (elaborate_basic_block env) in
   let succ = Array.copy cfg.succ in
   let pred = Array.copy cfg.pred in
-  { cfg with node; succ; pred; temp_tab = env.temp_size_tab }
+  { cfg with node; succ; pred; temp_tab = env.temp_type_tab }
 
 let fail_with_parsing_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in

@@ -6,10 +6,10 @@ module Make(V : VarType) = struct
   module Sem = Make(V)
   open Sem
 
-  let simplify cfg e =
+  let simplify tab e =
     let z3 = Z3.mk_context [] in
     let z3e =
-      try e |> to_z3expr z3 cfg with (Z3.Error _ as err) ->
+      try e |> to_z3expr z3 tab with (Z3.Error _ as err) ->
         Format.printf "%a@." pp_expr e;
         raise err
     in
@@ -25,7 +25,7 @@ module Make(V : VarType) = struct
     for i=0 to n-1 do
       cfg.Cfg.node.(i).Cfg.stmts <-
         cfg.Cfg.node.(i).Cfg.stmts |> List.map begin fun stmt ->
-          let stmt' = map_stmt (simplify cfg) stmt in
+          let stmt' = map_stmt (simplify cfg.temp_tab) stmt in
           if stmt' <> stmt then changed := true;
           stmt'
         end

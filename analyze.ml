@@ -48,6 +48,7 @@ let find_stack_ref il =
     | _ -> ()
   and visit_expr = function
     | E_lit _ -> ()
+    | E_lit_bool _ -> ()
     | E_const _ -> ()
     | E_var _ -> ()
     | E_prim1 (_, e) -> visit_expr e
@@ -199,6 +200,7 @@ let defuse_of_proc (cfg : SSA.stmt cfg) =
   let rec update_use (ep) =
     match ep with
     | E_lit _ -> ()
+    | E_lit_bool _ -> ()
     | E_const _ -> ()
     | E_var sv ->
       begin match sv with

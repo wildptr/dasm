@@ -16,7 +16,7 @@ type 'a cfg = {
   pred : int list array;
   edges : edge list;
   exits : Set.Int.t;
-  temp_tab : int array;
+  temp_tab : Semant.typ array;
 }
 
 let basic_block_count cfg = Array.length cfg.node

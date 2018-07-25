@@ -15,6 +15,7 @@ type prim1 =
   | P1_foldxor
   | P1_foldor
   | P1_part of reg_part
+  | P1_extract of int * int
 
 type prim2 =
   | P2_concat
@@ -24,7 +25,9 @@ type prim2 =
   | P2_logshiftright
   | P2_arishiftright
   | P2_less
+  | P2_less_eq
   | P2_below
+  | P2_below_eq
   | P2_eq
   | P2_and
   | P2_xor
@@ -34,13 +37,32 @@ type prim2 =
 type prim3 =
   | P3_carry
 
+type typ =
+  | T_bool
+  | T_bitvec of int
+
+let pp_typ f = function
+  | T_bool -> pp_print_string f "bool"
+  | T_bitvec size -> pp_print_int f size
+
+let type_of_reg r =
+  let open Inst in
+  match r with
+  | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH -> T_bitvec 8
+  | R_AX | R_CX | R_DX | R_BX | R_SI | R_DI | R_SP | R_BP -> T_bitvec 16
+  | R_EAX | R_ECX | R_EDX | R_EBX | R_ESI | R_EDI | R_ESP | R_EBP -> T_bitvec 32
+  | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS | R_S6 | R_S7 -> T_bitvec 16
+  | R_CF | R_PF | R_AF | R_ZF | R_SF | R_IF | R_DF | R_OF -> T_bool
+  | R_ST0 | R_ST1 | R_ST2 | R_ST3 | R_ST4 | R_ST5 | R_ST6 | R_ST7 -> T_bitvec 80
+  | R_XMM0 | R_XMM1 | R_XMM2 | R_XMM3 | R_XMM4 | R_XMM5 | R_XMM6 | R_XMM7 -> T_bitvec 128
+
 module type VarType = sig
   type t
   val pp : Format.formatter -> t -> unit
   val to_int : t -> int
   val to_string : t -> string
   val of_string : string -> t
-  val size_in_cfg : 'a Cfg.cfg -> t -> int
+  val typ : typ array -> t -> typ
 end
 
 module Var = struct
@@ -50,14 +72,14 @@ module Var = struct
     | Temp of int
     | Local of string
     | PC
-    | Nondet of int
+    | Nondet of typ
 
   let pp f = function
     | Global r -> pp_print_string f (Inst.string_of_reg r)
     | Temp i -> fprintf f "$%d" i
     | Local s -> pp_print_string f s
     | PC -> pp_print_string f "PC"
-    | Nondet w -> fprintf f "?%d" w
+    | Nondet t -> fprintf f "?%a" pp_typ t
 
   let to_string =
     Printf.(function
@@ -65,7 +87,7 @@ module Var = struct
         | Temp i -> sprintf "T:%d" i
         | Local s -> sprintf "L:%s" s
         | PC -> "PC"
-        | Nondet w -> sprintf "N:%d" w
+        | Nondet t -> Format.asprintf "N:%a" pp_typ t
       )
 
   let of_string s =
@@ -75,13 +97,17 @@ module Var = struct
     | "T:" -> Temp (int_of_string tl)
     | "L:" -> Local tl
     | "PC" -> PC
-    | "N:" -> Nondet (int_of_string tl)
+    | "N:" ->
+      let typ =
+        if tl.[0] = 'b' then T_bool else T_bitvec (int_of_string tl)
+      in
+      Nondet typ
     | _ -> invalid_arg ("Var.of_string: " ^ s)
 
-  let size_in_cfg cfg = function
-    | Global r -> Inst.size_of_reg r
-    | Temp i -> cfg.Cfg.temp_tab.(i)
-    | _ -> invalid_arg "Var.size_in_cfg"
+  let typ tab = function
+    | Global r -> type_of_reg r
+    | Temp i -> tab.(i)
+    | _ -> invalid_arg "Var.typ"
 
   let to_int = function
     | Global r -> Inst.int_of_reg r
@@ -113,7 +139,7 @@ module SSAVar = struct
       let uid = int_of_string uid_s in
       { orig; ver; uid }
     | _ -> invalid_arg ("SSAVar.of_string: " ^ s)
-  let size_in_cfg cfg { uid; _ } = cfg.Cfg.temp_tab.(uid)
+  let typ tab { uid; _ } = tab.(uid)
 end
 (*
   | SV_global of string * int
@@ -126,19 +152,26 @@ let pp_sep_list sep pp f = function
     fprintf f "%a" pp hd;
     List.iter (fprintf f "%s%a" sep pp) tl
 
+let mk_andb2 z3 e1 e2 =
+  Z3.Boolean.mk_and z3 [e1;e2]
+
+let mk_orb2 z3 e1 e2 =
+  Z3.Boolean.mk_or z3 [e1;e2]
+
 module Make(V : VarType) = struct
 
   type var = V.t
 
   type expr =
     | E_lit of Bitvec.t
-    | E_const of string * int
+    | E_lit_bool of bool
+    | E_const of string * typ
     | E_var of var
     | E_prim1 of prim1 * expr
     | E_prim2 of prim2 * expr * expr
     | E_prim3 of prim3 * expr * expr * expr
     | E_load of int * expr
-    | E_nondet of int * int
+    | E_nondet of typ * int
     | E_extend of bool * expr * int
     | E_shrink of expr * int
 
@@ -199,8 +232,8 @@ module Make(V : VarType) = struct
     p_name : string;
     p_body : stmt list;
     p_param_names : string list;
-    p_results : (string * int) list;
-    p_var_tab : (string, int) Hashtbl.t;
+    p_results : (string * typ) list;
+    p_var_tab : (string, typ) Hashtbl.t;
   }
 
   let pp_var_part f (var, part) =
@@ -208,6 +241,7 @@ module Make(V : VarType) = struct
 
   let rec pp_expr f = function
     | E_lit bv -> fprintf f "%nd" (Bitvec.to_nativeint bv) (* width is lost *)
+    | E_lit_bool b -> pp_print_bool f b
     | E_const (name, _) -> pp_print_string f name
     | E_var var -> V.pp f var
     | E_prim1 (p, e) ->
@@ -220,6 +254,7 @@ module Make(V : VarType) = struct
         | P1_foldxor -> sym_pp "^"
         | P1_foldor -> sym_pp "|"
         | P1_part p -> ident_pp (string_of_reg_part p)
+        | P1_extract (lo, hi) -> fprintf f "extract(%d, %d, %a)" lo hi pp_expr e
       end
     | E_prim2 (p, e1, e2) ->
       begin match p with
@@ -230,7 +265,9 @@ module Make(V : VarType) = struct
         | P2_logshiftright -> fprintf f "(%a >> %a)" pp_expr e1 pp_expr e2
         | P2_arishiftright -> fprintf f "(%a ±>> %a)" pp_expr e1 pp_expr e2
         | P2_less -> fprintf f "(%a ±< %a)" pp_expr e1 pp_expr e2
+        | P2_less_eq -> fprintf f "(%a ±<= %a)" pp_expr e1 pp_expr e2
         | P2_below -> fprintf f "(%a < %a)" pp_expr e1 pp_expr e2
+        | P2_below_eq -> fprintf f "(%a <= %a)" pp_expr e1 pp_expr e2
         | P2_eq ->  fprintf f "(%a == %a)" pp_expr e1 pp_expr e2
         | P2_and -> fprintf f "(%a & %a)" pp_expr e1 pp_expr e2
         | P2_xor -> fprintf f "(%a ^ %a)" pp_expr e1 pp_expr e2
@@ -256,7 +293,7 @@ module Make(V : VarType) = struct
        fprintf f "(%a)" (pp_sep_list (" "^op_s^" ") pp_expr) es *)
     | E_load (size, addr) ->
       fprintf f "[%a]" pp_expr addr
-    | E_nondet (n, id) -> fprintf f "nondet(%d)#%d" n id
+    | E_nondet (typ, id) -> fprintf f "nondet(%a)#%d" pp_typ typ id
     | E_extend (sign, e, n) ->
       let op_s = if sign then "sign_extend" else "zero_extend" in
       fprintf f "%s(%a, %d)" op_s pp_expr e n
@@ -344,6 +381,7 @@ module Make(V : VarType) = struct
 
   let rec subst f = function
     | E_lit _ as e -> e
+    | E_lit_bool _ as e -> e
     | E_const _ as e -> e
     | E_var v -> f v
     | E_prim1 (p, e) -> E_prim1 (p, subst f e)
@@ -379,52 +417,72 @@ module Make(V : VarType) = struct
 
   let subst_stmt f stmt = map_stmt (subst f) stmt
 
-  let rec size_of_expr cfg = function
-    | E_lit bv -> Bitvec.length bv
-    | E_const (_, size) -> size
-    | E_var v -> V.size_in_cfg cfg v
+  let rec type_of_expr tab = function
+    | E_lit bv -> T_bitvec (Bitvec.length bv)
+    | E_lit_bool _ -> T_bool
+    | E_const (_, typ) -> typ
+    | E_var v -> V.typ tab v
     | E_prim1 (p, e) ->
       begin match p with
-        | P1_not | P1_neg -> size_of_expr cfg e
-        | P1_foldand | P1_foldxor | P1_foldor -> 1
-        | P1_part LoByte | P1_part HiByte -> 8
-        | P1_part LoWord -> 16
+        | P1_not | P1_neg -> type_of_expr tab e
+        | P1_foldand | P1_foldxor | P1_foldor -> T_bitvec 1
+        | P1_part LoByte | P1_part HiByte -> T_bitvec 8
+        | P1_part LoWord -> T_bitvec 16
+        | P1_extract (lo, hi) -> T_bitvec (hi-lo)
       end
     | E_prim2 (p, e1, e2) ->
       begin match p with
-        | P2_concat -> size_of_expr cfg e1 + size_of_expr cfg e2
+        | P2_concat -> begin
+            let T_bitvec w1 = type_of_expr tab e1 in
+            let T_bitvec w2 = type_of_expr tab e2 in
+            T_bitvec (w1 + w2)
+          end [@warning "-8"]
         | P2_add | P2_sub
         | P2_shiftleft | P2_logshiftright | P2_arishiftright
         | P2_and | P2_xor | P2_or | P2_updatepart _ ->
-          size_of_expr cfg e1
-        | P2_eq | P2_less | P2_below -> 1
+          type_of_expr tab e1
+        | P2_eq | P2_less | P2_less_eq | P2_below | P2_below_eq -> T_bool
       end
     | E_prim3 (p, e1, e2, e3) ->
       begin match p with
-        | P3_carry -> 1
+        | P3_carry -> T_bool
       end
-    | E_load (nbyte, _) -> nbyte * 8
-    | E_nondet (size, _) -> size
-    | E_extend (_, _, size) -> size
-    | E_shrink (_, size) -> size
+    | E_load (nbyte, _) -> T_bitvec (nbyte * 8)
+    | E_nondet (typ, _) -> typ
+    | E_extend (_, _, size) -> T_bitvec size
+    | E_shrink (_, size) -> T_bitvec size
 
-  let rec to_z3expr z3 cfg e =
+  let poly tab e mk_bool mk_bv =
+    let typ = type_of_expr tab e in
+    match typ with
+    | T_bool -> mk_bool
+    | T_bitvec _ -> mk_bv
+
+  let rec to_z3expr z3 tab e =
     let open Z3 in
     let open Expr in
     let open BitVector in
-    let size = size_of_expr cfg e in
+    let typ = type_of_expr tab e in
+    let extract_width = function
+      | T_bool -> failwith "type error"
+      | T_bitvec n -> n
+    in
+    let to_sort z3 = function
+      | T_bool -> Boolean.mk_sort z3
+      | T_bitvec n -> mk_sort z3 n
+    in
     match e with
     | E_lit bv ->
       let i = Bitvec.to_nativeint bv in
       let s = Nativeint.to_string i in
-      mk_numeral z3 s size
-    | E_const (s, _) -> mk_const_s z3 s size
-    | E_var v ->
-      mk_const_s z3 (V.to_string v) size
+      mk_numeral z3 s (extract_width typ)
+    | E_lit_bool b -> (if b then Boolean.mk_true else Boolean.mk_false) z3
+    | E_const (s, typ) -> Expr.mk_const_s z3 s (to_sort z3 typ)
+    | E_var v -> Expr.mk_const_s z3 (V.to_string v) (to_sort z3 typ)
     | E_prim1 (p, e) ->
       let mk =
         match p with
-        | P1_not -> mk_not
+        | P1_not -> poly tab e Boolean.mk_not BitVector.mk_not
         | P1_neg -> mk_neg
         | P1_foldand -> mk_redand
         | P1_foldxor -> failwith "to_z3expr: P1_foldxor"
@@ -436,16 +494,17 @@ module Make(V : VarType) = struct
             | HiByte -> 8, 15
             | LoWord -> 0, 15
           in
-          fun z3 -> mk_extract z3 lo hi
+          fun z3 -> mk_extract z3 hi lo
+        | P1_extract (lo, hi) -> fun z3 -> mk_extract z3 (hi-1) lo
       in
-      mk z3 (to_z3expr z3 cfg e)
+      mk z3 (to_z3expr z3 tab e)
     | E_prim2 (p, e1, e2) ->
       let mk =
         match p with
         | P2_add -> mk_add
-        | P2_and -> mk_and
-        | P2_xor -> mk_xor
-        | P2_or -> mk_or
+        | P2_and -> poly tab e1 mk_andb2 BitVector.mk_and
+        | P2_xor -> poly tab e1 Boolean.mk_xor BitVector.mk_xor
+        | P2_or -> poly tab e1 mk_orb2 BitVector.mk_or
         | P2_concat -> mk_concat
         | P2_sub -> mk_sub
         | P2_eq -> Boolean.mk_eq
@@ -453,74 +512,95 @@ module Make(V : VarType) = struct
         | P2_logshiftright -> mk_lshr
         | P2_arishiftright -> mk_ashr
         | P2_less -> mk_slt
+        | P2_less_eq -> mk_sle
         | P2_below -> mk_ult
+        | P2_below_eq -> mk_ule
         | P2_updatepart p ->
+          let size = extract_width typ in
           begin match p with
             | LoByte ->
-              fun z3 e1 e2 -> mk_concat z3 e2 (mk_extract z3 8 (size-1) e1)
+              fun z3 e1 e2 -> mk_concat z3 e2 (mk_extract z3 (size-1) 8 e1)
             | LoWord ->
-              fun z3 e1 e2 -> mk_concat z3 e2 (mk_extract z3 16 (size-1) e1)
+              fun z3 e1 e2 -> mk_concat z3 e2 (mk_extract z3 (size-1) 16 e1)
             | HiByte ->
               fun z3 e1 e2 ->
-                mk_concat z3 (mk_extract z3 0 7 e1)
-                  (mk_concat z3 e2 (mk_extract z3 16 (size-1) e1))
+                mk_concat z3 (mk_extract z3 7 0 e1)
+                  (mk_concat z3 e2 (mk_extract z3 (size-1) 16 e1))
           end
       in
-      mk z3 (to_z3expr z3 cfg e1) (to_z3expr z3 cfg e2)
+      mk z3 (to_z3expr z3 tab e1) (to_z3expr z3 tab e2)
     | E_prim3 (p, e1, e2, e3) ->
       begin match p with
         | P3_carry ->
-          let size = size_of_expr cfg e1 in
+          let size = type_of_expr tab e1 |> extract_width in
           let sortn = mk_sort z3 size in
-          let sort1 = mk_sort z3 1 in
+          let bool_sort = Boolean.mk_sort z3 in
           let carry_func =
             FuncDecl.mk_func_decl_s z3 (Printf.sprintf "carry%d" size)
-              [sortn; sortn; sort1] sort1
+              [sortn; sortn; bool_sort] bool_sort
           in
           mk_app z3 carry_func
-            [to_z3expr z3 cfg e1; to_z3expr z3 cfg e2; to_z3expr z3 cfg e3]
+            [to_z3expr z3 tab e1; to_z3expr z3 tab e2; to_z3expr z3 tab e3]
       end
     | E_load (nbyte, e) ->
       let mem_func =
         FuncDecl.mk_func_decl_s z3 (Printf.sprintf "mem%d" (nbyte*8))
           [mk_sort z3 32] (mk_sort z3 (nbyte*8))
       in
-      mk_app z3 mem_func [to_z3expr z3 cfg e]
-    | E_nondet (size, id) ->
+      mk_app z3 mem_func [to_z3expr z3 tab e]
+    | E_nondet (typ, id) ->
       let int_sort = Arithmetic.Integer.mk_sort z3 in
       let nondet_func =
-        FuncDecl.mk_func_decl_s z3 (Printf.sprintf "nondet%d" id)
-          [int_sort] (mk_sort z3 size)
+        FuncDecl.mk_func_decl_s z3 (Format.asprintf "nondet%a" pp_typ typ)
+          [int_sort] (to_sort z3 typ)
       in
       mk_app z3 nondet_func [mk_numeral_int z3 id int_sort]
-    | E_extend (sign, e, size)->
-      (if sign then mk_sign_ext else mk_zero_ext) z3 size (to_z3expr z3 cfg e)
-    | E_shrink (e, size)->
-      mk_extract z3 0 (size-1) (to_z3expr z3 cfg e)
+    | E_extend (sign, e, size) ->
+      let size = extract_width typ in
+      (if sign then mk_sign_ext else mk_zero_ext) z3 size (to_z3expr z3 tab e)
+    | E_shrink (e, size) ->
+      let size = extract_width typ in
+      mk_extract z3 (size-1) 0 (to_z3expr z3 tab e)
+
+  let rec make_prim2_from_list p = function
+    | [] -> failwith "make_prim2_from_list: empty list"
+    | [a] -> a
+    | a::b::l -> make_prim2_from_list p (E_prim2 (p, a, b) :: l)
 
   let func_sym_table = [
-    "bvadd", (fun [a;b] -> E_prim2 (P2_add, a, b));
-    "bvsub", (fun [a;b] -> E_prim2 (P2_sub, a, b));
-    "bvand", (fun [a;b] -> E_prim2 (P2_and, a, b));
-    "bvxor", (fun [a;b] -> E_prim2 (P2_xor, a, b));
-    "bvsle", (fun [a;b] -> E_prim2 (P2_less, a, b));
-    "bvule", (fun [a;b] -> E_prim2 (P2_below, a, b));
-    "bvor", (fun [a;b] -> E_prim2 (P2_or, a, b));
+    "bvadd", (make_prim2_from_list P2_add);
+    "bvsub", (make_prim2_from_list P2_sub);
+    "bvand", (make_prim2_from_list P2_and);
+    "bvxor", (make_prim2_from_list P2_xor);
+    "bvor", (make_prim2_from_list P2_or);
+    "bvslt", (fun [a;b] -> E_prim2 (P2_less, a, b));
+    "bvsle", (fun [a;b] -> E_prim2 (P2_less_eq, a, b));
+    "bvult", (fun [a;b] -> E_prim2 (P2_below, a, b));
+    "bvule", (fun [a;b] -> E_prim2 (P2_below_eq, a, b));
     "bvnot", (fun [a] -> E_prim1 (P1_not, a));
     "not", (fun [a] -> E_prim1 (P1_not, a));
     "=", (fun [a;b] -> E_prim2 (P2_eq, a, b));
-  ] |> List.enum |> Map.String.of_enum
+    "concat", (make_prim2_from_list P2_concat);
+  ] [@warning "-8"] |> List.enum |> Map.String.of_enum
 
-  let rec of_sexp = function
-    | Sexplib0.Sexp.Atom s ->
+  let rec of_sexp sexp =
+    let open Sexplib0.Sexp in
+    match sexp with
+    | Atom s ->
       if s.[0] = '#' then
         E_lit begin
           match s.[1] with
+          | 'b' ->
+            "0b" ^ String.tail s 2 |> Nativeint.of_string |>
+            Bitvec.of_nativeint (String.length s - 2)
           | 'x' ->
             "0x" ^ String.tail s 2 |> Nativeint.of_string |>
             Bitvec.of_nativeint ((String.length s - 2) * 4)
           | _ -> invalid_arg ("of_sexp: " ^ s)
         end
+      else
+      if s = "true" then E_lit_bool true
+      else if s = "false" then E_lit_bool false
       else
         let len = String.length s in
         E_var begin
@@ -528,9 +608,9 @@ module Make(V : VarType) = struct
              String.sub s 1 (len-2)
            else s) |> V.of_string
         end
-    | Sexplib0.Sexp.List l ->
+    | List l ->
       begin match l with
-        | Sexplib0.Sexp.Atom s :: tl ->
+        | Atom s :: tl ->
           if String.left s 3 = "mem" then
             let nbyte = (String.tail s 3 |> int_of_string)/8 in
             let e =
@@ -540,19 +620,24 @@ module Make(V : VarType) = struct
             in
             E_load (nbyte, e)
           else if String.left s 6 = "nondet" then
-            let size = String.tail s 6 |> int_of_string in
+            let typ =
+              if s.[6] = 'b' then T_bool
+              else let size = String.tail s 6 |> int_of_string in T_bitvec size
+            in
             let id =
               match tl with
-              | [Sexplib0.Sexp.Atom s] -> int_of_string s
+              | [Atom s] -> int_of_string s
               | _ -> invalid_arg "of_sexp(nondet)"
             in
-            E_nondet (size, id)
-          (* else if String.left s 5 = "carry" then
-            let size = String.tail s 5 |> int_of_string in
+            E_nondet (typ, id)
+          else if String.left s 5 = "carry" then
+(*             let size = String.tail s 5 |> int_of_string in *)
             let e1, e2, e3 =
-              match
-                E_
-            E_carry () *)
+              match tl with
+              | [a;b;c] -> of_sexp a, of_sexp b, of_sexp c
+              | _ -> invalid_arg "of_sexp(carry)"
+            in
+            E_prim3 (P3_carry, e1, e2, e3)
           else
             let f =
               try Map.String.find s func_sym_table
@@ -560,11 +645,18 @@ module Make(V : VarType) = struct
                 invalid_arg ("of_sexp: unknown function symbol " ^ s)
             in
             tl |> List.map of_sexp |> f
+        | [List [Atom "_"; Atom "extract"; Atom hi; Atom lo]; a] ->
+          E_prim1
+            (P1_extract (int_of_string lo, int_of_string hi + 1), of_sexp a)
         | _ -> invalid_arg "of_sexp"
       end
 
   let from_z3expr z3e =
-    z3e |> Z3.Expr.to_string |> Parsexp.Single.parse_string_exn |> of_sexp
+    try
+      z3e |> Z3.Expr.to_string |> Parsexp.Single.parse_string_exn |> of_sexp
+    with e ->
+      Format.printf "%s@." (z3e |> Z3.Expr.to_string);
+      raise e
 
 end
 

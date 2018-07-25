@@ -15,10 +15,13 @@ let next_line lexbuf =
 let keyword_map : token Map.String.t =
   [
     (*"if", K_if;*)
+    "bool", K_bool;
+    "false", K_false;
     "jump", K_jump;
     "pc", K_pc;
     "proc", K_proc;
     "template", K_template;
+    "true", K_true;
     "undefined", K_undefined;
     "var", K_var;
   ] |> List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty

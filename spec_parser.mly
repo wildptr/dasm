@@ -33,10 +33,13 @@ open Spec_ast
 %token RBrace
 %token Tilde
 
+%token K_bool
+%token K_false
 %token K_jump
 %token K_pc
 %token K_proc
 %token K_template
+%token K_true
 %token K_undefined
 %token K_var
 
@@ -62,20 +65,20 @@ decl:
   | proc_inst { Decl_proc_inst $1 }
 
 localdecl:
-  | K_var; name = Ident; Colon; size = cexpr; Semi
-    { name, size }
+  | K_var; name = Ident; Colon; typ = typ; Semi
+    { name, typ }
 
 block:
   | LBrace; decls = list(localdecl); stmts = list(stmt); RBrace
     { decls, stmts }
 
-name_width_pair:
-  | name = Ident; Colon; len = cexpr { name, len }
+name_type_pair:
+  | name = Ident; Colon; typ = typ { name, typ }
 
 proc_def:
   | K_proc; ap_name = Ident;
-    LParen; ap_params = separated_list(Comma, name_width_pair); RParen;
-    ap_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_width_pair)));
+    LParen; ap_params = separated_list(Comma, name_type_pair); RParen;
+    ap_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_type_pair)));
     ap_body = block
     {{ ap_name; ap_params; ap_body; ap_results }}
 
@@ -87,13 +90,15 @@ primary_expr:
       else Expr_local_sym name }*)
   | bv = Bitvec
     { Expr_literal bv }
+  | K_false { Expr_literal_bool false }
+  | K_true { Expr_literal_bool true }
   | Hash; v = primary_cexpr; Colon; w = primary_cexpr
     { Expr_literal2 (v, w) }
   | LParen; e = expr; RParen { e }
   | func_name = Ident; LParen; args = separated_list(Comma, expr); RParen
     { Expr_apply (func_name, args) }
-  | K_undefined; LParen; width = cexpr; RParen
-    { Expr_undef width }
+  | K_undefined; LParen; typ = typ; RParen
+    { Expr_undef typ }
   | memloc
     { Expr_load $1 }
   | LParen; e = primary_expr; Colon; w = primary_cexpr; RParen
@@ -187,11 +192,15 @@ binary_cexpr:
 
 cexpr: binary_cexpr {$1}
 
+typ:
+  | cexpr { Typ_bitvec $1 }
+  | K_bool { Typ_bool }
+
 proc_templ:
   | K_template; K_proc; pt_name = Ident;
     LAngle; pt_templ_params = separated_list(Comma, Ident); RAngle;
-    LParen; pt_proc_params = separated_list(Comma, name_width_pair); RParen;
-    pt_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_width_pair)));
+    LParen; pt_proc_params = separated_list(Comma, name_type_pair); RParen;
+    pt_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_type_pair)));
     pt_body = block
     {{ pt_name; pt_templ_params; pt_proc_params; pt_body; pt_results }}
 

@@ -34,6 +34,14 @@ let rec pp_cexpr f = function
   | C_unary (op, e) ->
     fprintf f "(%s%a)" (string_of_c_unop op) pp_cexpr e
 
+type texpr =
+  | Typ_bool
+  | Typ_bitvec of cexpr
+
+let pp_texpr f = function
+  | Typ_bool -> pp_print_string f "bool"
+  | Typ_bitvec c -> pp_cexpr f c
+
 (* ---- *)
 
 type unary_op =
@@ -71,10 +79,11 @@ type astexpr =
   | Expr_sym of string
   | Expr_literal of Bitvec.t
   | Expr_literal2 of cexpr * cexpr (* value, width *)
+  | Expr_literal_bool of bool
   | Expr_unary of unary_op * astexpr
   | Expr_binary of binary_op * astexpr * astexpr
   | Expr_apply of string * astexpr list
-  | Expr_undef of cexpr
+  | Expr_undef of texpr
   | Expr_load of memloc
   | Expr_extend of bool * astexpr * cexpr
   | Expr_pc
@@ -92,7 +101,7 @@ type aststmt =
 
 let pp_comma_separated_list pp f = function
   | [] -> ()
-  | hd::tl -> pp f hd; pp_print_string f ","; List.iter (pp f) tl
+  | hd::tl -> pp f hd; List.iter (fun x -> pp_print_string f ","; pp f x) tl
 
 let pp_list pp f = List.iter (pp f)
 
@@ -100,13 +109,14 @@ let rec pp_astexpr f = function
   | Expr_sym s -> pp_print_string f s
   | Expr_literal bv -> fprintf f "'%a'" Bitvec.pp bv
   | Expr_literal2 (v, w) -> fprintf f "{%a:%a}" pp_cexpr v pp_cexpr w
+  | Expr_literal_bool b -> pp_print_bool f b;
   | Expr_unary (op, e) ->
     fprintf f "(%s%a)" (string_of_unary_op op) pp_astexpr e
   | Expr_binary (op, e1, e2) ->
     fprintf f "(%a%s%a)" pp_astexpr e1 (string_of_binary_op op) pp_astexpr e2
   | Expr_apply (func_name, args) ->
     fprintf f "%s(%a)" func_name (pp_comma_separated_list pp_astexpr) args;
-  | Expr_undef width -> fprintf f "undefined(%a)" pp_cexpr width
+  | Expr_undef texpr -> fprintf f "undefined(%a)" pp_texpr texpr
   | Expr_load memloc -> pp_memloc f memloc
   | Expr_extend (sign, data, n) -> () (* TODO *)
   | Expr_pc -> pp_print_string f "pc"
@@ -127,18 +137,18 @@ let pp_aststmt f = function
   | Stmt_jump addr ->
     fprintf f "jump %a;" pp_astexpr addr
 
-type param_list = (string * cexpr) list
+type param_list = (string * texpr) list
 
-let pp_param f (name, width) = fprintf f "%s:%a" name pp_cexpr width
+let pp_param f (name, texpr) = fprintf f "%s:%a" name pp_texpr texpr
 
-type vardecl = string * cexpr
+type vardecl = string * texpr
 type astblock = vardecl list * aststmt list
 
 type astproc = {
   ap_name : string;
   ap_params : param_list;
   ap_body : astblock;
-  ap_results : (string * cexpr) list;
+  ap_results : (string * texpr) list;
 }
 
 let pp_astblock f (decls, stmts) =
@@ -161,7 +171,7 @@ type proc_templ = {
   pt_templ_params : string list;
   pt_proc_params : param_list;
   pt_body : astblock;
-  pt_results : (string * cexpr) list;
+  pt_results : (string * texpr) list;
 }
 
 let pp_proc_templ f pt =

@@ -1,6 +1,6 @@
 template proc add<N>(a:N, b:N) -> out:N
 {
-	CF = carry(a, b, '0');
+	CF = carry(a, b, false);
 	ZF = a+b == #0:N;
 	SF = less(a+b, #0:N);
 	OF = CF ^ SF ^ less(a, #0:N) ^ less(b, #0:N);
@@ -37,12 +37,12 @@ template proc sbb<N>(a:N, b:N) -> out:N
 template proc log_op<N, OP>(a:N, b:N) -> out:N
 {
 	out = OP(a, b);
-	CF = '0';
+	CF = false;
 	//PF = ~^out[7:0];
-	//AF = undefined(1);
+	//AF = undefined(bool);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
-	OF = '0';
+	OF = false;
 }
 
 template proc shl<N, M>(x:N, n:M) -> out:N
@@ -50,33 +50,33 @@ template proc shl<N, M>(x:N, n:M) -> out:N
 	out = shift_left(x, n);
 	// TODO: the following is incorrect; see 325383.pdf p.1236
 	//PF = ~^out[7:0];
-	//AF = undefined(1);
-	CF = undefined(1);
+	//AF = undefined(bool);
+	CF = undefined(bool);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
-	OF = undefined(1);
+	OF = undefined(bool);
 }
 
 template proc shr<N, M>(x:N, n:M) -> out:N
 {
 	out = log_shift_right(x, n);
 	//PF = ~^out[7:0];
-	//AF = undefined(1);
-	CF = undefined(1);
+	//AF = undefined(bool);
+	CF = undefined(bool);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
-	OF = undefined(1);
+	OF = undefined(bool);
 }
 
 template proc sar<N, M>(x:N, n:M) -> out:N
 {
 	out = ari_shift_right(x, n);
-	CF = undefined(1);
+	CF = undefined(bool);
 	//PF = ~^out[7:0];
-	//AF = undefined(1);
+	//AF = undefined(bool);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
-	OF = undefined(1);
+	OF = undefined(bool);
 }
 
 proc add8  = add< 8>;
@@ -145,7 +145,7 @@ template proc inc<N>(in:N) -> out:N
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
 	//OF = sum1[N] ^ out[N-1] ^ in[N-1];
-	OF = undefined(1);
+	OF = undefined(bool);
 }
 
 template proc dec<N>(in:N) -> out:N
@@ -153,7 +153,7 @@ template proc dec<N>(in:N) -> out:N
 	out = in - #1:N;
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
-	OF = undefined(1);
+	OF = undefined(bool);
 }
 
 proc inc8  = inc< 8>;
@@ -180,12 +180,12 @@ proc neg32 = neg<32>;
 template proc not<N>(in:N) -> out:N
 {
 	out = ~in;
-	CF = '0';
+	CF = false;
 	//PF = ~^out[7:0];
-	//AF = undefined(1);
+	//AF = undefined(bool);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
-	OF = '0';
+	OF = false;
 }
 
 proc not8  = not< 8>;

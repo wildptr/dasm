@@ -76,15 +76,6 @@ let reg_of_int i = let (r:reg) = Obj.magic i in r
 let all_registers =
   List.range 0 `To (number_of_registers-1) |> List.map reg_of_int
 
-let size_of_reg = function
-  | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH -> 8
-  | R_AX | R_CX | R_DX | R_BX | R_SI | R_DI | R_SP | R_BP -> 16
-  | R_EAX | R_ECX | R_EDX | R_EBX | R_ESI | R_EDI | R_ESP | R_EBP -> 32
-  | R_ES | R_CS | R_SS | R_DS | R_FS | R_GS | R_S6 | R_S7 -> 16
-  | R_CF | R_PF | R_AF | R_ZF | R_SF | R_IF | R_DF | R_OF -> 1
-  | R_ST0 | R_ST1 | R_ST2 | R_ST3 | R_ST4 | R_ST5 | R_ST6 | R_ST7 -> 80
-  | R_XMM0 | R_XMM1 | R_XMM2 | R_XMM3 | R_XMM4 | R_XMM5 | R_XMM6 | R_XMM7 -> 128
-
 let lookup_reg name =
   match name with
   | "AL" -> R_AL
