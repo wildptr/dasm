@@ -65,7 +65,15 @@ let of_int len i =
 let of_nativeint len bits =
   { len; bits }
 
-let to_nativeint bv = bv.bits
+let sign_bit bv =
+  Nativeint.logand (Nativeint.shift_right bv.bits (bv.len-1)) 1n = 1n
+
+let to_nativeint bv =
+  let mask = Nativeint.shift_left (-1n) bv.len in
+  if sign_bit bv then
+    Nativeint.logor mask bv.bits
+  else
+    Nativeint.(logand (lognot mask) bv.bits)
 
 let of_bytestring s = failwith "Bitvec.of_bytestring: not implemented"
 
@@ -82,9 +90,6 @@ let truncate len bv =
 
 let zero_extend len bv =
   { len; bits = bv.bits }
-
-let sign_bit bv =
-  Nativeint.logand (Nativeint.shift_right bv.bits (bv.len-1)) 1n = 1n
 
 let sign_extend len bv =
   let s = sign_bit bv in

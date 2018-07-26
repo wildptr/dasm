@@ -41,14 +41,13 @@ let find_stack_ref il =
   let rec visit_addr_expr e =
     visit_expr e;
     match e with
-    | E_prim2 (P2_add, (E_var (Var.Global R_ESP)), (E_lit bv)) ->
+    | E_prim2 (P2_add, (E_var (Var.Global R_ESP)), (E_lit (BitvecLit, bv))) ->
       set := S.add (Bitvec.to_nativeint bv) !set
     | E_var (Var.Global R_ESP) ->
       set := S.add 0n !set
     | _ -> ()
   and visit_expr = function
     | E_lit _ -> ()
-    | E_lit_bool _ -> ()
     | E_const _ -> ()
     | E_var _ -> ()
     | E_prim1 (_, e) -> visit_expr e
@@ -109,8 +108,8 @@ let get_stack_offset e =
   let open SSA in
   match e with
   | E_prim2 (P2_add, (E_var { orig = Var.Global R_ESP; ver = 0; _ }),
-             (E_lit offset)) -> Some (Bitvec.to_nativeint offset)
-  | E_prim2 (P2_add, E_lit offset,
+             (E_lit (BitvecLit, offset))) -> Some (Bitvec.to_nativeint offset)
+  | E_prim2 (P2_add, E_lit (BitvecLit, offset),
              E_var { orig = Var.Global R_ESP; ver = 0; _ }) ->
     Some (Bitvec.to_nativeint offset)
   | _ -> None
@@ -200,7 +199,6 @@ let defuse_of_proc (cfg : SSA.stmt cfg) =
   let rec update_use (ep) =
     match ep with
     | E_lit _ -> ()
-    | E_lit_bool _ -> ()
     | E_const _ -> ()
     | E_var sv ->
       begin match sv with

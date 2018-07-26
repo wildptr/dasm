@@ -199,14 +199,16 @@ let call_retlist =
     r, Var.Global r
   end
 
+module PlainToPlain = Transform(Var)(Var)
+
 let rec expand_stmt env pc stmt =
-  let rename_var = function
+  let subst_var = function
     | Var.Local name ->
       begin
         try Hashtbl.find env.rename_table name
         with Not_found -> failwith ("unbound local variable: "^name)
       end
-    | Var.PC -> E_lit (Bitvec.of_nativeint 32 pc)
+    | Var.PC -> E_lit (BitvecLit, Bitvec.of_nativeint 32 pc)
     | Var.Nondet w -> E_nondet (w, new_nondet_id env)
 (*
     | Var.Global r as v ->
@@ -225,15 +227,15 @@ let rec expand_stmt env pc stmt =
 *)
     | v -> E_var v
   in
-  let rename e = subst rename_var e in
+  let subst e = PlainToPlain.subst subst_var e in
   let tr_assign var e =
     let var' =
-      match rename_var var with
+      match subst_var var with
       | E_lit _ -> failwith "assignment to parameter (via ordinary assignment)"
       | E_var v -> v
       | _ -> assert false
     in
-    let e' = rename e in
+    let e' = subst e in
     var', e'
   in
   match stmt with
@@ -241,7 +243,7 @@ let rec expand_stmt env pc stmt =
     let var', e' = tr_assign var e in
     emit env (S_set (var', e'))
   | S_store (size, addr, data) ->
-    emit env (S_store (size, rename addr, rename data))
+    emit env (S_store (size, subst addr, subst data))
   | S_jump (c, e) ->
     begin match Database.get_jump_info env.db pc with
       | (J_call | J_ret as j) ->
@@ -250,9 +252,9 @@ let rec expand_stmt env pc stmt =
         let retlist = if j = J_call then call_retlist else [] in
         emit env (S_jumpout (rename e, jumpout_arglist, retlist))
 *)
-        emit env (S_jumpout (rename e, j = J_call))
+        emit env (S_jumpout (subst e, j = J_call))
       | _ ->
-        emit env (S_jump (Option.map rename c, rename e))
+        emit env (S_jump (Option.map subst c, subst e))
     end
   | S_call (proc, args, results) ->
     (* try not to create temporary variables for constants, as they confuse the
@@ -278,7 +280,7 @@ let rec expand_stmt env pc stmt =
     in
     let results' =
       results |> List.map begin fun v ->
-        match rename_var v with
+        match subst_var v with
         | E_var v' -> v'
         | _ -> assert false
       end
@@ -311,7 +313,7 @@ let rec expand_stmt env pc stmt =
           | E_var v -> v
           | _ -> assert false
         in
-        emit env (S_set (param_var, rename arg))
+        emit env (S_set (param_var, subst arg))
     done;
     (* expand procedure body *)
     List.iter (expand_stmt env pc) proc.p_body;
@@ -408,7 +410,9 @@ let elaborate_inst env pc inst =
         | _ -> assert false
       in
       let cond = cond_expr (inst.variant lsr 4) in
-      let data = E_extend (false, cond, 8) in
+      let zero = E_lit (BitvecLit, Bitvec.of_nativeint 8 0n) in
+      let one = E_lit (BitvecLit, Bitvec.of_nativeint 8 1n) in
+      let data = E_prim3 (P3_ite, cond, one, zero) in
       elaborate_writeback emit' dst data
     | I_XCHG ->
       let dst, src =

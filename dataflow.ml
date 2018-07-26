@@ -21,7 +21,6 @@ module DefUse(V : VarType) = struct
 
   let rec use_of_expr = function
     | E_lit _ -> S.empty
-    | E_lit_bool _ -> S.empty
     | E_const _ -> S.empty
     | E_var var -> S.singleton (V.to_int var)
     | E_prim1 (_, e) -> use_of_expr e
@@ -116,6 +115,10 @@ end
 
 module PlainDefUse = DefUse(Var)
 module SSADefUse = DefUse(SSAVar)
+
+module SSAToSSA = Transform(SSAVar)(SSAVar)
+module PlainToSSA = Transform(Var)(SSAVar)
+module SSAToPlain = Transform(SSAVar)(Var)
 
 let postorder f cfg =
   let n = Array.length cfg.node in
@@ -226,13 +229,13 @@ let auto_subst cfg =
         let ok =
           use_count.(v) = 1 ||
           begin match rhs with
-            | E_var _ | E_lit _ | E_lit_bool _ -> true
+            | E_var _ | E_lit _ -> true
             | _ -> lhs.SSAVar.orig = Var.Global R_ESP
           end
         in
         if ok then begin
           let rhs' =
-            rhs |> subst begin fun sv ->
+            rhs |> SSAToSSA.subst begin fun sv ->
               let v' = SSAVar.to_int sv in
               rep.(v') |> Option.default (E_var sv)
             end
@@ -254,7 +257,7 @@ let auto_subst cfg =
         let stmt' =
           match stmt with
           | S_set (lhs, _) when rep.(SSAVar.to_int lhs) <> None -> None
-          | _ -> Some (subst_stmt f stmt)
+          | _ -> Some (SSAToSSA.map_stmt (fun v -> v) (SSAToSSA.subst f) stmt)
         in
         if Some stmt <> stmt' then changed := true;
         stmt'
@@ -264,6 +267,7 @@ let auto_subst cfg =
 
 let remove_dead_code_ssa cfg =
   let open SSA in
+
   let n = Array.length cfg.node in
   let changed = ref false in
   let use_count = count_uses cfg in
@@ -285,54 +289,6 @@ let remove_dead_code_ssa cfg =
       end
   done;
   !changed
-
-let rec rename_to_ssa f = function
-  | Plain.E_lit bv ->
-    SSA.E_lit bv
-  | Plain.E_lit_bool b ->
-    SSA.E_lit_bool b
-  | Plain.E_const (name, size) ->
-    SSA.E_const (name, size)
-  | Plain.E_var name ->
-    SSA.E_var (f name)
-  | Plain.E_prim1 (p, e) ->
-    SSA.E_prim1 (p, rename_to_ssa f e)
-  | Plain.E_prim2 (p, e1, e2) ->
-    SSA.E_prim2 (p, rename_to_ssa f e1, rename_to_ssa f e2)
-  | Plain.E_prim3 (p, e1, e2, e3) ->
-    SSA.E_prim3 (p, rename_to_ssa f e1, rename_to_ssa f e2, rename_to_ssa f e3)
-  | Plain.E_load (size, addr) ->
-    SSA.E_load (size, rename_to_ssa f addr)
-  | Plain.E_nondet (w, id) ->
-    SSA.E_nondet (w, id)
-  | Plain.E_extend (sign, e, n) ->
-    SSA.E_extend (sign, rename_to_ssa f e, n)
-  | Plain.E_shrink (e, n) ->
-    SSA.E_shrink (rename_to_ssa f e, n)
-
-let rec rename_from_ssa f = function
-  | SSA.E_lit bv ->
-    Plain.E_lit bv
-  | SSA.E_lit_bool b ->
-    Plain.E_lit_bool b
-  | SSA.E_const (name, size) ->
-    Plain.E_const (name, size)
-  | SSA.E_var name ->
-    Plain.E_var (f name)
-  | SSA.E_prim1 (p, e) ->
-    Plain.E_prim1 (p, rename_from_ssa f e)
-  | SSA.E_prim2 (p, e1, e2) ->
-    Plain.E_prim2 (p, rename_from_ssa f e1, rename_from_ssa f e2)
-  | SSA.E_prim3 (p, e1, e2, e3) ->
-    Plain.E_prim3 (p, rename_from_ssa f e1, rename_from_ssa f e2, rename_from_ssa f e3)
-  | SSA.E_load (size, addr) ->
-    Plain.E_load (size, rename_from_ssa f addr)
-  | SSA.E_nondet (w, id) ->
-    Plain.E_nondet (w, id)
-  | SSA.E_extend (sign, e, n) ->
-    Plain.E_extend (sign, rename_from_ssa f e, n)
-  | SSA.E_shrink (e, n) ->
-    Plain.E_shrink (rename_from_ssa f e, n)
 
 let plain_dummy = Plain.E_nondet (T_bool, 0)
 let ssa_dummy = SSA.E_nondet (T_bool, 0)
@@ -446,36 +402,36 @@ let convert_to_ssa db cfg =
       let stmt' =
         match stmt with
         | Plain.S_set (name, e) ->
-          let e' = rename_to_ssa f e in
+          let e' = PlainToSSA.rename_var f e in
           let name' = f name in
           SSA.S_set (name', e')
         | Plain.S_store (size, off, data) ->
-          let off' = rename_to_ssa f off in
-          let data' = rename_to_ssa f data in
+          let off' = PlainToSSA.rename_var f off in
+          let data' = PlainToSSA.rename_var f data in
           SSA.S_store (size, off', data')
         | Plain.S_jump (c, dst) ->
-          let c' = Option.map (rename_to_ssa f) c in
-          let dst' = rename_to_ssa f dst in
+          let c' = Option.map (PlainToSSA.rename_var f) c in
+          let dst' = PlainToSSA.rename_var f dst in
           SSA.S_jump (c', dst')
         | Plain.S_jumpout (dst, j) ->
-          let dst' = rename_to_ssa f dst in
+          let dst' = PlainToSSA.rename_var f dst in
           if j then
             let arglist, retlist =
               match dst with
-              | Plain.E_lit dst_bv ->
+              | Plain.E_lit (BitvecLit, dst_bv) ->
                 jumpout_io db (Some (Bitvec.to_nativeint dst_bv))
               | _ ->
                 jumpout_io db None
             in
             let arglist' =
-              arglist |> List.map (fun (r,v) -> r, rename_to_ssa f v)
+              arglist |> List.map (fun (r,v) -> r, PlainToSSA.rename_var f v)
             in
             let retlist' = retlist |> List.map (fun (r,v) -> r, f v) in
             SSA.S_jumpout_call (dst', arglist', retlist')
           else
             let arglist = make_arglist Inst.all_registers in
             let arglist' =
-              arglist |> List.map (fun (r,v) -> r, rename_to_ssa f v)
+              arglist |> List.map (fun (r,v) -> r, PlainToSSA.rename_var f v)
             in
             SSA.S_jumpout_ret (dst', arglist')
         | Plain.S_phi (lhs, rhs) ->
@@ -490,7 +446,7 @@ let convert_to_ssa db cfg =
   done;
   let rec rename_bb i =
     let open SSA in
-    let sub = subst (fun sv -> E_var (rename_rhs sv)) in
+    let sub = SSAToSSA.subst (fun sv -> E_var (rename_rhs sv)) in
     node.(i).stmts <- begin
       node.(i).stmts |> List.map begin function
         | S_set (sv, e) ->
@@ -529,7 +485,7 @@ let convert_to_ssa db cfg =
           let open SSAVar in
           assert (rhs.(j) == ssa_dummy);
           rhs.(j) <-
-            SSA.subst (fun sv -> SSA.E_var (rename_rhs sv))
+            SSAToSSA.subst (fun sv -> SSA.E_var (rename_rhs sv))
               (SSA.E_var lhs)
         | _ -> ()
       end
@@ -554,35 +510,22 @@ let convert_to_ssa db cfg =
   { node; succ; pred; edges = cfg.edges; exits = cfg.exits; temp_tab }
 
 let convert_stmt_from_ssa f s =
-  let rename = rename_from_ssa f in
-  match s with
-  | SSA.S_set (lhs, rhs) ->
-    Plain.S_set (f lhs, rename rhs)
-  | SSA.S_store (size, addr, data) ->
-    Plain.S_store (size, rename addr, rename data)
-  | SSA.S_jump (cond_opt, dest) ->
-    let cond_opt' = Option.map rename cond_opt in
-    let dest' = rename dest in
-    Plain.S_jump (cond_opt', dest')
-  | SSA.S_jumpout_call (dest, arglist, retlist) ->
-    let dest' = rename dest in
+  let open Plain in
+  match SSAToPlain.map_stmt f (SSAToPlain.rename_var f) s with
+  | S_jumpout_call (dest, arglist, retlist) ->
     let arglist' =
-      arglist |> List.map (fun (r,v) -> r, rename v) |>
-      List.filter (fun (r,v) -> v <> Plain.E_var (Var.Global r))
+      arglist |> List.filter (fun (r,v) -> v <> E_var (Var.Global r))
     in
     let retlist' =
-      retlist |> List.map (fun (r,v) -> r, f v) |>
-      List.filter (fun (r,v) -> v <> Var.Global r)
+      retlist |> List.filter (fun (r,v) -> v <> Var.Global r)
     in
-    Plain.S_jumpout_call (dest', arglist', retlist')
-  | SSA.S_jumpout_ret (dest, arglist) ->
-    let dest' = rename dest in
+    S_jumpout_call (dest, arglist', retlist')
+  | S_jumpout_ret (dest, arglist) ->
     let arglist' =
-      arglist |> List.map (fun (r,v) -> r, rename v) |>
-      List.filter (fun (r,v) -> v <> Plain.E_var (Var.Global r))
+      arglist |> List.filter (fun (r,v) -> v <> E_var (Var.Global r))
     in
-    Plain.S_jumpout_ret (dest', arglist')
-  | _ -> invalid_arg "convert_stmt_from_ssa"
+    S_jumpout_ret (dest, arglist')
+  | s -> s
 
 let convert_from_ssa cfg =
   let n = Array.length cfg.node in
@@ -608,7 +551,7 @@ let convert_from_ssa cfg =
     cfg.node.(i).stmts |> List.iter begin function
       | SSA.S_phi (lhs, rhs) ->
         let open SSAVar in
-        let rhs' = rhs |> Array.map (rename_from_ssa svar_to_pvar) in
+        let rhs' = rhs |> Array.map (SSAToPlain.rename_var svar_to_pvar) in
         cfg.pred.(i) |> List.iteri begin fun no j ->
           let assign = Plain.S_set (svar_to_pvar lhs, rhs'.(no)) in
           begin match new_stmts.(j) with

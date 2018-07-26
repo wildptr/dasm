@@ -154,15 +154,15 @@ let rec translate_expr env expr =
   | Expr_sym s ->
     begin match lookup st s with
       | Var (var, w) -> E_var var, w
-      | BVConst bv -> E_lit bv, T_bitvec (Bitvec.length bv)
+      | BVConst bv -> E_lit (BitvecLit, bv), T_bitvec (Bitvec.length bv)
       | _ -> failwith ("not a Var or BVConst value: "^s)
     end
-  | Expr_literal bv -> E_lit bv, T_bitvec (Bitvec.length bv)
+  | Expr_literal bv -> E_lit (BitvecLit, bv), T_bitvec (Bitvec.length bv)
   | Expr_literal2 (c_v, c_w) ->
     let v = translate_cexpr st c_v in
     let w = translate_cexpr st c_w in
-    E_lit (Bitvec.of_int w v), T_bitvec w
-  | Expr_literal_bool b -> E_lit_bool b, T_bool
+    E_lit (BitvecLit, Bitvec.of_int w v), T_bitvec w
+  | Expr_literal_bool b -> E_lit (BoolLit, b), T_bool
   | Expr_apply (func_name, args) ->
     let handle_builtin func_name =
       let f_bin prim =

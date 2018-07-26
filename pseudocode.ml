@@ -154,7 +154,7 @@ module Make(V : VarType) = struct
     | L_mem (off, size) -> pp_expr f (E_load (size, off))
 
   let pp_label_expr f = function
-    | E_lit bv -> fprintf f "%nx" (Bitvec.to_nativeint bv)
+    | E_lit (BitvecLit, bv) -> fprintf f "%nx" (Bitvec.to_nativeint bv)
     | e -> pp_expr f e
 
   let rec pp_pstmt' indent f = function
