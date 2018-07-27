@@ -47,7 +47,7 @@ template proc log_op<N, OP>(a:N, b:N) -> out:N
 
 template proc shl<N, M>(x:N, n:M) -> out:N
 {
-	out = shift_left(x, n);
+	out = shift_left(x, (n:N));
 	// TODO: the following is incorrect; see 325383.pdf p.1236
 	//PF = ~^out[7:0];
 	//AF = undefined(bool);
@@ -59,7 +59,7 @@ template proc shl<N, M>(x:N, n:M) -> out:N
 
 template proc shr<N, M>(x:N, n:M) -> out:N
 {
-	out = log_shift_right(x, n);
+	out = log_shift_right(x, (n:N));
 	//PF = ~^out[7:0];
 	//AF = undefined(bool);
 	CF = undefined(bool);
@@ -70,7 +70,7 @@ template proc shr<N, M>(x:N, n:M) -> out:N
 
 template proc sar<N, M>(x:N, n:M) -> out:N
 {
-	out = ari_shift_right(x, n);
+	out = ari_shift_right(x, (n:N));
 	CF = undefined(bool);
 	//PF = ~^out[7:0];
 	//AF = undefined(bool);

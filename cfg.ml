@@ -14,6 +14,7 @@ type 'a cfg = {
   node : 'a basic_block array;
   succ : int list array;
   pred : int list array;
+  idom : int array;
   edges : edge list;
   exits : Set.Int.t;
   temp_tab : Semant.typ array;
@@ -46,3 +47,8 @@ let rec start_of_ctlstruct = function
   | IfElse (a, _, _, _, _) -> start_of_ctlstruct a
   | DoWhile (a, _, _) -> start_of_ctlstruct a
   | Generic l -> start_of_ctlstruct l.(0)
+
+let rec dominates cfg i j =
+  if i=j then true
+  else if j=0 then false
+  else dominates cfg i cfg.idom.(j)

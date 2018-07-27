@@ -53,7 +53,8 @@ module DefUse(V : VarType) = struct
       l |> List.fold_left (fun acc (_, v) -> S.union acc (use_of_expr v))
         (use_of_expr e)
 (*     | S_jumpout_ret (e, _) -> use_of_expr e *)
-    | S_phi (_, rhs) -> Array.to_list rhs |> uses_expr_list
+    | S_phi (_, rhs) ->
+      rhs |> Hashtbl.values |> List.of_enum |> uses_expr_list
     | _ -> assert false
 
   let remove_dead_code_bb bb live_out =
@@ -290,9 +291,6 @@ let remove_dead_code_ssa cfg =
   done;
   !changed
 
-let plain_dummy = Plain.E_nondet (T_bool, 0)
-let ssa_dummy = SSA.E_nondet (T_bool, 0)
-
 let make_arglist =
   List.map (fun r -> r, Plain.E_var (Var.Global r))
 
@@ -310,6 +308,8 @@ let jumpout_io db va_opt =
   in
   ins, outs
 
+let debug = false
+
 let convert_to_ssa db cfg =
   let size = Array.length cfg.node in
   (* fields of the resulting CFG *)
@@ -317,7 +317,7 @@ let convert_to_ssa db cfg =
   let succ = Array.copy cfg.succ in
   let pred = Array.copy cfg.pred in
   (* place phi functions *)
-  let idom = Control_flow.compute_idom succ pred in
+  let idom = cfg.idom in
   let children = Array.make size [] in
   let df = Array.make size [] in
   let rec dominates x y =
@@ -353,7 +353,7 @@ let convert_to_ssa db cfg =
         if not phi_inserted_at.(y) && live_in.(i).(v) then begin
           let n_pred = List.length pred.(y) in
           let lhs = Var.of_int v in
-          let phi = Plain.(S_phi (lhs, Array.make n_pred plain_dummy)) in
+          let phi = Plain.(S_phi (lhs, Hashtbl.create n_pred)) in
           (* actually insert phi function *)
           cfg.node.(y).stmts <- phi :: cfg.node.(y).stmts;
           phi_inserted_at.(y) <- true;
@@ -363,8 +363,8 @@ let convert_to_ssa db cfg =
     done
   done;
   (* rename variables *)
-  let count = Array.make n_var 0 in
-  let stack = Array.make n_var [0] in
+  let next_ver = Array.make n_var 0 in
+  let current_ver = Array.make n_var 0 in
   let svid_table = Hashtbl.create 0 in
   let sv_table = Hashtbl.create 0 in
   let next_svid = ref 0 in
@@ -381,9 +381,11 @@ let convert_to_ssa db cfg =
     let open SSAVar in
     let orig = sv.orig in
     let orig_uid = Var.to_int orig in
-    let ver = count.(orig_uid) + 1 in
-    count.(orig_uid) <- ver;
-    stack.(orig_uid) <- ver :: stack.(orig_uid);
+    let ver = next_ver.(orig_uid) + 1 in
+    if debug then
+      Format.printf "%a: %d -> %d@," Var.pp orig current_ver.(orig_uid) ver;
+    next_ver.(orig_uid) <- ver;
+    current_ver.(orig_uid) <- ver;
     let uid = get_svid (orig_uid, ver) in
     SSAVar.{ orig; ver; uid }
   in
@@ -391,7 +393,7 @@ let convert_to_ssa db cfg =
     let open SSAVar in
     let orig = sv.orig in
     let orig_uid = Var.to_int orig in
-    let ver = List.hd stack.(orig_uid) in
+    let ver = current_ver.(orig_uid) in
     let uid = get_svid (orig_uid, ver) in
     SSAVar.{ orig; ver; uid }
   in
@@ -436,8 +438,8 @@ let convert_to_ssa db cfg =
             SSA.S_jumpout_ret (dst', arglist')
         | Plain.S_phi (lhs, rhs) ->
           let lhs' = f lhs in
-          let n = Array.length rhs in
-          SSA.S_phi (lhs', Array.make n ssa_dummy)
+          let n = Hashtbl.length rhs in
+          SSA.S_phi (lhs', Hashtbl.create n)
         | _ -> assert false
       in
       stmts' := stmt' :: !stmts'
@@ -445,6 +447,9 @@ let convert_to_ssa db cfg =
     node.(i).stmts <- List.rev !stmts'
   done;
   let rec rename_bb i =
+    if debug then
+      Format.printf "@[<v>entering basic block %nx@," cfg.node.(i).start;
+    let saved_ver = Array.copy current_ver in
     let open SSA in
     let sub = SSAToSSA.subst (fun sv -> E_var (rename_rhs sv)) in
     node.(i).stmts <- begin
@@ -477,27 +482,33 @@ let convert_to_ssa db cfg =
       end
     end;
     (* rename variables in RHS of phi-functions *)
-    succ.(i) |> List.iter begin fun y ->
-      (* i is the j-th predecessor of y *)
-      let j = List.index_of i pred.(y) |> Option.get in
-      node.(y).stmts |> List.iter begin function
+    succ.(i) |> List.iter begin fun j ->
+      (* i -> j *)
+      let i_addr = cfg.node.(i).start in
+      node.(j).stmts |> List.iter begin function
         | SSA.S_phi (lhs, rhs) ->
           let open SSAVar in
-          assert (rhs.(j) == ssa_dummy);
-          rhs.(j) <-
-            SSAToSSA.subst (fun sv -> SSA.E_var (rename_rhs sv))
-              (SSA.E_var lhs)
+          assert (Hashtbl.mem rhs i_addr |> not);
+          SSA.E_var lhs |>
+          SSAToSSA.subst (fun sv -> SSA.E_var (rename_rhs sv)) |>
+          Hashtbl.add rhs i_addr
         | _ -> ()
       end
     end;
-    children.(i) |> List.iter rename_bb;
-    cfg.node.(i).stmts |> List.iter begin fun stmt ->
-      PlainDefUse.def_of_stmt stmt |> S.iter begin fun uid ->
-        stack.(uid) <- List.tl stack.(uid)
-      end
-    end
+    children.(i) |> List.iter begin fun j ->
+      if debug then Format.printf "  ";
+      rename_bb j;
+      if debug then Format.printf "@,"
+    end;
+    if debug then Format.printf "leaving basic block %nx" cfg.node.(i).start;
+    for i=0 to Inst.number_of_registers-1 do
+      current_ver.(i) <- saved_ver.(i)
+    done;
+    if debug then Format.printf "@]"
   in
+  if debug then Format.printf "@[<v>";
   rename_bb 0;
+  if debug then Format.printf "@.";
   let temp_tab =
     Array.init !next_svid begin fun i ->
       let orig, ver = Hashtbl.find sv_table i in
@@ -551,9 +562,16 @@ let convert_from_ssa cfg =
     cfg.node.(i).stmts |> List.iter begin function
       | SSA.S_phi (lhs, rhs) ->
         let open SSAVar in
-        let rhs' = rhs |> Array.map (SSAToPlain.rename_var svar_to_pvar) in
-        cfg.pred.(i) |> List.iteri begin fun no j ->
-          let assign = Plain.S_set (svar_to_pvar lhs, rhs'.(no)) in
+        let rhs' =
+          rhs |> Hashtbl.map
+            (fun _ e -> (SSAToPlain.rename_var svar_to_pvar e))
+        in
+        cfg.pred.(i) |> List.iter begin fun j ->
+          (* j -> i *)
+          let src_addr = cfg.node.(j).start in
+          let assign =
+            Plain.S_set (svar_to_pvar lhs, Hashtbl.find rhs' src_addr)
+          in
           begin match new_stmts.(j) with
             | (Plain.S_jump _ as jump) :: rest ->
               new_stmts.(j) <- jump :: assign :: rest

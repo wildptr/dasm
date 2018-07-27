@@ -176,16 +176,6 @@ let rec translate_expr env expr =
         check_width w1 w2;
         E_prim2 (prim, a1', a2'), w1
       in
-      let f_shift prim =
-        let a1, a2 =
-          match args with
-          | [a1;a2] -> a1, a2
-          | _ -> raise (Wrong_arity (func_name, 2))
-        in
-        let a1', w1 = translate_expr env a1 in
-        let a2', _  = translate_expr env a2 in
-        E_prim2 (prim, a1', a2'), w1
-      in
       let f_pred prim =
         let a1, a2 =
           match args with
@@ -213,9 +203,9 @@ let rec translate_expr env expr =
       | "and" -> f_bin P2_and
       | "xor" -> f_bin P2_xor
       | "or"  -> f_bin P2_or
-      | "shift_left" -> f_shift P2_shiftleft
-      | "log_shift_right" -> f_shift P2_logshiftright
-      | "ari_shift_right" -> f_shift P2_arishiftright
+      | "shift_left" -> f_bin P2_shiftleft
+      | "log_shift_right" -> f_bin P2_logshiftright
+      | "ari_shift_right" -> f_bin P2_arishiftright
       | "less" -> f_pred P2_less
       | "below" -> f_pred P2_below
       | _ -> raise (Unknown_primitive func_name)

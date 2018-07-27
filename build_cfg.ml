@@ -150,6 +150,7 @@ let build_cfg db init_pc =
     succ.(from_id) <- to_id :: succ.(from_id);
     pred.(to_id) <- from_id :: pred.(to_id);
   end;
+  let idom = Control_flow.compute_idom succ pred in
   let exits =
     let temp = ref Set.Int.empty in
     !exits |> S.iter begin fun a ->
@@ -158,7 +159,7 @@ let build_cfg db init_pc =
     !temp
   in
   let inst_cfg =
-    { node; succ; pred; edges; exits; temp_tab = [||] }
+    { node; succ; pred; idom; edges; exits; temp_tab = [||] }
   in
   Printf.printf "%nx: %d basic %s\n" init_pc n
     (if n=1 then "block" else "blocks");

@@ -233,7 +233,7 @@ let defuse_of_proc (cfg : SSA.stmt cfg) =
         arglist |> List.iter (fun (r,v) -> update_use v)
       | S_jumpout_ret _ -> ()
       | S_phi (_, rhs) ->
-        rhs |> Array.iter update_use
+        rhs |> Hashtbl.iter (fun _ e -> update_use e)
       | _ -> assert false
     end
   done;

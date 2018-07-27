@@ -2,13 +2,6 @@ open Batteries
 open Cfg
 
 let write_dot fmtr cfg =
-  let idom = Control_flow.domtree_of_cfg cfg in
-  let rec dominates i j =
-    if i=j then true
-    else if j=0 then false
-    else dominates i idom.(j)
-  in
-  let strictly_dominates i j = i <> j && dominates i j in
   let open Format in
   pp_print_string fmtr "digraph {\n";
   pp_print_string fmtr "  node [shape=box];\n";
@@ -19,7 +12,7 @@ let write_dot fmtr cfg =
     if cfg.succ.(i) = [] then
       fprintf fmtr "  %s [style=filled; fillcolor=gray];\n" (node_name i);
     cfg.succ.(i) |> List.iter begin fun j ->
-      if strictly_dominates j i then
+      if dominates cfg j i then
         fprintf fmtr "  %s -> %s [dir=back penwidth=2.0];\n"
           (node_name j) (node_name i)
       else

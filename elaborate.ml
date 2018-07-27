@@ -67,7 +67,7 @@ let elaborate_mem_index (reg, scale) =
   let e_reg = elaborate_reg reg in
   if scale = 0 then e_reg
   else
-    let e_scale = make_lit 2 (Nativeint.of_int scale) in
+    let e_scale = make_lit (size_of_reg reg) (Nativeint.of_int scale) in
     E_prim2 (P2_shiftleft, e_reg, e_scale)
 
 let make_address addr = make_lit 32 addr
@@ -126,34 +126,6 @@ let elaborate_writeback emit o_dst e_data =
                    make_prim2 (P2_updatepart a) (expr_of_reg fullreg) e_data))
     else
       emit (S_set (Var.Global r, e_data))
-(*
-    emit (S_set (Var.Global r, e_data));
-    let rid = Inst.int_of_reg r in
-    if rid < 16 then
-      let a, r' = alias_table.(rid) in
-      let size' = size_of_reg r' in
-      let ext = extend_expr false e_data size' in
-      let e1, mask =
-        match a with
-        | LoByte ->
-          ext, Nativeint.lognot 0xffn
-        | LoWord ->
-          ext, Nativeint.lognot 0xffffn
-        | HiByte ->
-          make_prim2 P2_shiftleft ext (make_lit 4 8n), Nativeint.lognot 0xff00n
-      in
-      let e2 = make_primn Pn_and [expr_of_reg r'; make_lit size' mask] in
-      emit (S_set (Var.Global r', make_primn Pn_or [e1;e2]))
-    else if rid < 24 then begin
-      let fullreg = expr_of_reg r in
-      if rid < 20 then begin
-        (* ExX *)
-        emit (S_set (Var.Global (Inst.reg_of_int (rid-16)), (E_shrink (fullreg, 8), 8)));
-        emit (S_set (Var.Global (Inst.reg_of_int (rid-12)), (E_shrink (make_prim2 P2_logshiftright fullreg (make_lit 4 8n), 8), 8)));
-      end;
-      emit (S_set (Var.Global (Inst.reg_of_int (rid-8)), (E_shrink (fullreg, 16), 16)))
-    end
-*)
   | O_mem (m, size) ->
     assert (size > 0);
     let off = elaborate_mem_addr m in
@@ -210,21 +182,6 @@ let rec expand_stmt env pc stmt =
       end
     | Var.PC -> E_lit (BitvecLit, Bitvec.of_nativeint 32 pc)
     | Var.Nondet w -> E_nondet (w, new_nondet_id env)
-(*
-    | Var.Global r as v ->
-      let rid = Inst.int_of_reg r in
-      if rid < 16 then
-        let size = size_of_reg r in
-        let a, r' = alias_table.(rid) in
-        match a with
-        | LoByte | LoWord -> E_shrink (expr_of_reg r', size)
-        | HiByte ->
-          let shifted =
-            make_prim2 P2_logshiftright (expr_of_reg r') (make_lit 4 8n)
-          in
-          E_shrink (shifted, size)
-      else E_var v
-*)
     | v -> E_var v
   in
   let subst e = PlainToPlain.subst subst_var e in

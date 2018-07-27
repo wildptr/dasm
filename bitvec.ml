@@ -46,7 +46,7 @@ let to_string bv =
   let s = Bytes.create bv.len in
   for i=0 to bv.len-1 do
     let c =
-      if Nativeint.(logor bv.bits (shift_left 1n i) = 0n) then '0' else '1'
+      if Nativeint.(logand bv.bits (shift_left 1n i) = 0n) then '0' else '1'
     in
     Bytes.set s (bv.len-1-i) c
   done;

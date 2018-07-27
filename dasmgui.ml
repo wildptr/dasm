@@ -10,6 +10,16 @@ let asm_listing (cfg : Inst.inst Cfg.cfg) =
   done;
   flush_str_formatter ()
 
+let ssa_listing (cfg : Semant.SSA.stmt Cfg.cfg) =
+  let open Format in
+  let n = Array.length cfg.node in
+  for i=0 to n-1 do
+    fprintf str_formatter "%nx:\n" cfg.node.(i).start;
+    cfg.node.(i).stmts |> List.iter
+      (fprintf str_formatter "%a@." Semant.SSA.pp_stmt)
+  done;
+  flush_str_formatter ()
+
 (*
 type rect = { x : int; y : int; width : int; height : int }
 
@@ -142,6 +152,14 @@ let show_il db va32 =
     let btn = GButton.button ~label:"asm" ~packing:toolbar#add () in
     btn#connect#clicked begin fun () ->
       let text = asm_listing proc.inst_cfg in
+      text_view#buffer#set_text text
+    end
+  in
+  (* "SSA" button *)
+  let _ =
+    let btn = GButton.button ~label:"SSA" ~packing:toolbar#add () in
+    btn#connect#clicked begin fun () ->
+      let text = ssa_listing ssa_cfg in
       text_view#buffer#set_text text
     end
   in
