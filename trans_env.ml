@@ -1,6 +1,17 @@
 open Batteries
 open Semant
-open Normal
+open Template
+open Spec_ast
+
+type value =
+  | Var of templ_var * typ
+  | Proc of proc
+  | Templ of proc_templ
+  | IConst of int
+  | BVConst of Bitvec.t
+  | Prim of string
+
+type symtab = value Map.String.t
 
 type env = {
   mutable temp_type_tab : typ array;
@@ -9,28 +20,16 @@ type env = {
   mutable n_temp : int;
   mutable stmts_rev : stmt list;
   rename_table : (string, expr) Hashtbl.t;
-  mutable next_nondet_id : int;
-  db : Database.db;
-  mutable pc : nativeint;
+  mutable symtab : symtab;
+  var_tab : (string, typ) Hashtbl.t;
 }
 
 let emit env stmt =
-  let stmt' =
-    match stmt with
-    | S_jump (cond, dest) ->
-      begin match Database.get_jump_info env.db env.pc with
-        | (J_call | J_ret as j) ->
-          assert (cond = None);
-          S_jumpout (dest, j = J_call)
-        | _ -> stmt
-      end
-    | _ -> stmt
-  in
-  env.stmts_rev <- stmt' :: env.stmts_rev
+  env.stmts_rev <- stmt :: env.stmts_rev
 
 let init_temp_tab_size = 16
 
-let create db =
+let create symtab =
   {
     temp_type_tab  = Array.make init_temp_tab_size T_bool;
     temp_avail_tab = Array.make init_temp_tab_size false;
@@ -38,9 +37,8 @@ let create db =
     n_temp = 0;
     stmts_rev = [];
     rename_table = Hashtbl.create 0;
-    next_nondet_id = 0;
-    db;
-    pc = 0n;
+    symtab;
+    var_tab = Hashtbl.create 0;
   }
 
 let temp_count env = env.n_temp
@@ -72,12 +70,12 @@ let acquire_temp env typ =
     env.n_temp <- env.n_temp + 1;
     env.temp_type_tab.(i) <- typ;
     env.temp_avail_tab.(i) <- false;
-    Temp i
-  with Found i -> Temp i
+    TV_Local i
+  with Found i -> TV_Local i
 
 let release_temp env temp =
   match temp with
-  | Temp i -> env.temp_avail_tab.(i) <- true
+  | TV_Local i -> env.temp_avail_tab.(i) <- true
   | _ -> failwith "release_temp: not a temporary"
 
 let get_stmts env =
@@ -85,11 +83,3 @@ let get_stmts env =
 
 let type_of_temp tid env =
   env.temp_type_tab.(tid)
-
-let new_nondet_id env =
-  let id = env.next_nondet_id in
-  env.next_nondet_id <- env.next_nondet_id + 1;
-  id
-
-let fresh_nondet typ env =
-  E_nondet (typ, new_nondet_id env)

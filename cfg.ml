@@ -52,3 +52,11 @@ let rec dominates cfg i j =
   if i=j then true
   else if j=0 then false
   else dominates cfg i cfg.idom.(j)
+
+let iter_stmt f cfg =
+  for i = 0 to basic_block_count cfg - 1 do
+    List.iter f cfg.node.(i).stmts
+  done
+
+let var_count cfg =
+  Semant.number_of_globals + Array.length cfg.temp_tab

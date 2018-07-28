@@ -10,13 +10,13 @@ let asm_listing (cfg : Inst.inst Cfg.cfg) =
   done;
   flush_str_formatter ()
 
-let ssa_listing (cfg : Semant.SSA.stmt Cfg.cfg) =
+let ssa_listing (cfg : Semant.Normal.stmt Cfg.cfg) =
   let open Format in
   let n = Array.length cfg.node in
   for i=0 to n-1 do
     fprintf str_formatter "%nx:\n" cfg.node.(i).start;
     cfg.node.(i).stmts |> List.iter
-      (fprintf str_formatter "%a@." Semant.SSA.pp_stmt)
+      (fprintf str_formatter "%a@." Semant.Normal.pp_stmt)
   done;
   flush_str_formatter ()
 
@@ -109,8 +109,8 @@ let show_il db va32 =
   let ssa_cfg = Dataflow.convert_to_ssa db scfg in
   Analyze.simplify_ssa_cfg ssa_cfg;
   let cs = ssa_cfg |> Dataflow.convert_from_ssa |> Fold_cfg.fold_cfg in
-  let il = cs |> Pseudocode.Plain.convert in
-  il |> List.iter (Pseudocode.Plain.pp_pstmt Format.str_formatter);
+  let il = cs |> Pseudocode.convert in
+  il |> List.iter (Pseudocode.pp_pstmt Format.str_formatter);
   let il_text = Format.flush_str_formatter () in
 
   let title = Printf.sprintf "%nx" va in
@@ -123,7 +123,7 @@ let show_il db va32 =
     btn#connect#clicked begin fun () ->
       let dlg = GWindow.dialog ~title:(Printf.sprintf "Defs of %nx" va) () in
       let text =
-        proc.defs |> List.map Inst.string_of_reg |> String.concat " "
+        proc.defs |> List.map Semant.string_of_global |> String.concat " "
       in
       let _ = GMisc.label ~text ~packing:dlg#vbox#add () in
       dlg#show ()
@@ -135,7 +135,7 @@ let show_il db va32 =
     btn#connect#clicked begin fun () ->
       let dlg = GWindow.dialog ~title:(Printf.sprintf "Uses of %nx" va) () in
       let text =
-        proc.uses |> List.map Inst.string_of_reg |> String.concat " "
+        proc.uses |> List.map Semant.string_of_global |> String.concat " "
       in
       let _ = GMisc.label ~text ~packing:dlg#vbox#add () in
       dlg#show ()

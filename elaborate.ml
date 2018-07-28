@@ -2,47 +2,48 @@ open Batteries
 open Elab_env
 open Inst
 open Semant
-open Plain
+open Normal
 
 let alias_table = [|
-  LoByte, R_EAX;
-  LoByte, R_ECX;
-  LoByte, R_EDX;
-  LoByte, R_EBX;
-  HiByte, R_EAX;
-  HiByte, R_ECX;
-  HiByte, R_EDX;
-  HiByte, R_EBX;
-  LoWord, R_EAX;
-  LoWord, R_ECX;
-  LoWord, R_EDX;
-  LoWord, R_EBX;
-  LoWord, R_ESP;
-  LoWord, R_EBP;
-  LoWord, R_ESI;
-  LoWord, R_EDI;
+  LoByte, EAX;
+  LoByte, ECX;
+  LoByte, EDX;
+  LoByte, EBX;
+  HiByte, EAX;
+  HiByte, ECX;
+  HiByte, EDX;
+  HiByte, EBX;
+  LoWord, EAX;
+  LoWord, ECX;
+  LoWord, EDX;
+  LoWord, EBX;
+  LoWord, ESP;
+  LoWord, EBP;
+  LoWord, ESI;
+  LoWord, EDI;
 |]
 
-let expr_of_reg r = E_var (Var.Global r)
+let mk_global g = E_var (Global g)
+let memory = mk_global Memory
 
 let elaborate_reg r =
   let rid = Inst.int_of_reg r in
   if rid < 16 then
-    let a, fullreg = alias_table.(rid) in
-    E_prim1 (P1_part a, expr_of_reg fullreg)
+    let a, g = alias_table.(rid) in
+    E_prim1 (P1_part a, mk_global g)
   else
-    expr_of_reg r
+    E_var (Global (global_of_reg r))
 
-let eCF = expr_of_reg R_CF
-let ePF = expr_of_reg R_PF
-let eZF = expr_of_reg R_ZF
-let eSF = expr_of_reg R_SF
-let eOF = expr_of_reg R_OF
+let eCF = mk_global CF
+let ePF = mk_global PF
+let eZF = mk_global ZF
+let eSF = mk_global SF
+let eOF = mk_global OF
 
-let predef_table : (string, proc) Hashtbl.t = Hashtbl.create 0
+let proc_table : (string, proc) Hashtbl.t = Hashtbl.create 0
 
-let lookup_predef name =
-  try Hashtbl.find predef_table name
+let lookup_proc name =
+  try Hashtbl.find proc_table name
   with Not_found ->
     failwith ("predefined semantic procedure not found: " ^ name)
 
@@ -64,10 +65,11 @@ let cond_expr code =
 (* TODO: don't hard code address size *)
 
 let elaborate_mem_index (reg, scale) =
-  let e_reg = elaborate_reg reg in
+  let g = global_of_reg reg in
+  let e_reg = mk_global g in
   if scale = 0 then e_reg
   else
-    let e_scale = make_lit (size_of_reg reg) (Nativeint.of_int scale) in
+    let e_scale = make_lit (size_of_global g) (Nativeint.of_int scale) in
     E_prim2 (P2_shiftleft, e_reg, e_scale)
 
 let make_address addr = make_lit 32 addr
@@ -109,7 +111,7 @@ let elaborate_operand pc' = function
   | O_mem (mem, nbyte) ->
     if nbyte <= 0 then failwith "size of operand invalid";
     let off = elaborate_mem_addr mem in
-    E_load (nbyte, off)
+    E_prim2 (P2_load nbyte, memory, off)
   | O_imm (imm, size) ->
     if size <= 0 then failwith "size of operand invalid";
     make_lit (size*8) imm
@@ -122,14 +124,14 @@ let elaborate_writeback emit o_dst e_data =
     let rid = Inst.int_of_reg r in
     if rid < 16 then
       let a, fullreg = alias_table.(rid) in
-      emit (S_set (Var.Global fullreg,
-                   make_prim2 (P2_updatepart a) (expr_of_reg fullreg) e_data))
+      emit (S_set (Global fullreg,
+                   make_prim2 (P2_updatepart a) (mk_global fullreg) e_data))
     else
-      emit (S_set (Var.Global r, e_data))
-  | O_mem (m, size) ->
-    assert (size > 0);
+      emit (S_set (Global (global_of_reg r), e_data))
+  | O_mem (m, nbyte) ->
+    assert (nbyte > 0);
     let off = elaborate_mem_addr m in
-    emit (S_store (size, off, e_data))
+    emit (S_set (Global Memory, E_prim3 (P3_store nbyte, memory, off, e_data)))
   | _ -> failwith "elaborate_writeback: invalid operand type"
 
 let fnname_of_op = function
@@ -157,134 +159,52 @@ let fnname_of_op = function
   | I_XOR -> "xor"
   | _ -> failwith "fnname_of_op: not implemented"
 
-let jumpout_arglist =
-  List.range 16 `To (Inst.number_of_registers-1) |>
-  List.map begin fun rid ->
-    let r = Inst.reg_of_int rid in
-    r, expr_of_reg r
-  end
-
-let call_retlist =
-  List.range 0 `To (Inst.number_of_registers-1) |>
-  List.map begin fun rid ->
-    let r = Inst.reg_of_int rid in
-    r, Var.Global r
-  end
-
-module PlainToPlain = Transform(Var)(Var)
-
-let rec expand_stmt env pc stmt =
-  let subst_var = function
-    | Var.Local name ->
-      begin
-        try Hashtbl.find env.rename_table name
-        with Not_found -> failwith ("unbound local variable: "^name)
-      end
-    | Var.PC -> E_lit (BitvecLit, Bitvec.of_nativeint 32 pc)
-    | Var.Nondet w -> E_nondet (w, new_nondet_id env)
-    | v -> E_var v
-  in
-  let subst e = PlainToPlain.subst subst_var e in
-  let tr_assign var e =
-    let var' =
-      match subst_var var with
-      | E_lit _ -> failwith "assignment to parameter (via ordinary assignment)"
-      | E_var v -> v
-      | _ -> assert false
-    in
-    let e' = subst e in
-    var', e'
-  in
-  match stmt with
-  | S_set (var, e) ->
-    let var', e' = tr_assign var e in
-    emit env (S_set (var', e'))
-  | S_store (size, addr, data) ->
-    emit env (S_store (size, subst addr, subst data))
-  | S_jump (c, e) ->
-    begin match Database.get_jump_info env.db pc with
-      | (J_call | J_ret as j) ->
-        assert (c = None);
 (*
-        let retlist = if j = J_call then call_retlist else [] in
-        emit env (S_jumpout (rename e, jumpout_arglist, retlist))
+let default_arglist = all_globals |> List.map (fun g -> g, mk_global g)
+let default_retlist = all_globals |> List.map (fun g -> g, Global g)
 *)
-        emit env (S_jumpout (subst e, j = J_call))
-      | _ ->
-        emit env (S_jump (Option.map subst c, subst e))
-    end
-  | S_call (proc, args, results) ->
-    (* try not to create temporary variables for constants, as they confuse the
-       recursive procedure scanner *)
-    let arg_arr = Array.of_list args in
-    let n_arg = Array.length arg_arr in
-    let arg_is_const =
-      arg_arr |> Array.map (function E_lit _ -> true | _ -> false)
-    in
-    let n_param = List.length proc.p_param_names in
-    (* TODO: check widths *)
-    if n_param <> n_arg then begin
-      let open Format in
-      printf "procedure: %s@." proc.p_name;
-      printf "arguments:@.";
-      args |> List.iter (printf "%a@." pp_expr);
-      failwith "wrong arity"
-    end;
-    let param_arr = proc.p_param_names |> Array.of_list in
-    let param_index_map =
-      proc.p_param_names |> List.mapi (fun i name -> name, i) |>
-      List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
-    in
-    let results' =
-      results |> List.map begin fun v ->
-        match subst_var v with
-        | E_var v' -> v'
-        | _ -> assert false
-      end
-    in
-    let temps = ref [] in
-    (* bind local variables *)
-    proc.p_var_tab |> Hashtbl.iter begin fun name typ ->
-      let var =
-        match Map.String.Exceptionless.find name param_index_map with
-        | Some i when arg_is_const.(i) -> arg_arr.(i)
-        | _ ->
-          let temp = acquire_temp env typ in
-          temps := temp :: !temps;
-          E_var temp
-      in
-      Hashtbl.add env.rename_table name var
-    end;
-    (* bind return values *)
-    List.combine proc.p_results results' |>
-    List.iter begin fun ((name, _), var) ->
-      Hashtbl.add env.rename_table name (E_var var)
-    end;
-    (* pass arguments *)
-    for i=0 to n_arg-1 do
-      if not arg_is_const.(i) then
-        let arg = arg_arr.(i) in
-        let param_name = param_arr.(i) in
-        let param_var =
-          match Hashtbl.find env.rename_table param_name with
-          | E_var v -> v
-          | _ -> assert false
-        in
-        emit env (S_set (param_var, subst arg))
-    done;
-    (* expand procedure body *)
-    List.iter (expand_stmt env pc) proc.p_body;
-    (* remove bindings *)
-    proc.p_var_tab |> Hashtbl.iter begin fun name _ ->
-      Hashtbl.remove env.rename_table name
-    end;
-    proc.p_results |> List.iter begin fun (name, _) ->
-      Hashtbl.remove env.rename_table name
-    end;
-    !temps |> List.iter (release_temp env)
-  | _ -> assert false
 
-let elaborate_inst env pc inst =
+let emit_proc env pc proc args rets =
+  let module T = Transform(TemplVar)(Var) in
+  let arg_tab = Array.of_list args in
+  let ret_tab = Array.of_list rets in
+  let local_tab =
+    proc.local_types |> List.map (acquire_temp env) |> Array.of_list
+  in
+  assert (Array.length arg_tab = List.length proc.arg_types);
+  assert (Array.length ret_tab = List.length proc.ret_types);
+  assert (Array.length local_tab = List.length proc.local_types);
+  let map_lvar = function
+    | TV_Global g -> Global g
+    | TV_Local i -> local_tab.(i)
+    | TV_Output i -> ret_tab.(i)
+    | _ -> failwith "invalid assignment"
+  in
+  let map_rvar = function
+    | TV_Global g -> mk_global g
+    | TV_Local i -> E_var local_tab.(i)
+    | TV_Input i -> arg_tab.(i)
+    | TV_Output i -> E_var ret_tab.(i)
+    | TV_PC -> E_lit (BitvecLit, Bitvec.of_nativeint 32 pc)
+    | TV_Nondet t -> fresh_nondet t env
+  in
+  begin
+    try
+      proc.body |> List.iter begin fun s ->
+        s |> T.map_stmt map_lvar (T.subst map_rvar) |> emit env
+      end;
+    with e ->
+      let open Format in
+      printf "local_tab:\n";
+      local_tab |> Array.iteri begin fun i v ->
+        printf "[%d]=%a\n" i pp_var v
+      end;
+      proc.body |> List.iter (printf "%a@." Template.pp_stmt);
+      raise e
+  end;
+  local_tab |> Array.iter (release_temp env)
+
+let elaborate_inst env inst =
   let op = operation_of inst in
   let lsize = inst.variant land 15 in (* log size in bytes *)
   let size = 8 lsl lsize in
@@ -293,105 +213,100 @@ let elaborate_inst env pc inst =
   let fn inst =
     let fnname_base = fnname_of_op op in
     let fnname = Printf.sprintf "%s%d" fnname_base size in
-    lookup_predef fnname
+    lookup_proc fnname
   in
-  let inst_stmts = ref [] in
-  let emit' s =
-    inst_stmts := s :: !inst_stmts
-  in
+  let pc = env.pc in
   let pc' = Nativeint.(pc + of_int (length_of inst)) in
-  begin
-    match op with
-    | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR
-    | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
-      let temp = acquire_temp env size_typ in
-      let args = operands |> List.map (elaborate_operand pc') in
-      emit' (S_call (fn inst, args, [temp]));
-      elaborate_writeback emit' (List.hd operands) (E_var temp);
-      release_temp env temp
-    | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
-      let proc = fn inst in
-      let temps =
-        proc.p_results |> List.map (fun (_, w) -> acquire_temp env w)
-      in
-      let args = operands |> List.map (elaborate_operand pc') in
-      emit' (S_call (proc, args, temps));
-      (* no writeback *)
-      temps |> List.iter (release_temp env)
-    | I_POP ->
-      let temp = acquire_temp env size_typ in
-      emit' (S_call (fn inst, [], [temp]));
-      elaborate_writeback emit' (List.hd operands) (E_var temp);
-      release_temp env temp
-    | I_MOV ->
-      let dst, src =
-        match operands with
-        | [d; s] -> d, s
-        | _ -> assert false
-      in
-      elaborate_writeback emit' dst (elaborate_operand pc' src)
-    | I_MOVZX | I_MOVSX ->
-      let dst, src =
-        match operands with
-        | [d; s] -> d, s
-        | _ -> assert false
-      in
-      (*let lsize_src = inst.variant lsr 4 in*)
-      (*let src_size = 8 lsl lsize_src in*)
-      let src' = elaborate_operand pc' src in
-      elaborate_writeback emit' dst (E_extend (op = I_MOVSX, src', size))
-    | I_LEA ->
-      let dst, src =
-        match operands with
-        | [d; s] -> d, s
-        | _ -> assert false
-      in
-      let addr =
-        match src with
-        | O_mem (m, _size) -> elaborate_mem_addr m
-        | _ -> assert false
-      in
-      elaborate_writeback emit' dst addr
-    | I_JMP | I_CJMP ->
-      let cond_opt =
-        if op = I_CJMP then
-          Some (cond_expr (inst.variant lsr 4))
-        else
-          None
-      in
-      emit' (S_jump (cond_opt, elaborate_operand pc' (List.hd operands)))
-    | I_SET ->
-      let dst =
-        match operands with
-        | [dst] -> dst
-        | _ -> assert false
-      in
-      let cond = cond_expr (inst.variant lsr 4) in
-      let zero = E_lit (BitvecLit, Bitvec.of_nativeint 8 0n) in
-      let one = E_lit (BitvecLit, Bitvec.of_nativeint 8 1n) in
-      let data = E_prim3 (P3_ite, cond, one, zero) in
-      elaborate_writeback emit' dst data
-    | I_XCHG ->
-      let dst, src =
-        match operands with
-        | [d; s] -> d, s
-        | _ -> assert false
-      in
-      let dst' = elaborate_operand pc' dst in
-      let src' = elaborate_operand pc' src in
-      elaborate_writeback emit' dst src';
-      elaborate_writeback emit' src dst'
-    | _ ->
-      Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst
-  end;
-  List.rev !inst_stmts |> List.iter (expand_stmt env pc')
+  match op with
+  | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR
+  | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
+    let temp = acquire_temp env size_typ in
+    let args = operands |> List.map (elaborate_operand pc') in
+    emit_proc env pc' (fn inst) args [temp];
+    elaborate_writeback (emit env) (List.hd operands) (E_var temp);
+    release_temp env temp
+  | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
+    let proc = fn inst in
+    let temps =
+      proc.ret_types |> List.map (acquire_temp env)
+    in
+    let args = operands |> List.map (elaborate_operand pc') in
+    emit_proc env pc' proc args temps;
+    (* no writeback *)
+    temps |> List.iter (release_temp env)
+  | I_POP ->
+    let temp = acquire_temp env size_typ in
+    emit_proc env pc' (fn inst) [] [temp];
+    elaborate_writeback (emit env) (List.hd operands) (E_var temp);
+    release_temp env temp
+  | I_MOV ->
+    let dst, src =
+      match operands with
+      | [d; s] -> d, s
+      | _ -> assert false
+    in
+    elaborate_writeback (emit env) dst (elaborate_operand pc' src)
+  | I_MOVZX | I_MOVSX ->
+    let dst, src =
+      match operands with
+      | [d; s] -> d, s
+      | _ -> assert false
+    in
+    (*let lsize_src = inst.variant lsr 4 in*)
+    (*let src_size = 8 lsl lsize_src in*)
+    let src' = elaborate_operand pc' src in
+    elaborate_writeback (emit env) dst
+      (E_prim1 (P1_extend (op = I_MOVSX, size), src'))
+  | I_LEA ->
+    let dst, src =
+      match operands with
+      | [d; s] -> d, s
+      | _ -> assert false
+    in
+    let addr =
+      match src with
+      | O_mem (m, _size) -> elaborate_mem_addr m
+      | _ -> assert false
+    in
+    elaborate_writeback (emit env) dst addr
+  | I_JMP | I_CJMP ->
+    let cond_opt =
+      if op = I_CJMP then
+        Some (cond_expr (inst.variant lsr 4))
+      else
+        None
+    in
+    emit env (S_jump (cond_opt, elaborate_operand pc' (List.hd operands)))
+  | I_SET ->
+    let dst =
+      match operands with
+      | [dst] -> dst
+      | _ -> assert false
+    in
+    let cond = cond_expr (inst.variant lsr 4) in
+    let zero = E_lit (BitvecLit, Bitvec.of_nativeint 8 0n) in
+    let one = E_lit (BitvecLit, Bitvec.of_nativeint 8 1n) in
+    let data = E_prim3 (P3_ite, cond, one, zero) in
+    elaborate_writeback (emit env) dst data
+  | I_XCHG ->
+    let dst, src =
+      match operands with
+      | [d; s] -> d, s
+      | _ -> assert false
+    in
+    let dst' = elaborate_operand pc' dst in
+    let src' = elaborate_operand pc' src in
+    elaborate_writeback (emit env) dst src';
+    elaborate_writeback (emit env) src dst'
+  | _ ->
+    Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst
 
 let elaborate_basic_block env bb =
   let open Cfg in
-  let pc = ref bb.start in
+  env.pc <- bb.start;
   bb.stmts |> List.iter begin fun inst ->
-    elaborate_inst env !pc inst;
-    pc := Nativeint.(!pc + of_int (length_of inst))
+    elaborate_inst env inst;
+    env.pc <- Nativeint.(env.pc + of_int (length_of inst))
   end;
   let stmts = get_stmts env in
   env.stmts_rev <- [];
@@ -439,6 +354,6 @@ let load_spec filepath =
   in
   symtab |> Map.String.iter begin fun key data ->
     match data with
-    | Translate.Proc proc -> Hashtbl.add predef_table key proc
+    | Trans_env.Proc proc -> Hashtbl.add proc_table key proc
     | _ -> ()
   end

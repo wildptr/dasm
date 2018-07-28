@@ -1,8 +1,9 @@
 open Batteries
 open Format
 open Semant
-open Plain
+open Template
 open Spec_ast
+open Trans_env
 
 (* "%s takes exactly %d arguments" *)
 exception Wrong_arity of string * int
@@ -14,34 +15,6 @@ exception Redefinition of string
 
 let check_width w1 w2 =
   if w1 <> w2 then failwith "type mismatch"
-
-type value =
-  | Var of var * typ
-  | Proc of proc
-  | Templ of proc_templ
-  | IConst of int
-  | BVConst of Bitvec.t
-  | Prim of string
-
-type symtab = value Map.String.t
-
-type env = {
-  mutable symtab : symtab;
-  var_tab : (string, typ) Hashtbl.t;
-  mutable stmts_rev : stmt list;
-}
-
-let new_env symtab =
-  let var_tab = Hashtbl.create 0 in
-  { symtab; var_tab; stmts_rev = [] }
-
-let emit env stmt = env.stmts_rev <- stmt :: env.stmts_rev
-
-let new_temp env typ =
-  let n = Hashtbl.length env.var_tab in
-  let id = Printf.sprintf "_%d" n in
-  Hashtbl.add env.var_tab id typ;
-  id
 
 let prim_of_unary_op = function
   | Not -> P1_not
@@ -69,31 +42,12 @@ let type_of_binary_op (op, t1, t2) =
     check_width t1 t2; T_bool
 
 let init_symtab = [
-  Inst.R_EAX;
-  Inst.R_ECX;
-  Inst.R_EDX;
-  Inst.R_EBX;
-  Inst.R_ESP;
-  Inst.R_EBP;
-  Inst.R_ESI;
-  Inst.R_EDI;
-  Inst.R_ES;
-  Inst.R_CS;
-  Inst.R_SS;
-  Inst.R_DS;
-  Inst.R_FS;
-  Inst.R_GS;
-  Inst.R_CF;
-  Inst.R_PF;
-  Inst.R_AF;
-  Inst.R_ZF;
-  Inst.R_SF;
-  Inst.R_IF;
-  Inst.R_DF;
-  Inst.R_OF;
-] |> List.fold_left begin fun map reg ->
-    Map.String.add (Inst.string_of_reg reg)
-      (Var (Var.Global reg, type_of_reg reg)) map
+  EAX; ECX; EDX; EBX; ESP; EBP; ESI; EDI;
+  ES; CS; SS; DS;
+  CF; PF; AF; ZF; SF; IF; DF; OF;
+] |> List.fold_left begin fun m g ->
+    Map.String.add (string_of_global g)
+      (Var (TV_Global g, type_of_global g)) m
   end Map.String.empty
 
 let extend_symtab (name, value) st =
@@ -200,12 +154,24 @@ let rec translate_expr env expr =
         check_width w1 w2;
         check_width w3 T_bool;
         E_prim3 (P3_carry, a1', a2', a3'), T_bool
+      | "ite" ->
+        let a1, a2, a3 =
+          match args with
+          | [a1;a2;a3] -> a1, a2, a3
+          | _ -> raise (Wrong_arity (func_name, 3))
+        in
+        let (a1', w1) = translate_expr env a1 in
+        let (a2', w2) = translate_expr env a2 in
+        let (a3', w3) = translate_expr env a3 in
+        check_width w1 T_bool;
+        check_width w2 w3;
+        E_prim3 (P3_ite, a1', a2', a3'), w2
       | "and" -> f_bin P2_and
       | "xor" -> f_bin P2_xor
       | "or"  -> f_bin P2_or
-      | "shift_left" -> f_bin P2_shiftleft
-      | "log_shift_right" -> f_bin P2_logshiftright
-      | "ari_shift_right" -> f_bin P2_arishiftright
+      | "shl" -> f_bin P2_shiftleft
+      | "lshr" -> f_bin P2_logshiftright
+      | "ashr" -> f_bin P2_arishiftright
       | "less" -> f_pred P2_less
       | "below" -> f_pred P2_below
       | _ -> raise (Unknown_primitive func_name)
@@ -214,14 +180,14 @@ let rec translate_expr env expr =
       | None -> handle_builtin func_name
       | Some (Prim prim_name) -> handle_builtin prim_name
       | Some (Proc proc) ->
-        let w =
-          match proc.p_results with
-          | [_,w] -> w
+        let typ =
+          match proc.ret_types with
+          | [t] -> t
           | _ -> failwith "number of return values is not 1"
         in
-        let temp = Var.Local (new_temp env w) in
+        let temp = (acquire_temp env typ) in
         translate_call env proc args [temp];
-        E_var temp, w
+        E_var temp, typ
       | _ -> raise (Unknown_primitive func_name)
     end
   | Expr_unary (op, e) ->
@@ -242,30 +208,45 @@ let rec translate_expr env expr =
     e', type_of_binary_op (op, w1, w2)
   | Expr_undef typ ->
     let typ' = translate_typ st typ in
-    E_var (Var.Nondet typ'), typ'
+    E_var (TV_Nondet typ'), typ'
   | Expr_load memloc ->
     let seg', off', w = translate_memloc env memloc in
-    E_load (w lsr 3, off'), T_bitvec w
+    E_prim2 (P2_load (w lsr 3), E_var (TV_Global Memory), off'), T_bitvec w
   | Expr_extend (sign, data, size) ->
     let data' = translate_expr env data |> fst in
     let size' = translate_cexpr st size in
-    E_extend (sign, data', size'), T_bitvec size'
-  | Expr_pc -> E_var Var.PC, T_bitvec 32 (* TODO *)
+    E_prim1 (P1_extend (sign, size'), data'), T_bitvec size'
+  | Expr_pc -> E_var TV_PC, T_bitvec 32 (* TODO *)
 
-and translate_call env proc args results =
-  let args', arg_widths =
+and translate_call env proc args rets =
+  let module T = Transform(TemplVar)(TemplVar) in
+  let args', arg_types =
     args |> List.map (translate_expr env) |> List.split
   in
-  let n_param = List.length proc.p_param_names in
-  let n_arg = List.length args in
-  if n_param <> n_arg then raise (Wrong_arity ("???", n_param)); (* TODO *)
-  (* check arg width *)
-  List.combine proc.p_param_names arg_widths |> List.iter
-    (fun (param_name, arg_width) ->
-       let param_width = Hashtbl.find proc.p_var_tab param_name in
-       check_width param_width arg_width);
-  (* function that translates arguments *)
-  emit env (S_call (proc, args', results))
+  if arg_types <> proc.arg_types then failwith "type error in procedure call";
+  let arg_tab = Array.of_list args' in
+  let ret_tab = Array.of_list rets in
+  if List.length rets <> List.length proc.ret_types then
+    failwith "wrong number of return values";
+  let local_tab =
+    proc.local_types |> List.map (acquire_temp env) |> Array.of_list
+  in
+  let map_lvar = function
+    | TV_Local i -> local_tab.(i)
+    | TV_Input _ -> failwith "assignment to argument"
+    | TV_Output i -> ret_tab.(i)
+    | v -> v
+  in
+  let map_rvar = function
+    | TV_Local i -> E_var local_tab.(i)
+    | TV_Input i -> arg_tab.(i)
+    | TV_Output i -> E_var ret_tab.(i)
+    | v -> E_var v
+  in
+  proc.body |> List.iter begin fun s ->
+    s |> T.map_stmt map_lvar (T.subst map_rvar) |> emit env
+  end;
+  local_tab |> Array.iter (release_temp env)
 
 and translate_memloc env (seg, off, size) =
   let (seg', segw) = translate_expr env seg in
@@ -294,7 +275,9 @@ let translate_stmt env stmt =
         check_width mw w;
         if w land 7 <> 0 then
           failwith "width of memory location is not multiple of 8";
-        emit env (S_store (w lsr 3, off, data))
+        S_set (TV_Global Memory,
+               E_prim3 (P3_store (w lsr 3), E_var (TV_Global Memory),
+                        off, data)) |> emit env
     end
   in
   match stmt with
@@ -315,42 +298,43 @@ let translate_proc st proc =
   if debug then
     Format.printf "translating procedure %s@." proc.ap_name;
   (* construct static environment to translate function body in *)
-  let proc_env = new_env st in
-  let register_var (name, te) =
-    let typ = translate_typ proc_env.symtab te in
-    proc_env.symtab <-
-      extend_symtab (name, Var (Var.Local name, typ))
-        proc_env.symtab;
-    Hashtbl.add proc_env.var_tab name typ
-  in
-  proc.ap_params |> List.iter register_var;
-  proc.ap_results |> List.iter begin fun (name, te) ->
-    let typ = translate_typ proc_env.symtab te in
-    proc_env.symtab <-
-      extend_symtab (name, Var (Var.Local name, typ))
-        proc_env.symtab
-  end;
-  let vardecls, stmts = proc.ap_body in
-  vardecls |> List.iter register_var;
-  let param_names = proc.ap_params |> List.map fst in
-  let results =
-    proc.ap_results |> List.map begin fun (name, te) ->
-      name, translate_typ st te
+  let args =
+    proc.ap_params |> List.map begin fun (name, te) ->
+      let t = translate_typ st te in name, t
     end
   in
-  stmts |> List.iter (translate_stmt proc_env);
-(*
-  Printf.printf "Local variables of %s:\n" proc.ap_name;
-  proc_env.var_tab |> Hashtbl.iter begin fun name width ->
-    Printf.printf "%s:%d\n" name width
-  end;
-*)
-  (*Printf.printf "%s: %d statements\n" proc.ap_name (List.length proc_env.stmts_rev);*)
-  { p_name = proc.ap_name;
-    p_body = List.rev proc_env.stmts_rev;
-    p_param_names = param_names;
-    p_results = results;
-    p_var_tab = proc_env.var_tab }
+  let rets =
+    proc.ap_results |> List.map begin fun (name, te) ->
+      let t = translate_typ st te in name, t
+    end
+  in
+  let ast_locals, stmts = proc.ap_body in
+  let locals =
+    ast_locals |> List.map begin fun (name, te) ->
+      let t = translate_typ st te in name, t
+    end
+  in
+  let env =
+    st |>
+    List.fold_right begin fun (i, name, typ) ->
+      extend_symtab (name, Var (TV_Input i, typ))
+    end (args |> List.mapi (fun i (name, typ) -> i, name, typ)) |>
+    List.fold_right begin fun (i, name, typ) ->
+      extend_symtab (name, Var (TV_Output i, typ))
+    end (rets |> List.mapi (fun i (name, typ) -> i, name, typ)) |>
+    List.fold_right begin fun (i, name, typ) ->
+      extend_symtab (name, Var (TV_Local i, typ))
+    end (locals |> List.mapi (fun i (name, typ) -> i, name, typ)) |>
+    create
+  in
+  stmts |> List.iter (translate_stmt env);
+  let local_types =
+    Array.sub env.temp_type_tab 0 (temp_count env) |> Array.to_list
+  in
+  let split_snd l = l |> List.split |> snd in
+  { name = proc.ap_name; body = List.rev env.stmts_rev;
+    arg_types = split_snd args; ret_types = split_snd rets;
+    local_types }
 
 let translate_ast ast =
   ast |> List.fold_left begin fun st decl ->
@@ -388,23 +372,3 @@ let translate_ast ast =
       let proc' = translate_proc inst_st proc in
       extend_symtab (proc.ap_name, Proc proc') st
   end (* init: *) init_symtab
-
-let pp_value f = function
-  | Var (var, t) ->
-    fprintf f "Var %a:%a" Var.pp var pp_typ t
-  | Proc p ->
-    fprintf f "Proc %a" pp_proc p
-  | Templ _ ->
-    fprintf f "Templ"
-  | IConst i ->
-    fprintf f "IConst %d" i
-  | BVConst bv ->
-    fprintf f "BVConst %a" Bitvec.pp bv
-  | Prim s ->
-    fprintf f "Prim %s" s
-
-let pp_symtab f st =
-  fprintf f "@[<v>";
-  st |> Map.String.iter (fun key data ->
-      fprintf f "%s: %a@ " key pp_value data);
-  fprintf f "@]"

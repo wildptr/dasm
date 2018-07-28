@@ -14,7 +14,6 @@ let next_line lexbuf =
 
 let keyword_map : token Map.String.t =
   [
-    (*"if", K_if;*)
     "bool", K_bool;
     "false", K_false;
     "jump", K_jump;

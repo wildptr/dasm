@@ -18,9 +18,9 @@ let write_dot fmtr cfg =
       else
         fprintf fmtr "  %s -> %s;\n" (node_name i) (node_name j)
     end;
-    let p = idom.(i) in
+    let p = cfg.idom.(i) in
     if p>=0 then
-      fprintf fmtr "  %s -> %s [style=dotted];\n" (node_name p) (node_name i)
+      fprintf fmtr "  %s -> %s [style=dotted; arrowhead=empty];\n" (node_name p) (node_name i)
   done;
   let cs = Fold_cfg.fold_cfg cfg in
   let inc_ind ind = ind ^ "  " in

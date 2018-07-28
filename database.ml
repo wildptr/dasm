@@ -6,8 +6,8 @@ type proc = {
 (*   mutable span : nativeint Itree.t; *)
   mutable is_complete : bool;
   mutable is_leaf : bool;
-  mutable defs : Inst.reg list;
-  mutable uses : Inst.reg list;
+  mutable defs : Semant.global list;
+  mutable uses : Semant.global list;
 }
 
 type jump =
@@ -38,8 +38,8 @@ let create_proc db va inst_cfg =
 (*     stmt_cfg = Elaborate.elaborate_cfg db inst_cfg; *)
     is_leaf = false;
     is_complete = false;
-    defs = Inst.all_registers;
-    uses = Inst.all_registers;
+    defs = Semant.all_globals;
+    uses = Semant.all_globals;
   } in
   Hashtbl.add db.proc_table va proc;
   proc

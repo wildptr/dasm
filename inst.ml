@@ -10,8 +10,6 @@ type reg =
   | R_ST0 | R_ST1 | R_ST2 | R_ST3 | R_ST4 | R_ST5 | R_ST6 | R_ST7
   | R_XMM0 | R_XMM1 | R_XMM2 | R_XMM3 | R_XMM4 | R_XMM5 | R_XMM6 | R_XMM7
 
-let number_of_registers = 56
-
 let string_of_reg = function
   | R_AL -> "AL"
   | R_CL -> "CL"
@@ -72,9 +70,6 @@ let string_of_reg = function
 
 let int_of_reg r = let (i:int) = Obj.magic r in i
 let reg_of_int i = let (r:reg) = Obj.magic i in r
-
-let all_registers =
-  List.range 0 `To (number_of_registers-1) |> List.map reg_of_int
 
 let lookup_reg name =
   match name with

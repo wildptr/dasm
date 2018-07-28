@@ -9,7 +9,7 @@ template proc add<N>(a:N, b:N) -> out:N
 
 template proc adc<N>(a:N, b:N) -> out:N
 {
-	out = a + b + (CF:N);
+	out = a + b + ite(CF, #1:N, #0:N);
 	CF = carry(a, b, CF);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
@@ -27,7 +27,7 @@ template proc sub<N>(a:N, b:N) -> out:N
 
 template proc sbb<N>(a:N, b:N) -> out:N
 {
-	out = a - b - (CF:N);
+	out = a - b - ite(CF, #1:N, #0:N);
 	CF = ~carry(a, ~b, ~CF);
 	ZF = out == #0:N;
 	SF = less(out, #0:N);
@@ -45,9 +45,9 @@ template proc log_op<N, OP>(a:N, b:N) -> out:N
 	OF = false;
 }
 
-template proc shl<N, M>(x:N, n:M) -> out:N
+template proc shl_<N, M>(x:N, n:M) -> out:N
 {
-	out = shift_left(x, (n:N));
+	out = shl(x, (n:N));
 	// TODO: the following is incorrect; see 325383.pdf p.1236
 	//PF = ~^out[7:0];
 	//AF = undefined(bool);
@@ -59,7 +59,7 @@ template proc shl<N, M>(x:N, n:M) -> out:N
 
 template proc shr<N, M>(x:N, n:M) -> out:N
 {
-	out = log_shift_right(x, (n:N));
+	out = lshr(x, (n:N));
 	//PF = ~^out[7:0];
 	//AF = undefined(bool);
 	CF = undefined(bool);
@@ -70,7 +70,7 @@ template proc shr<N, M>(x:N, n:M) -> out:N
 
 template proc sar<N, M>(x:N, n:M) -> out:N
 {
-	out = ari_shift_right(x, (n:N));
+	out = ashr(x, (n:N));
 	CF = undefined(bool);
 	//PF = ~^out[7:0];
 	//AF = undefined(bool);
@@ -107,9 +107,9 @@ proc xor8  = log_op< 8, xor>;
 proc xor16 = log_op<16, xor>;
 proc xor32 = log_op<32, xor>;
 
-proc shl8  = shl< 8, 5>;
-proc shl16 = shl<16, 5>;
-proc shl32 = shl<32, 5>;
+proc shl8  = shl_< 8, 5>;
+proc shl16 = shl_<16, 5>;
+proc shl32 = shl_<32, 5>;
 
 proc shr8  = shr< 8, 5>;
 proc shr16 = shr<16, 5>;
