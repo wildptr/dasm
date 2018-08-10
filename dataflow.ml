@@ -217,11 +217,13 @@ let auto_subst cfg =
       if
         use_count.(vi) = 1 ||
         begin match e with
-          | E_var _ | E_lit _ -> true
-          | _ -> v = Global ESP
+          | E_var _ | E_lit _
+          | E_prim1 (_, (E_var _ | E_lit _))
+          | E_prim2 (_, (E_var _ | E_lit _), E_lit _)
+          | E_prim2 (_, E_lit _, E_var _) -> true
+          | _ -> false
         end
-      then
-        def.(vi) <- e
+      then def.(vi) <- e
     | _ -> ()
   end;
 
@@ -236,7 +238,15 @@ let auto_subst cfg =
       if e = E_var v || use_of_expr e |> S.for_all (Array.get expanded) then
         (expanded.(vi) <- true; e)
       else
-        let e' = subst replace e in (def.(vi) <- e'; e')
+        let rec rec_subst e =
+          let e' = subst replace e in
+          if
+            use_of_expr e |>
+            S.for_all (fun i -> def.(i) = E_var (var_of_int i))
+          then e' else rec_subst e'
+        in
+        let e' = rec_subst e in
+        (def.(vi) <- e'; expanded.(vi) <- true; e')
     end
   in
 
@@ -249,7 +259,7 @@ let auto_subst cfg =
           | S_set (v, _) when def.(int_of_var v) <> E_var v -> None
           | _ -> Some (map_stmt (fun v -> v) (subst replace) stmt)
         in
-        if !changed && Some stmt <> stmt' then changed := true;
+        if not !changed && Some stmt <> stmt' then changed := true;
         stmt'
       end
   done;
