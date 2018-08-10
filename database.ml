@@ -6,6 +6,7 @@ type proc = {
 (*   mutable span : nativeint Itree.t; *)
   mutable is_complete : bool;
   mutable is_leaf : bool;
+  mutable has_loop : bool;
   mutable defs : Semant.global list;
   mutable uses : Semant.global list;
 }
@@ -38,6 +39,7 @@ let create_proc db va inst_cfg =
 (*     stmt_cfg = Elaborate.elaborate_cfg db inst_cfg; *)
     is_leaf = false;
     is_complete = false;
+    has_loop = false;
     defs = Semant.all_globals;
     uses = Semant.all_globals;
   } in

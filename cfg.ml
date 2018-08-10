@@ -60,3 +60,30 @@ let iter_stmt f cfg =
 
 let var_count cfg =
   Semant.number_of_globals + Array.length cfg.temp_tab
+
+let rpo cfg =
+  let n = basic_block_count cfg in
+  let visited = Array.make n false in
+  let order = ref [] in
+  let rec visit i =
+    if not visited.(i) then begin
+      visited.(i) <- true;
+      cfg.succ.(i) |> List.iter visit;
+      order := i :: !order
+    end
+  in
+  visit 0;
+  !order
+
+exception Break
+
+let has_loop cfg =
+  let n = basic_block_count cfg in
+  let visited = Array.make n false in
+  try
+    rpo cfg |> List.iter begin fun i ->
+      cfg.pred.(i) |> List.iter (fun j -> if not visited.(j) then raise Break);
+      visited.(i) <- true
+    end;
+    false
+  with Break -> true

@@ -29,7 +29,8 @@ let rec scan db va =
       | _ -> is_complete := false
     end;
     proc.is_complete <- !is_complete;
-    proc.is_leaf <- !is_leaf
+    proc.is_leaf <- !is_leaf;
+    proc.has_loop <- has_loop cfg
   end
 
 (*

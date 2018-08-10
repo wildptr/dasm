@@ -224,6 +224,7 @@ let show_gui db =
   let compl_col = cols#add Gobject.Data.boolean in
   let leaf_col = cols#add Gobject.Data.boolean in
   let bb_col = cols#add Gobject.Data.int in
+  let loop_col = cols#add Gobject.Data.boolean in
   let model = GTree.list_store cols in
   Database.get_proc_entry_list db |> List.iter begin fun va ->
     let proc = Database.get_proc db va in
@@ -232,7 +233,8 @@ let show_gui db =
     model#set ~row ~column:addr_col va32;
     model#set ~row ~column:compl_col proc.is_complete;
     model#set ~row ~column:leaf_col proc.is_leaf;
-    model#set ~row ~column:bb_col (Cfg.basic_block_count proc.inst_cfg)
+    model#set ~row ~column:bb_col (Cfg.basic_block_count proc.inst_cfg);
+    model#set ~row ~column:loop_col proc.has_loop;
   end;
   let va_data_func renderer (model:GTree.model) iter =
     let va = model#get ~row:iter ~column:addr_col in
@@ -269,6 +271,13 @@ let show_gui db =
     let view_col =
       GTree.view_column ~title:"BB"
         ~renderer:(renderer_text, ["text", bb_col]) ()
+    in
+    view#append_column view_col
+  in
+  let _ =
+    let view_col =
+      GTree.view_column ~title:"Loop"
+        ~renderer:(renderer_text, ["text", loop_col]) ()
     in
     view#append_column view_col
   in
