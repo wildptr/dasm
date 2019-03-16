@@ -20,6 +20,18 @@ let ssa_listing (cfg : Semant.Normal.stmt Cfg.cfg) =
   done;
   flush_str_formatter ()
 
+let cfa_listing cfa =
+  let open Format in
+  let open Cfa in
+  for i=0 to cfa.size-1 do
+    let body, edges = cfa.node.(i) in
+    fprintf str_formatter "%d:@." i;
+    body |> List.iter (fprintf str_formatter "%a@." pp_trans);
+    edges |> List.iter begin fun (t, succ) ->
+      fprintf str_formatter "goto %d [%a]@." succ pp_trans t
+    end
+  done;
+  flush_str_formatter ()
 (*
 type rect = { x : int; y : int; width : int; height : int }
 
@@ -108,7 +120,8 @@ let show_il db va32 =
   let scfg = Elaborate.elaborate_cfg db icfg in
   let ssa_cfg = Dataflow.convert_to_ssa db scfg in
   Analyze.simplify_ssa_cfg ssa_cfg;
-  let cs = ssa_cfg |> Dataflow.convert_from_ssa |> Fold_cfg.fold_cfg in
+  let il_cfg = ssa_cfg |> Dataflow.convert_from_ssa in
+  let cs = il_cfg |> Fold_cfg.fold_cfg in
   let il = cs |> Pseudocode.convert in
   il |> List.iter (Pseudocode.pp_pstmt Format.str_formatter);
   let il_text = Format.flush_str_formatter () in
@@ -211,12 +224,22 @@ let show_il db va32 =
       flush stderr
     end
   in
+  let _ =
+    let btn = GButton.button ~label:"CFA" ~packing:toolbar#add () in
+    btn#connect#clicked begin fun () ->
+      let cfa = Cfa.convert_from_cfg il_cfg in
+      let z3 = Z3.mk_context [] in
+      let z3e = Cfa.ass z3 cfa in
+      Z3.Expr.to_string z3e |> Format.printf "%s@.";
+      let text = cfa_listing cfa in
+      text_view#buffer#set_text text
+    end
+  in
   text_view#buffer#set_text il_text;
   window#show ()
 
 let show_gui db =
   let _ = GMain.init () in
-  Lwt_glib.install ();
   let window = GWindow.window ~width:640 ~height:480 ~title:"dasm" () in
   let cols = new GTree.column_list in
   (* Gobject.Data does not have nativeint *)
