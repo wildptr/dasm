@@ -288,3 +288,13 @@ proc imul_32(a:32)
 	EAX = extract(tmp,  0, 32);
 	EDX = extract(tmp, 32, 64);
 }
+
+proc imul2_16(a:16, b:16) -> out:16
+{
+	out = extract(imul16(a, b), 0, 16);
+}
+
+proc imul2_32(a:32, b:32) -> out:32
+{
+	out = extract(imul32(a, b), 0, 32);
+}

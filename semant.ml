@@ -353,10 +353,10 @@ module Make(V : VarType) = struct
           | P1_foldor -> sym_pp "|"
           | P1_part p -> ident_pp (string_of_reg_part p)
           | P1_extract (lo, hi) ->
-            fprintf f "extract(%d, %d, %a)" lo hi (pp low) e
+            fprintf f "extract(%a, %d, %d)" (pp low) e lo hi
           | P1_extend (sign, size) ->
-            fprintf f "%s_extend(%a)" (if sign then "sign" else "zero")
-              (pp low) e
+            fprintf f "%s_extend(%a, %d)" (if sign then "sign" else "zero")
+              (pp low) e size
         end
       | E_prim2 (p, e1, e2) ->
         begin match p with
@@ -517,11 +517,15 @@ module Transform (V : VarType) (V' : VarType) = struct
   module S' = Make(V')
 
   let rec subst f = function
-    | S.E_lit (t, v) -> S'.E_lit (t, v)
-    | S.E_const (name, typ) -> S'.E_const (name, typ)
+    | S.E_lit (t, v) ->
+      S'.E_lit (t, v)
+    | S.E_const (name, typ) ->
+      S'.E_const (name, typ)
     | S.E_var v -> f v
-    | S.E_nondet (typ, id) -> S'.E_nondet (typ, id)
-    | S.E_prim1 (p, e) -> S'.E_prim1 (p, subst f e)
+    | S.E_nondet (typ, id) ->
+      S'.E_nondet (typ, id)
+    | S.E_prim1 (p, e) ->
+      S'.E_prim1 (p, subst f e)
     | S.E_prim2 (p, e1, e2) ->
       S'.E_prim2 (p, subst f e1, subst f e2)
     | S.E_prim3 (p, e1, e2, e3) ->
@@ -532,19 +536,19 @@ module Transform (V : VarType) (V' : VarType) = struct
   let map_stmt fv fe = function
     | S.S_set (lhs, rhs) -> S'.S_set (fv lhs, fe rhs)
     | S.S_jump (cond_opt, dest) ->
-      let cond_opt' = Option.map fe cond_opt in
-      let dest' = fe dest in
+      let cond_opt' = Option.map fe cond_opt
+      and dest' = fe dest in
       S'.S_jump (cond_opt', dest')
     | S.S_jumpout (dest, j) ->
       S'.S_jumpout (fe dest, j)
     | S.S_call (dest, arglist, retlist) ->
-      let dest' = fe dest in
-      let arglist' = arglist |> List.map (fun (r,v) -> r, fe v) in
-      let retlist' = retlist |> List.map (fun (r,v) -> r, fv v) in
+      let dest' = fe dest
+      and arglist' = arglist |> List.map (fun (r,v) -> r, fe v)
+      and retlist' = retlist |> List.map (fun (r,v) -> r, fv v) in
       S'.S_call (dest', arglist', retlist')
     | S.S_ret (dest, arglist) ->
-      let dest' = fe dest in
-      let arglist' = arglist |> List.map (fun (r,v) -> r, fe v) in
+      let dest' = fe dest
+      and arglist' = arglist |> List.map (fun (r,v) -> r, fe v) in
       S'.S_ret (dest', arglist')
     | S.S_phi (lhs, rhs) ->
       S'.S_phi (fv lhs, Hashtbl.map (fun _ e -> fe e) rhs)

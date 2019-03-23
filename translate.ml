@@ -105,7 +105,7 @@ let translate_typ st = function
   | Typ_bool -> T_bool
   | Typ_bitvec c -> T_bitvec (translate_cexpr st c)
 
-let debug = true
+let debug = false
 
 (* TODO: handle segment selectors *)
 

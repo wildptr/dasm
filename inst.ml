@@ -177,7 +177,7 @@ let pp_operand f = function
   | O_farptr (seg, off) -> fprintf f "0x%x:0x%nx" seg off
 
 type operation =
-  | I_BAD
+  | I_Bad
   | I_AAA
   | I_AAD
   | I_AAM
@@ -299,6 +299,8 @@ type operation =
   | I_HLT
   | I_IDIV
   | I_IMUL
+  | I_IMUL2
+  | I_IMUL3
   | I_IN
   | I_INC
   | I_INS
@@ -402,7 +404,7 @@ let prefix_of_size = function
 
 let mnemonic_of_inst inst =
   match inst.operation with
-  | I_BAD -> "<invalid instruction>"
+  | I_Bad -> "<invalid instruction>"
   | I_AAA -> "AAA"
   | I_AAD -> "AAD"
   | I_AAM -> "AAM"
@@ -523,7 +525,7 @@ let mnemonic_of_inst inst =
   | I_FYL2XP1 -> "FYL2XP1"
   | I_HLT -> "HLT"
   | I_IDIV -> "IDIV"
-  | I_IMUL -> "IMUL"
+  | I_IMUL | I_IMUL2 | I_IMUL3 -> "IMUL"
   | I_IN -> "IN"
   | I_INC -> "INC"
   | I_INS -> "INS" ^ suffix_of_size inst.variant

@@ -344,22 +344,22 @@ let opgroup_80 =
   E_grp [| I_ADD;  I_OR;   I_ADC;  I_SBB;  I_AND;  I_SUB;  I_XOR;  I_CMP   |]
 
 let opgroup_8f =
-  E_grp [| I_POP;  I_BAD;  I_BAD;  I_BAD;  I_BAD;  I_BAD;  I_BAD;  I_BAD   |]
+  E_grp [| I_POP;  I_Bad;  I_Bad;  I_Bad;  I_Bad;  I_Bad;  I_Bad;  I_Bad   |]
 
 let opgroup_c0 =
   E_grp [| I_ROL;  I_ROR;  I_RCL;  I_RCR;  I_SHL;  I_SHR;  I_SHL;  I_SAR   |]
 
 let opgroup_c6 =
-  E_grp [| I_MOV;  I_BAD;  I_BAD;  I_BAD;  I_BAD;  I_BAD;  I_BAD;  I_BAD   |]
+  E_grp [| I_MOV;  I_Bad;  I_Bad;  I_Bad;  I_Bad;  I_Bad;  I_Bad;  I_Bad   |]
 
 let opgroup_f6 =
-  E_grp [| I_TEST; I_BAD;  I_NOT;  I_NEG;  I_MUL;  I_IMUL; I_DIV;  I_IDIV  |]
+  E_grp [| I_TEST; I_Bad;  I_NOT;  I_NEG;  I_MUL;  I_IMUL; I_DIV;  I_IDIV  |]
 
 let opgroup_fe =
-  E_grp [| I_INC;  I_DEC;  I_BAD;  I_BAD;  I_BAD;  I_BAD;  I_BAD;  I_BAD   |]
+  E_grp [| I_INC;  I_DEC;  I_Bad;  I_Bad;  I_Bad;  I_Bad;  I_Bad;  I_Bad   |]
 
 let opgroup_ff =
-  E_grp [| I_INC;  I_DEC;  I_CALL; I_CALLF;I_JMP;  I_JMPF; I_PUSH; I_BAD   |]
+  E_grp [| I_INC;  I_DEC;  I_CALL; I_CALLF;I_JMP;  I_JMPF; I_PUSH; I_Bad   |]
 
 let fmtgroup_8c =
   E_grp [|
@@ -485,9 +485,9 @@ let optable_basic = [|
   (* 66 *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* 67 *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* 68 *) { op = E_uni I_PUSH;     var=15;  fmt = E_uni [I] };
-  (* 69 *) { op = E_uni I_IMUL;     var=15;  fmt = E_uni [R;RM;I] };
+  (* 69 *) { op = E_uni I_IMUL3;    var=15;  fmt = E_uni [R;RM;I] };
   (* 6a *) { op = E_uni I_PUSH;     var=15;  fmt = E_uni [I] };
-  (* 6b *) { op = E_uni I_IMUL;     var=15;  fmt = E_uni [R;RM;I] };
+  (* 6b *) { op = E_uni I_IMUL3;    var=15;  fmt = E_uni [R;RM;I] };
   (* 6c *) { op = E_uni I_INS;      var= 0;  fmt = E_uni [] };
   (* 6d *) { op = E_uni I_INS;      var=15;  fmt = E_uni [] };
   (* 6e *) { op = E_uni I_OUTS;     var= 0;  fmt = E_uni [] };
@@ -814,7 +814,7 @@ let optable_0f = [|
   (* ac *) { op = E_uni I_SHRD;     var=15;  fmt = E_uni [RM;R;X (O_imm (1n,1))] };
   (* ad *) { op = E_uni I_SHRD;     var=15;  fmt = E_uni [RM;R;X (O_reg R_CL)] };
   (* ae *) { op = E_inv;            var= 0;  fmt = E_inv };
-  (* af *) { op = E_uni I_IMUL;     var=15;  fmt = E_uni [R;RM] };
+  (* af *) { op = E_uni I_IMUL2;    var=15;  fmt = E_uni [R;RM] };
   (* b0 *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* b1 *) { op = E_inv;            var= 0;  fmt = E_inv };
   (* b2 *) { op = E_inv;            var= 0;  fmt = E_inv };
@@ -907,11 +907,11 @@ let fpu_optable = [|
   (* d8 6 *) I_FDIV,    [Ms 4],  E_uni I_FDIV;
   (* d8 7 *) I_FDIVR,   [Ms 4],  E_uni I_FDIVR;
   (* d9 0 *) I_FLD,     [Ms 4],  E_uni I_FLD;
-  (* d9 1 *) I_BAD,     [],     E_uni I_FXCH;
-  (* d9 2 *) I_FST,     [Ms 4],  E_grp [|I_FNOP;    I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD    |];
+  (* d9 1 *) I_Bad,     [],      E_uni I_FXCH;
+  (* d9 2 *) I_FST,     [Ms 4],  E_grp [|I_FNOP;    I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad    |];
   (* d9 3 *) I_FSTP,    [Ms 4],  E_inv;
-  (* d9 4 *) I_FLDENV,  [Ms 0],  E_grp [|I_FCHS;    I_FABS;    I_BAD;     I_BAD;     I_FTST;    I_FXAM;    I_BAD;     I_BAD    |];
-  (* d9 5 *) I_FLDCW,   [Ms 0],  E_grp [|I_FLD1;    I_FLDL2T;  I_FLDL2E;  I_FLDPI;   I_FLDLG2;  I_FLDLN2;  I_FLDZ;    I_BAD    |];
+  (* d9 4 *) I_FLDENV,  [Ms 0],  E_grp [|I_FCHS;    I_FABS;    I_Bad;     I_Bad;     I_FTST;    I_FXAM;    I_Bad;     I_Bad    |];
+  (* d9 5 *) I_FLDCW,   [Ms 0],  E_grp [|I_FLD1;    I_FLDL2T;  I_FLDL2E;  I_FLDPI;   I_FLDLG2;  I_FLDLN2;  I_FLDZ;    I_Bad    |];
   (* d9 6 *) I_FNSTENV, [Ms 0],  E_grp [|I_F2XM1;   I_FYL2X;   I_FPTAN;   I_FPATAN;  I_FXTRACT; I_FPREM1;  I_FDECSTP; I_FINCSTP|];
   (* d9 7 *) I_FNSTCW,  [Ms 0],  E_grp [|I_FPREM;   I_FYL2XP1; I_FSQRT;   I_FSINCOS; I_FRNDINT; I_FSCALE;  I_FSIN;    I_FCOS   |];
   (* da 0 *) I_FIADD,   [Ms 4],  E_uni I_FCMOVB;
@@ -919,16 +919,16 @@ let fpu_optable = [|
   (* da 2 *) I_FICOM,   [Ms 4],  E_uni I_FCMOVBE;
   (* da 2 *) I_FICOMP,  [Ms 4],  E_uni I_FCMOVU;
   (* da 4 *) I_FISUB,   [Ms 4],  E_inv;
-  (* da 5 *) I_FISUBR,  [Ms 4],  E_grp [|I_BAD;     I_FUCOMPP; I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD    |];
+  (* da 5 *) I_FISUBR,  [Ms 4],  E_grp [|I_Bad;     I_FUCOMPP; I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad    |];
   (* da 6 *) I_FIDIV,   [Ms 4],  E_inv;
   (* da 7 *) I_FIDIVR,  [Ms 4],  E_inv;
   (* db 0 *) I_FILD,    [Ms 4],  E_uni I_FCMOVNB;
   (* db 1 *) I_FISTTP,  [Ms 4],  E_uni I_FCMOVNE;
   (* db 2 *) I_FIST,    [Ms 4],  E_uni I_FCMOVNBE;
   (* db 3 *) I_FISTP,   [Ms 4],  E_uni I_FCMOVNU;
-  (* db 4 *) I_BAD,     [],     E_grp [|I_BAD;     I_BAD;     I_FNCLEX;  I_FNINIT;  I_BAD;     I_BAD;     I_BAD;     I_BAD    |];
+  (* db 4 *) I_Bad,     [],      E_grp [|I_Bad;     I_Bad;     I_FNCLEX;  I_FNINIT;  I_Bad;     I_Bad;     I_Bad;     I_Bad    |];
   (* db 5 *) I_FLD,     [Ms 10], E_uni I_FUCOMI;
-  (* db 6 *) I_BAD,     [],     E_uni I_FCOMI;
+  (* db 6 *) I_Bad,     [],      E_uni I_FCOMI;
   (* db 7 *) I_FSTP,    [Ms 10], E_inv;
   (* dc 0 *) I_FADD,    [Ms 8],  E_uni I_FADD_TO;
   (* dc 1 *) I_FMUL,    [Ms 8],  E_uni I_FMUL_TO;
@@ -943,13 +943,13 @@ let fpu_optable = [|
   (* dd 2 *) I_FST,     [Ms 8],  E_uni I_FST;
   (* dd 3 *) I_FSTP,    [Ms 8],  E_uni I_FSTP;
   (* dd 4 *) I_FRSTOR,  [Ms 0],  E_uni I_FUCOM;
-  (* dd 5 *) I_BAD,     [],     E_uni I_FUCOMP;
+  (* dd 5 *) I_Bad,     [],      E_uni I_FUCOMP;
   (* dd 6 *) I_FNSAVE,  [Ms 0],  E_inv;
   (* dd 7 *) I_FNSTSW,  [Ms 0],  E_inv;
   (* de 0 *) I_FIADD,   [Ms 2],  E_uni I_FADDP;
   (* de 1 *) I_FIMUL,   [Ms 2],  E_uni I_FMULP;
   (* de 2 *) I_FICOM,   [Ms 2],  E_inv;
-  (* de 3 *) I_FICOMP,  [Ms 2],  E_grp [|I_BAD;     I_FCOMPP;  I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD    |];
+  (* de 3 *) I_FICOMP,  [Ms 2],  E_grp [|I_Bad;     I_FCOMPP;  I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad    |];
   (* de 4 *) I_FISUB,   [Ms 2],  E_uni I_FSUBRP;
   (* de 5 *) I_FISUBR,  [Ms 2],  E_uni I_FSUBP;
   (* de 6 *) I_FIDIV,   [Ms 2],  E_uni I_FDIVRP;
@@ -958,7 +958,7 @@ let fpu_optable = [|
   (* df 1 *) I_FISTTP,  [Ms 2],  E_inv;
   (* df 2 *) I_FIST,    [Ms 2],  E_inv;
   (* df 3 *) I_FISTP,   [Ms 2],  E_inv;
-  (* df 4 *) I_FBLD,    [Ms 0],  E_grp [|I_FNSTSW;  I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD;     I_BAD    |];
+  (* df 4 *) I_FBLD,    [Ms 0],  E_grp [|I_FNSTSW;  I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad;     I_Bad    |];
   (* df 5 *) I_FILD,    [Ms 8],  E_uni I_FUCOMIP;
   (* df 6 *) I_FBSTP,   [Ms 0],  E_uni I_FCOMIP;
   (* df 7 *) I_FISTP,   [Ms 8],  E_inv;
@@ -1152,7 +1152,7 @@ let disassemble config str pos =
             | E_grp a ->
               let op = a.(r) in
               match op with
-              | I_BAD -> raise Invalid_instruction
+              | I_Bad -> raise Invalid_instruction
               | _ -> op, 0, []
           end
         | Mem _ ->

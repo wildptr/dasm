@@ -123,6 +123,7 @@ let proc_name_of_op = function
   | I_CMP -> "sub"
   | I_DEC -> "dec"
   | I_IMUL -> "imul_"
+  | I_IMUL2 | I_IMUL3 -> "imul2_"
   | I_INC -> "inc"
   | I_LEAVE -> "leave"
   | I_MUL -> "mul_"
@@ -205,7 +206,8 @@ let elaborate_inst env inst =
   let pc' = Nativeint.(pc + of_int (inst_length inst)) in
   match op with
   | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR
-  | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
+  | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT
+  | I_IMUL2 ->
     let temp = acquire_temp env size_typ in
     let args = operands |> List.map (elaborate_operand pc') in
     emit_proc env pc' (get_proc inst) args [temp];
@@ -221,6 +223,12 @@ let elaborate_inst env inst =
     emit_proc env pc' proc args temps;
     (* no writeback *)
     temps |> List.iter (release_temp env)
+  | I_IMUL3 ->
+    let temp = acquire_temp env size_typ in
+    let args = List.tl operands |> List.map (elaborate_operand pc') in
+    emit_proc env pc' (get_proc inst) args [temp];
+    elaborate_writeback (emit env) (List.hd operands) (E_var temp);
+    release_temp env temp
   | I_POP ->
     let temp = acquire_temp env size_typ in
     emit_proc env pc' (get_proc inst) [] [temp];
