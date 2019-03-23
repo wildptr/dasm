@@ -105,7 +105,7 @@ let translate_typ st = function
   | Typ_bool -> T_bool
   | Typ_bitvec c -> T_bitvec (translate_cexpr st c)
 
-let debug = false
+let debug = true
 
 (* TODO: handle segment selectors *)
 
@@ -352,6 +352,8 @@ let translate_proc st proc =
     end (locals |> List.mapi (fun i (name, typ) -> i, name, typ)) |>
     create
   in
+  (* TODO: fix this mess *)
+  let _ = locals |> List.map (fun (_, typ) -> acquire_temp env typ) in
   stmts |> List.iter (translate_stmt env);
   let temp_types =
     Array.sub env.temp_type_tab 0 (temp_count env) |> Array.to_list
@@ -369,7 +371,14 @@ let translate_proc st proc =
     end
   end; *)
   let split_snd l = l |> List.split |> snd in
-  { name = proc.ap_name; body = List.rev env.stmts_rev;
+  let body = List.rev env.stmts_rev in
+  if debug then begin
+    let open Format in
+    printf "proc %s {\n" proc.ap_name;
+    body |> List.iter (printf "\t%a\n" pp_stmt);
+    printf "}@."
+  end;
+  { name = proc.ap_name; body;
     arg_types = split_snd args; ret_types = split_snd rets;
     local_types }
 
