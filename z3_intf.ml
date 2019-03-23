@@ -28,8 +28,8 @@ let rec to_z3expr z3 tab e =
     | T_bool -> Boolean.mk_sort z3
     | T_bitvec n -> mk_sort z3 n
     | T_mem ->
-      let addr_sort = mk_sort z3 32 in
-      let byte_sort = mk_sort z3 8 in
+      let addr_sort = mk_sort z3 32
+      and byte_sort = mk_sort z3 8 in
       Z3Array.mk_sort z3 addr_sort byte_sort
   in
   match e with
@@ -97,9 +97,9 @@ let rec to_z3expr z3 tab e =
         begin match nbyte with
           | 1 -> Z3Array.mk_select z3 e1 e2
           | 2 ->
-            let mem = to_sort z3 T_mem in
-            let bv16 = mk_sort z3 16 in
-            let bv32 = mk_sort z3 32 in
+            let mem = to_sort z3 T_mem
+            and bv16 = mk_sort z3 16
+            and bv32 = mk_sort z3 32 in
             let f = FuncDecl.mk_func_decl_s z3 "select2" [mem; bv32] bv16 in
             mk_app z3 f [e1; e2]
 (*
@@ -108,8 +108,8 @@ let rec to_z3expr z3 tab e =
             mk_concat z3 (Z3Array.mk_select z3 e1 e2_1)
 *)
           | 4 ->
-            let mem = to_sort z3 T_mem in
-            let bv32 = mk_sort z3 32 in
+            let mem = to_sort z3 T_mem
+            and bv32 = mk_sort z3 32 in
             let f = FuncDecl.mk_func_decl_s z3 "select4" [mem; bv32] bv32 in
             mk_app z3 f [e1; e2]
 (*
@@ -141,15 +141,15 @@ let rec to_z3expr z3 tab e =
         Boolean.mk_ite z3 (to_z3expr z3 tab e1)
           (to_z3expr z3 tab e2) (to_z3expr z3 tab e3)
       | P3_store nbyte ->
-        let e1 = to_z3expr z3 tab e1 in
-        let e2 = to_z3expr z3 tab e2 in
-        let e3 = to_z3expr z3 tab e3 in
+        let e1 = to_z3expr z3 tab e1
+        and e2 = to_z3expr z3 tab e2
+        and e3 = to_z3expr z3 tab e3 in
         begin match nbyte with
           | 1 -> Z3Array.mk_store z3 e1 e2 e3
           | 2 ->
-            let mem = to_sort z3 T_mem in
-            let bv16 = mk_sort z3 16 in
-            let bv32 = mk_sort z3 32 in
+            let mem = to_sort z3 T_mem
+            and bv16 = mk_sort z3 16
+            and bv32 = mk_sort z3 32 in
             let f = FuncDecl.mk_func_decl_s z3 "store2" [mem; bv32; bv16] mem in
             mk_app z3 f [e1; e2; e3]
 (*
@@ -159,8 +159,8 @@ let rec to_z3expr z3 tab e =
             Z3Array.mk_store z3 a e2_1 (mk_extract z3 15 8 e3)
 *)
           | 4 ->
-            let mem = to_sort z3 T_mem in
-            let bv32 = mk_sort z3 32 in
+            let mem = to_sort z3 T_mem
+            and bv32 = mk_sort z3 32 in
             let f = FuncDecl.mk_func_decl_s z3 "store4" [mem; bv32; bv32] mem in
             mk_app z3 f [e1; e2; e3]
 (*

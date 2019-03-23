@@ -459,31 +459,31 @@ let convert_to_ssa db cfg =
   end;
   { node; succ; pred; idom; edges = cfg.edges; exits = cfg.exits; temp_tab }
 
-let convert_stmt_from_ssa = function
-  | S_call (dest, arglist, retlist) ->
-    let arglist' =
-      arglist |> List.filter (fun (r,v) -> v <> E_var (Global r))
-    in
-    let retlist' =
-      retlist |> List.filter (fun (r,v) -> v <> Global r)
-    in
-    S_call (dest, arglist', retlist')
-  | S_ret (dest, arglist) ->
-    let arglist' =
-      arglist |> List.filter (fun (r,v) -> v <> E_var (Global r))
-    in
-    S_ret (dest, arglist')
-  | s -> s
-
 let convert_from_ssa cfg =
   let n = basic_block_count cfg in
+  let n_var = var_count cfg in
   let new_stmts = Array.make n [] in
+  let emit i s = new_stmts.(i) <- s :: new_stmts.(i) in
   for i=0 to n-1 do
     cfg.node.(i).stmts |> List.iter begin function
       | S_phi _ -> ()
-      | s ->
-        let emit s = new_stmts.(i) <- s :: new_stmts.(i) in
-        convert_stmt_from_ssa s |> emit
+      | S_call (dest, arglist, retlist) ->
+        let arglist' =
+          arglist |> List.filter (fun (r,v) -> v <> E_var (Global r))
+        in
+        let retlist' =
+          retlist |> List.filter (fun (r,v) -> v <> Global r)
+        in
+        S_call (dest, arglist', retlist') |> emit i
+      | S_ret (dest, arglist) ->
+        arglist |> List.iter begin fun (r,e) ->
+          if e <> E_var (Global r) then
+            let v = var_of_int (n_var + int_of_global r) in
+            emit i (S_set (v, e))
+        end;
+        S_ret (dest, []) |> emit i
+      | S_set _ | S_jump _ as s -> emit i s
+      | S_jumpout _ -> failwith "S_jumpout"
     end
   done;
   for i=0 to n-1 do
@@ -511,4 +511,12 @@ let convert_from_ssa cfg =
   in
   let succ = Array.copy cfg.succ in
   let pred = Array.copy cfg.pred in
-  { cfg with node; succ; pred }
+  let temp_tab =
+    Array.make (Array.length cfg.temp_tab + number_of_globals) T_bool
+  in
+  let n_temp = Array.length cfg.temp_tab in
+  Array.blit cfg.temp_tab 0 temp_tab 0 n_temp;
+  for i=0 to number_of_globals-1 do
+    temp_tab.(n_temp+i) <- type_of_global (global_of_int i)
+  done;
+  { cfg with node; succ; pred; temp_tab }
