@@ -1,3 +1,6 @@
-.PHONY: test
-test: dasm.ml
-	bash test.sh tests/*.asm
+.PHONY: all FORCE
+
+all: elab_test.native
+
+%.native: FORCE
+	ocamlbuild -use-ocamlfind $*.native

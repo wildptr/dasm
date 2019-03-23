@@ -1,2 +1,2 @@
-<*>: package(batteries), package(z3), package(parsexp), package(ppx_deriving.std), use_menhir, debug, thread
+<*>: package(batteries), package(z3), package(ppx_deriving.std), use_menhir, debug, thread
 <dasmgui.*>: package(lablgtk2), thread

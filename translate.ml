@@ -105,9 +105,9 @@ let translate_typ st = function
   | Typ_bool -> T_bool
   | Typ_bitvec c -> T_bitvec (translate_cexpr st c)
 
-(* TODO: handle segment selectors *)
-
 let debug = false
+
+(* TODO: handle segment selectors *)
 
 let rec translate_expr env expr =
   let st = env.symtab in
@@ -248,6 +248,12 @@ and translate_call env proc args rets =
   let local_tab =
     proc.local_types |> List.map (acquire_temp env) |> Array.of_list
   in
+  if debug then begin
+    print_endline "local_tab:";
+    local_tab |> Array.iter (fun tv -> print_endline (string_of_templ_var tv));
+    print_endline "ret_tab:";
+    ret_tab |> Array.iter (fun tv -> print_endline (string_of_templ_var tv))
+  end;
   let map_lvar = function
     | TV_Local i -> local_tab.(i)
     | TV_Input _ -> failwith "assignment to argument"
@@ -351,7 +357,7 @@ let translate_proc st proc =
     Array.sub env.temp_type_tab 0 (temp_count env) |> Array.to_list
   in
   let local_types = List.map snd locals @ temp_types in
-  if debug then begin
+  (* if debug then begin
     (* env.symtab |> Map.String.iter begin fun name value ->
       match value with
       | Var (tv, _) ->
@@ -361,7 +367,7 @@ let translate_proc st proc =
     local_types |> List.iter begin fun typ ->
       Format.printf "%a@." pp_typ typ
     end
-  end;
+  end; *)
   let split_snd l = l |> List.split |> snd in
   { name = proc.ap_name; body = List.rev env.stmts_rev;
     arg_types = split_snd args; ret_types = split_snd rets;

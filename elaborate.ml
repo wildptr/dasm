@@ -115,15 +115,17 @@ let elaborate_writeback emit o_dst e_data =
     emit (S_set (Global Memory, E_prim3 (P3_store nbyte, memory, off, e_data)))
   | _ -> failwith "elaborate_writeback: invalid operand type"
 
-let fnname_of_op = function
+let proc_name_of_op = function
   | I_ADC -> "adc"
   | I_ADD -> "add"
   | I_AND -> "and"
   | I_CALL -> "call"
   | I_CMP -> "sub"
   | I_DEC -> "dec"
+  | I_IMUL -> "imul_"
   | I_INC -> "inc"
   | I_LEAVE -> "leave"
+  | I_MUL -> "mul_"
   | I_NEG -> "neg"
   | I_NOT -> "not"
   | I_OR -> "or"
@@ -138,7 +140,7 @@ let fnname_of_op = function
   | I_SUB -> "sub"
   | I_TEST -> "and"
   | I_XOR -> "xor"
-  | _ -> failwith "fnname_of_op: not implemented"
+  | _ -> failwith "proc_name_of_op: not implemented"
 
 (*
 let default_arglist = all_globals |> List.map (fun g -> g, mk_global g)
@@ -195,9 +197,9 @@ let elaborate_inst env inst =
   let size_typ = T_bitvec size in
   let operands = inst.operands in
   let get_proc inst =
-    let fnname_base = fnname_of_op op in
-    let fnname = Printf.sprintf "%s%d" fnname_base size in
-    lookup_proc fnname
+    let proc_name_base = proc_name_of_op op in
+    let proc_name = Printf.sprintf "%s%d" proc_name_base size in
+    lookup_proc proc_name
   in
   let pc = env.pc in
   let pc' = Nativeint.(pc + of_int (inst_length inst)) in
@@ -209,7 +211,8 @@ let elaborate_inst env inst =
     emit_proc env pc' (get_proc inst) args [temp];
     elaborate_writeback (emit env) (List.hd operands) (E_var temp);
     release_temp env temp
-  | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
+  | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE
+  | I_MUL | I_IMUL ->
     let proc = get_proc inst in
     let temps =
       proc.ret_types |> List.map (acquire_temp env)
