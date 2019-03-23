@@ -8,6 +8,7 @@ open Spec_ast
 %token <Bitvec.t> Bitvec
 %token Arrow
 %token EqEq
+%token BangEq
 (*%token Dollar*)
 %token Hash
 %token Amp
@@ -33,20 +34,22 @@ open Spec_ast
 %token RBrace
 %token Tilde
 
-%token K_bool
-%token K_false
-%token K_jump
-%token K_pc
-%token K_proc
-%token K_template
-%token K_true
-%token K_undefined
-%token K_var
+%token BOOL
+%token EXTRACT
+%token FALSE
+%token JUMP
+%token PC
+%token PROC
+%token SIGN_EXTEND
+%token TEMPLATE
+%token TRUE
+%token UNDEFINED
+%token VAR
 
 %left Bar
 %left Caret
 %left Amp
-%left EqEq
+%left EqEq BangEq
 %left Star Slash
 %left Plus Minus
 %left Dot
@@ -65,7 +68,7 @@ decl:
   | proc_inst { Decl_proc_inst $1 }
 
 localdecl:
-  | K_var; name = Ident; Colon; typ = typ; Semi
+  | VAR; name = Ident; Colon; typ = typ; Semi
     { name, typ }
 
 block:
@@ -76,7 +79,7 @@ name_type_pair:
   | name = Ident; Colon; typ = typ { name, typ }
 
 proc_def:
-  | K_proc; ap_name = Ident;
+  | PROC; ap_name = Ident;
     LParen; ap_params = separated_list(Comma, name_type_pair); RParen;
     ap_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_type_pair)));
     ap_body = block
@@ -85,25 +88,26 @@ proc_def:
 primary_expr:
   | name = Ident
     { Expr_sym name }
-    (*{ if Char.is_uppercase name.[0]
-      then Expr_global_sym name
-      else Expr_local_sym name }*)
-  | bv = Bitvec
-    { Expr_literal bv }
-  | K_false { Expr_literal_bool false }
-  | K_true { Expr_literal_bool true }
+  | Bitvec
+    { Expr_literal $1 }
+  | FALSE { Expr_literal_bool false }
+  | TRUE { Expr_literal_bool true }
   | Hash; v = primary_cexpr; Colon; w = primary_cexpr
     { Expr_literal2 (v, w) }
   | LParen; e = expr; RParen { e }
   | func_name = Ident; LParen; args = separated_list(Comma, expr); RParen
     { Expr_apply (func_name, args) }
-  | K_undefined; LParen; typ = typ; RParen
+  | UNDEFINED; LParen; typ = typ; RParen
     { Expr_undef typ }
   | memloc
     { Expr_load $1 }
-  | LParen; e = primary_expr; Colon; w = primary_cexpr; RParen
+  | LParen; e = expr; Colon; w = primary_cexpr; RParen
     { Expr_extend (false, e, w) }
-  | K_pc { Expr_pc }
+  | SIGN_EXTEND; LParen; e = expr; Comma; w = cexpr; RParen
+    { Expr_extend (true, e, w) }
+  | PC { Expr_pc }
+  | EXTRACT; LParen; e = expr; Comma; lo = cexpr; Comma; hi = cexpr; RParen
+    { Expr_extract (e, lo, hi) }
 
 memloc:
   | LBrack; seg = primary_expr; Colon; off = primary_expr; RBrack; Colon;
@@ -126,12 +130,16 @@ binary_expr:
   | prefix_expr {$1}
   | e1 = binary_expr; Dot; e2 = binary_expr
     { Expr_binary (Concat, e1, e2) }
+  | e1 = binary_expr; Star; e2 = binary_expr
+    { Expr_binary (Mul, e1, e2) }
   | e1 = binary_expr; Plus; e2 = binary_expr
     { Expr_binary (Add, e1, e2) }
   | e1 = binary_expr; Minus; e2 = binary_expr
     { Expr_binary (Sub, e1, e2) }
   | e1 = binary_expr; EqEq; e2 = binary_expr
     { Expr_binary (Spec_ast.Eq, e1, e2) }
+  | e1 = binary_expr; BangEq; e2 = binary_expr
+    { Expr_binary (Spec_ast.NotEq, e1, e2) }
   | e1 = binary_expr; Amp; e2 = binary_expr
     { Expr_binary (And, e1, e2) }
   | e1 = binary_expr; Caret; e2 = binary_expr
@@ -152,7 +160,7 @@ stmt:
     { Stmt_set (lhs, value) }
   | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen; Semi
     { Stmt_call (proc_name, args) }
-  | K_jump; addr = expr; Semi
+  | JUMP; addr = expr; Semi
     { Stmt_jump addr }
 
 expr_top:
@@ -194,10 +202,10 @@ cexpr: binary_cexpr {$1}
 
 typ:
   | cexpr { Typ_bitvec $1 }
-  | K_bool { Typ_bool }
+  | BOOL { Typ_bool }
 
 proc_templ:
-  | K_template; K_proc; pt_name = Ident;
+  | TEMPLATE; PROC; pt_name = Ident;
     LAngle; pt_templ_params = separated_list(Comma, Ident); RAngle;
     LParen; pt_proc_params = separated_list(Comma, name_type_pair); RParen;
     pt_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_type_pair)));
@@ -205,7 +213,7 @@ proc_templ:
     {{ pt_name; pt_templ_params; pt_proc_params; pt_body; pt_results }}
 
 proc_inst:
-  | K_proc; pi_inst_name = Ident; Eq; pi_templ_name = Ident;
+  | PROC; pi_inst_name = Ident; Eq; pi_templ_name = Ident;
     LAngle; pi_templ_args = separated_nonempty_list(Comma, templ_arg); RAngle; Semi
     {{ pi_inst_name; pi_templ_name; pi_templ_args }}
 

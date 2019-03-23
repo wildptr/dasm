@@ -36,18 +36,27 @@ let type_of_binary_op (op, t1, t2) =
       let T_bitvec w2 = t2 in
       T_bitvec (w1 + w2)
     end [@warning "-8"]
-  | Add | Sub | And | Xor | Or ->
+  | Mul | Add | Sub | And | Xor | Or ->
     check_width t1 t2; t1
-  | Eq ->
+  | Eq | NotEq ->
     check_width t1 t2; T_bool
 
-let init_symtab = [
-  EAX; ECX; EDX; EBX; ESP; EBP; ESI; EDI;
-  ES; CS; SS; DS;
-  CF; PF; AF; ZF; SF; IF; DF; OF;
-] |> List.fold_left begin fun m g ->
-    Map.String.add (string_of_global g)
-      (Var (TV_Global g, type_of_global g)) m
+let init_symtab =
+  let open Inst in
+  [
+    R_AL ; R_CL ; R_DL ; R_BL ; R_AH ; R_CH ; R_DH ; R_BH ;
+    R_AX ; R_CX ; R_DX ; R_BX ; R_SP ; R_BP ; R_SI ; R_DI ;
+    R_EAX; R_ECX; R_EDX; R_EBX; R_ESP; R_EBP; R_ESI; R_EDI;
+    R_ES; R_CS; R_SS; R_DS;
+    R_CF; R_PF; R_AF; R_ZF; R_SF; R_IF; R_DF; R_OF;
+  ] |> List.fold_left begin fun m r ->
+    let g, part_opt = global_of_reg' r in
+    let value =
+      match part_opt with
+      | None -> Var (TV_Global g, type_of_global g)
+      | Some part -> PartialReg (g, part)
+    in
+    Map.String.add (string_of_reg r) value m
   end Map.String.empty
 
 let extend_symtab (name, value) st =
@@ -101,13 +110,14 @@ let translate_typ st = function
 let debug = false
 
 let rec translate_expr env expr =
-  (* if debug then
-    Format.printf "translating expression %a@." pp_astexpr expr; *)
   let st = env.symtab in
   match expr with
   | Expr_sym s ->
     begin match lookup st s with
       | Var (var, w) -> E_var var, w
+      | PartialReg (g, part) ->
+        E_prim1 (P1_part part, E_var (TV_Global g)),
+        T_bitvec (size_of_reg_part part)
       | BVConst bv -> E_lit (BitvecLit, bv), T_bitvec (Bitvec.length bv)
       | _ -> failwith ("not a Var or BVConst value: "^s)
     end
@@ -198,9 +208,11 @@ let rec translate_expr env expr =
     let (e2', w2) = translate_expr env e2 in
     let e' = match op with
       | Concat -> E_prim2 (P2_concat, e1', e2')
+      | Mul -> E_prim2 (P2_mul, e1', e2')
       | Add -> E_prim2 (P2_add, e1', e2')
       | Sub -> E_prim2 (P2_sub, e1', e2')
       | Eq -> E_prim2 (P2_eq, e1', e2')
+      | NotEq -> E_prim1 (P1_not, E_prim2 (P2_eq, e1', e2'))
       | And -> E_prim2 (P2_and, e1', e2')
       | Xor -> E_prim2 (P2_xor, e1', e2')
       | Or -> E_prim2 (P2_or, e1', e2')
@@ -217,6 +229,11 @@ let rec translate_expr env expr =
     let size' = translate_cexpr st size in
     E_prim1 (P1_extend (sign, size'), data'), T_bitvec size'
   | Expr_pc -> E_var TV_PC, T_bitvec 32 (* TODO *)
+  | Expr_extract (e, lo, hi) ->
+    let lo' = translate_cexpr st lo
+    and hi' = translate_cexpr st hi
+    and e', _ = translate_expr env e in (* TODO *)
+    E_prim1 (P1_extract (lo', hi'), e'), T_bitvec (hi'-lo')
 
 and translate_call env proc args rets =
   let module T = Transform(TemplVar)(TemplVar) in
@@ -267,6 +284,8 @@ let translate_stmt env stmt =
           | None -> raise (Unbound_symbol name)
           | Some (Var (r, r_width)) ->
             emit env (S_set (r, data))
+          | Some (PartialReg (g, part)) ->
+            emit env (S_set (TV_Global g, E_prim2 (P2_updatepart part, E_var (TV_Global g), data)))
           | _ -> raise (Invalid_assignment name)
         end
       | Lhs_mem memloc ->
@@ -328,9 +347,21 @@ let translate_proc st proc =
     create
   in
   stmts |> List.iter (translate_stmt env);
-  let local_types =
+  let temp_types =
     Array.sub env.temp_type_tab 0 (temp_count env) |> Array.to_list
   in
+  let local_types = List.map snd locals @ temp_types in
+  if debug then begin
+    (* env.symtab |> Map.String.iter begin fun name value ->
+      match value with
+      | Var (tv, _) ->
+        Printf.printf "%s → %s\n" name (string_of_templ_var tv)
+      | _ -> ()
+    end; *)
+    local_types |> List.iter begin fun typ ->
+      Format.printf "%a@." pp_typ typ
+    end
+  end;
   let split_snd l = l |> List.split |> snd in
   { name = proc.ap_name; body = List.rev env.stmts_rev;
     arg_types = split_snd args; ret_types = split_snd rets;

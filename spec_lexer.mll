@@ -9,20 +9,22 @@ let next_line lexbuf =
   let pos = lexbuf.lex_curr_p in
   lexbuf.lex_curr_p <-
     { pos with
-      pos_bol = lexbuf.lex_curr_p.pos_cnum;
+      pos_bol = pos.pos_cnum;
       pos_lnum = pos.pos_lnum + 1 }
 
 let keyword_map : token Map.String.t =
   [
-    "bool", K_bool;
-    "false", K_false;
-    "jump", K_jump;
-    "pc", K_pc;
-    "proc", K_proc;
-    "template", K_template;
-    "true", K_true;
-    "undefined", K_undefined;
-    "var", K_var;
+    "bool", BOOL;
+    "extract", EXTRACT;
+    "false", FALSE;
+    "jump", JUMP;
+    "pc", PC;
+    "proc", PROC;
+    "sign_extend", SIGN_EXTEND;
+    "template", TEMPLATE;
+    "true", TRUE;
+    "undefined", UNDEFINED;
+    "var", VAR;
   ] |> List.fold_left (fun m (k, v) -> Map.String.add k v m) Map.String.empty
 
 }
@@ -44,6 +46,7 @@ rule read = parse
       try Map.String.find s keyword_map with Not_found -> Ident s }
   | "->" { Arrow }
   | "==" { EqEq }
+  | "!=" { BangEq }
   (*| '$' { Dollar }*)
   | '#' { Hash }
   | '&' { Amp }

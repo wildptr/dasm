@@ -216,3 +216,79 @@ proc leave32()
 	ESP = EBP;
 	EBP = pop32();
 }
+
+template proc mul<N>(a:N, b:N) -> out:(N+N)
+{
+	var prod:N+N;
+	var overflow:bool;
+	prod = (a:(N+N)) * (b:(N+N));
+	overflow = (a*b:(N+N)) != prod;
+	SF = undefined(bool);
+	ZF = undefined(bool);
+	CF = overflow;
+	OF = overflow;
+	out = prod;
+}
+
+template proc imul<N>(a:N, b:N) -> out:(N+N)
+{
+	var prod:N+N;
+	var overflow:bool;
+	prod = sign_extend(a, N+N) * sign_extend(b, N+N);
+	overflow = sign_extend(a*b, N+N) != prod;
+	SF = undefined(bool);
+	ZF = undefined(bool);
+	CF = overflow;
+	OF = overflow;
+	out = prod;
+}
+
+proc mul8  = mul<8>;
+proc mul16 = mul<16>;
+proc mul32 = mul<32>;
+
+proc imul8  = imul<8>;
+proc imul16 = imul<16>;
+proc imul32 = imul<32>;
+
+proc mulb(a:8)
+{
+	AX = mul8(AL, a);
+}
+
+proc mulw16(a:16)
+{
+	var tmp:32;
+	tmp = mul16(AX, a);
+	AX = extract(tmp,  0, 16);
+	DX = extract(tmp, 16, 32);
+}
+
+proc mulw32(a:32)
+{
+	var tmp:64;
+	tmp = mul32(EAX, a);
+	EAX = extract(tmp,  0, 32);
+	EDX = extract(tmp, 32, 64);
+}
+
+proc imulb(a:8)
+{
+	AX = imul8(AL, a);
+}
+
+proc imulw16(a:16)
+{
+	var tmp:32;
+	tmp = imul16(AX, a);
+	AX = extract(tmp,  0, 16);
+	DX = extract(tmp, 16, 32);
+}
+
+proc imulw32(a:32)
+{
+	var tmp:64;
+	tmp = imul32(EAX, a);
+	EAX = extract(tmp,  0, 32);
+	EDX = extract(tmp, 32, 64);
+}

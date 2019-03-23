@@ -60,17 +60,20 @@ let string_of_unary_op = function
 
 type binary_op =
   | Concat
+  | Mul
   | Add | Sub
-  | Eq
+  | Eq | NotEq
   | And
   | Xor
   | Or
 
 let string_of_binary_op = function
   | Concat -> "."
+  | Mul -> "*"
   | Add -> "+"
   | Sub -> "-"
   | Eq -> "=="
+  | NotEq -> "!="
   | And -> "&"
   | Xor -> "^"
   | Or -> "|"
@@ -87,6 +90,7 @@ type astexpr =
   | Expr_load of memloc
   | Expr_extend of bool * astexpr * cexpr
   | Expr_pc
+  | Expr_extract of astexpr * cexpr * cexpr
 
 and memloc = astexpr * astexpr * cexpr (* seg, offset, size *)
 
@@ -108,7 +112,7 @@ let pp_list pp f = List.iter (pp f)
 let rec pp_astexpr f = function
   | Expr_sym s -> pp_print_string f s
   | Expr_literal bv -> fprintf f "'%a'" Bitvec.pp bv
-  | Expr_literal2 (v, w) -> fprintf f "{%a:%a}" pp_cexpr v pp_cexpr w
+  | Expr_literal2 (v, w) -> fprintf f "#%a:%a" pp_cexpr v pp_cexpr w
   | Expr_literal_bool b -> pp_print_bool f b;
   | Expr_unary (op, e) ->
     fprintf f "(%s%a)" (string_of_unary_op op) pp_astexpr e
@@ -120,6 +124,8 @@ let rec pp_astexpr f = function
   | Expr_load memloc -> pp_memloc f memloc
   | Expr_extend (sign, data, n) -> () (* TODO *)
   | Expr_pc -> pp_print_string f "pc"
+  | Expr_extract (e, lo, hi) ->
+    fprintf f "extract(%a, %a, %a)" pp_astexpr e pp_cexpr lo pp_cexpr hi
 
 and pp_memloc f (seg, off, size) =
   fprintf f "[%a:%a]:%a" pp_astexpr seg pp_astexpr off pp_cexpr size

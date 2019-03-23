@@ -4,25 +4,6 @@ open Inst
 open Semant
 open Normal
 
-let alias_table = [|
-  LoByte, EAX;
-  LoByte, ECX;
-  LoByte, EDX;
-  LoByte, EBX;
-  HiByte, EAX;
-  HiByte, ECX;
-  HiByte, EDX;
-  HiByte, EBX;
-  LoWord, EAX;
-  LoWord, ECX;
-  LoWord, EDX;
-  LoWord, EBX;
-  LoWord, ESP;
-  LoWord, EBP;
-  LoWord, ESI;
-  LoWord, EDI;
-|]
-
 let mk_global g = E_var (Global g)
 let memory = mk_global Memory
 
@@ -204,29 +185,32 @@ let emit_proc env pc proc args rets =
   end;
   local_tab |> Array.iter (release_temp env)
 
+let zero8 = E_lit (BitvecLit, Bitvec.of_nativeint 8 0n)
+and one8  = E_lit (BitvecLit, Bitvec.of_nativeint 8 1n)
+
 let elaborate_inst env inst =
-  let op = operation_of inst in
+  let op = inst.operation in
   let lsize = inst.variant land 15 in (* log size in bytes *)
   let size = 8 lsl lsize in
   let size_typ = T_bitvec size in
-  let operands = operands_of inst in
-  let fn inst =
+  let operands = inst.operands in
+  let get_proc inst =
     let fnname_base = fnname_of_op op in
     let fnname = Printf.sprintf "%s%d" fnname_base size in
     lookup_proc fnname
   in
   let pc = env.pc in
-  let pc' = Nativeint.(pc + of_int (length_of inst)) in
+  let pc' = Nativeint.(pc + of_int (inst_length inst)) in
   match op with
   | I_ADD | I_OR | I_ADC | I_SBB | I_AND | I_SUB | I_XOR
   | I_SHL | I_SHR | I_SAR | I_INC | I_DEC | I_NEG | I_NOT ->
     let temp = acquire_temp env size_typ in
     let args = operands |> List.map (elaborate_operand pc') in
-    emit_proc env pc' (fn inst) args [temp];
+    emit_proc env pc' (get_proc inst) args [temp];
     elaborate_writeback (emit env) (List.hd operands) (E_var temp);
     release_temp env temp
   | I_CMP | I_PUSH | I_TEST | I_CALL | I_RET | I_RETN | I_LEAVE ->
-    let proc = fn inst in
+    let proc = get_proc inst in
     let temps =
       proc.ret_types |> List.map (acquire_temp env)
     in
@@ -236,7 +220,7 @@ let elaborate_inst env inst =
     temps |> List.iter (release_temp env)
   | I_POP ->
     let temp = acquire_temp env size_typ in
-    emit_proc env pc' (fn inst) [] [temp];
+    emit_proc env pc' (get_proc inst) [] [temp];
     elaborate_writeback (emit env) (List.hd operands) (E_var temp);
     release_temp env temp
   | I_MOV ->
@@ -284,9 +268,7 @@ let elaborate_inst env inst =
       | _ -> assert false
     in
     let cond = cond_expr (inst.variant lsr 4) in
-    let zero = E_lit (BitvecLit, Bitvec.of_nativeint 8 0n) in
-    let one = E_lit (BitvecLit, Bitvec.of_nativeint 8 1n) in
-    let data = E_prim3 (P3_ite, cond, one, zero) in
+    let data = E_prim3 (P3_ite, cond, one8, zero8) in
     elaborate_writeback (emit env) dst data
   | I_XCHG ->
     let dst, src =
@@ -299,14 +281,14 @@ let elaborate_inst env inst =
     elaborate_writeback (emit env) dst src';
     elaborate_writeback (emit env) src dst'
   | _ ->
-    Format.printf "elaborate_inst: not implemented: %a@." Inst.pp inst
+    Format.printf "elaborate_inst: not implemented: %a@." Inst.pp_inst inst
 
 let elaborate_basic_block env bb =
   let open Cfg in
   env.pc <- bb.start;
   bb.stmts |> List.iter begin fun inst ->
     elaborate_inst env inst;
-    env.pc <- Nativeint.(env.pc + of_int (length_of inst))
+    env.pc <- Nativeint.(env.pc + of_int (inst_length inst))
   end;
   let stmts = get_stmts env in
   env.stmts_rev <- [];
@@ -316,9 +298,9 @@ let elaborate_basic_block env bb =
   done;
   { bb with stmts }
 
-let elaborate_cfg db cfg =
+let elaborate_cfg db_opt cfg =
   let open Cfg in
-  let env = Elab_env.create db in
+  let env = Elab_env.create db_opt in
   let node = cfg.node |> Array.map (elaborate_basic_block env) in
   let succ = Array.copy cfg.succ in
   let pred = Array.copy cfg.pred in

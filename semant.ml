@@ -9,6 +9,10 @@ let string_of_reg_part = function
   | HiByte -> "HiByte"
   | LoWord -> "LoWord"
 
+let size_of_reg_part = function
+  | LoByte | HiByte -> 8
+  | LoWord -> 16
+
 type prim1 =
   | P1_not
   | P1_neg
@@ -173,6 +177,35 @@ let global_of_reg r =
   | R_XMM5 -> XMM5
   | R_XMM6 -> XMM6
   | R_XMM7 -> XMM7
+
+let alias_table = [|
+  LoByte, EAX;
+  LoByte, ECX;
+  LoByte, EDX;
+  LoByte, EBX;
+  HiByte, EAX;
+  HiByte, ECX;
+  HiByte, EDX;
+  HiByte, EBX;
+  LoWord, EAX;
+  LoWord, ECX;
+  LoWord, EDX;
+  LoWord, EBX;
+  LoWord, ESP;
+  LoWord, EBP;
+  LoWord, ESI;
+  LoWord, EDI;
+|]
+
+let global_of_reg' r =
+  let open Inst in
+  match r with
+  | R_AL | R_CL | R_DL | R_BL | R_AH | R_CH | R_DH | R_BH
+  | R_AX | R_CX | R_DX | R_BX | R_SP | R_BP | R_SI | R_DI ->
+    let part, g = alias_table.(int_of_reg r) in
+    g, Some part
+  | _ ->
+    global_of_reg r, None
 
 module type VarType = sig
   type t

@@ -10,27 +10,31 @@ type env = {
   mutable stmts_rev : stmt list;
   rename_table : (string, expr) Hashtbl.t;
   mutable next_nondet_id : int;
-  db : Database.db;
+  db_opt : Database.db option;
   mutable pc : nativeint;
 }
 
 let emit env stmt =
   let stmt' =
-    match stmt with
-    | S_jump (cond, dest) ->
-      begin match Database.get_jump_info env.db env.pc with
-        | (J_call | J_ret as j) ->
-          assert (cond = None);
-          S_jumpout (dest, j = J_call)
+    match env.db_opt with
+    | None -> stmt
+    | Some db ->
+      begin match stmt with
+        | S_jump (cond, dest) ->
+          begin match Database.get_jump_info db env.pc with
+            | (J_call | J_ret as j) ->
+              assert (cond = None);
+              S_jumpout (dest, j = J_call)
+            | _ -> stmt
+          end
         | _ -> stmt
       end
-    | _ -> stmt
   in
   env.stmts_rev <- stmt' :: env.stmts_rev
 
 let init_temp_tab_size = 16
 
-let create db =
+let create db_opt =
   {
     temp_type_tab  = Array.make init_temp_tab_size T_bool;
     temp_avail_tab = Array.make init_temp_tab_size false;
@@ -39,7 +43,7 @@ let create db =
     stmts_rev = [];
     rename_table = Hashtbl.create 0;
     next_nondet_id = 0;
-    db;
+    db_opt;
     pc = 0n;
   }
 

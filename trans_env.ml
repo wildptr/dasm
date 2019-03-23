@@ -5,6 +5,7 @@ open Spec_ast
 
 type value =
   | Var of templ_var * typ
+  | PartialReg of global * reg_part
   | Proc of proc
   | Templ of proc_templ
   | IConst of int

@@ -368,6 +368,7 @@ type operation =
   | I_XCHG
   | I_XLAT
   | I_XOR
+[@@deriving show { with_path = false }]
 
 type inst = {
   bytes : string;
@@ -379,13 +380,7 @@ type inst = {
 let make bytes operation variant operands =
   { bytes; operation; variant; operands }
 
-let bytes_of inst = inst.bytes
-
-let length_of inst = String.length inst.bytes
-
-let operands_of inst = inst.operands
-
-let operation_of inst = inst.operation
+let inst_length inst = String.length inst.bytes
 
 let cond_code =
   [|"O";"NO";"B";"AE";"Z";"NZ";"BE";"A";
@@ -405,7 +400,7 @@ let prefix_of_size = function
   | 3 -> "o64 "
   | _ -> assert false
 
-let mnemonic_of inst =
+let mnemonic_of_inst inst =
   match inst.operation with
   | I_BAD -> "<invalid instruction>"
   | I_AAA -> "AAA"
@@ -599,8 +594,17 @@ let mnemonic_of inst =
   | I_XLAT -> "XLAT"
   | I_XOR -> "XOR"
 
-let pp f inst =
-  pp_print_string f (mnemonic_of inst);
+let pp_inst f inst =
+  pp_print_string f (mnemonic_of_inst inst);
+  match inst.operands with
+  | [] -> ()
+  | o_hd::o_tl ->
+    pp_print_string f " ";
+    pp_operand f o_hd;
+    List.iter (fun o -> pp_print_string f ","; pp_operand f o) o_tl
+
+let pp_inst' f inst =
+  fprintf f "%a (%02x)" pp_operation inst.operation inst.variant;
   match inst.operands with
   | [] -> ()
   | o_hd::o_tl ->
@@ -609,4 +613,4 @@ let pp f inst =
     List.iter (fun o -> pp_print_string f ","; pp_operand f o) o_tl
 
 let to_string inst =
-  asprintf "%a" pp inst
+  asprintf "%a" pp_inst inst
