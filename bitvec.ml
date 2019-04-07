@@ -1,104 +1,98 @@
-open Batteries
-
 type t = {
   len : int;
-  bits : nativeint;
+  bits : Z.t;
+  mask : Z.t
 }
 
 let zero len =
-  { len; bits = 0n }
+  { len; bits = Z.zero; mask = Z.zero }
+
+let mk_mask len =
+  Z.(pred (Z.one lsl len))
 
 let add bv1 bv2 =
-  let len = bv1.len in
-  { len; bits = Nativeint.(bv1.bits + bv2.bits) }
-
-let notv bv =
-  { len = bv.len; bits = Nativeint.lognot bv.bits }
+  { bv1 with bits = Z.((bv1.bits + bv2.bits) land bv1.mask) }
 
 let sub bv1 bv2 =
-  let len = bv1.len in
-  { len; bits = Nativeint.(bv1.bits - bv2.bits) }
+  { bv1 with bits = Z.((bv1.bits - bv2.bits) land bv1.mask) }
+
+let lognot bv =
+  { bv with bits = Z.(lognot bv.bits land bv.mask) }
+
+let neg bv =
+  { bv with bits = Z.(neg bv.bits land bv.mask) }
 
 let length bv = bv.len
 
-let neg bv =
-  { len = bv.len; bits = Nativeint.neg bv.bits }
-
 let rec bitwise f bv1 bv2 =
-  let len = bv1.len in
-  { len; bits = f bv1.bits bv2.bits }
+  { bv1 with bits = f bv1.bits bv2.bits }
 
-let andv = bitwise Nativeint.logand
-let xorv = bitwise Nativeint.logxor
-let orv  = bitwise Nativeint.logor
+let logand = bitwise Z.logand
+let logxor = bitwise Z.logxor
+let logor  = bitwise Z.logor
 
 let of_string s =
   let len = String.length s in
-  let w = ref 0n in
-  for i=0 to len-1 do
-    if s.[i] <> '0' then
-      let shamt = len-1-i in
-      w := Nativeint.(logor !w (shift_left 1n shamt))
-  done;
-  { len; bits = !w }
+  let bits = Z.of_string_base 2 s in
+  { len; bits; mask = mk_mask len }
 
 let to_string bv =
-  let s = Bytes.create bv.len in
-  for i=0 to bv.len-1 do
-    let c =
-      if Nativeint.(logand bv.bits (shift_left 1n i) = 0n) then '0' else '1'
-    in
-    Bytes.set s (bv.len-1-i) c
-  done;
-  Bytes.to_string s
+  let fmt = Printf.sprintf "0%db" bv.len in
+  Z.format fmt bv.bits
 
-let of_bool b = { len = 1; bits = if b then 1n else 0n }
+let of_bool b =
+  { len = 1; bits = if b then Z.one else Z.zero; mask = Z.one }
 
 let part (lo, hi) bv =
   let len = hi-lo in
-  let mask = Nativeint.(shift_left 1n len - 1n) in
-  { len; bits = Nativeint.(logand mask (shift_right bv.bits lo)) }
+  let mask = mk_mask len in
+  { len;
+    bits = Z.(logand mask (shift_right bv.bits lo));
+    mask }
 
 let of_int len i =
-  { len; bits = Nativeint.of_int i }
+  let mask = mk_mask len in
+  { len; bits = Z.(of_int i land mask); mask }
 
 let of_nativeint len bits =
-  { len; bits }
+  let mask = mk_mask Sys.word_size in
+  { len; bits = Z.(of_nativeint bits land mask); mask }
 
 let sign_bit bv =
-  Nativeint.logand (Nativeint.shift_right bv.bits (bv.len-1)) 1n = 1n
+  Z.testbit bv.bits (bv.len-1)
 
 let to_nativeint bv =
-  let mask = Nativeint.shift_left (-1n) bv.len in
-  if sign_bit bv then
-    Nativeint.logor mask bv.bits
-  else
-    Nativeint.(logand (lognot mask) bv.bits)
+  Z.to_nativeint bv.bits
 
-let of_bytestring s = failwith "Bitvec.of_bytestring: not implemented"
+let of_bytestring s =
+  let len = String.length s * 8 in
+  let mask = mk_mask len in
+  { len; bits = Z.of_bits s; mask }
 
 let pp f bv = Format.pp_print_string f (to_string bv)
 
 let to_bool bv =
-  bv.bits <> 0n
+  not Z.(equal bv.bits zero)
 
-let equal b1 b2 = b1 = b2
+let equal b1 b2 =
+  Z.equal b1.bits b2.bits
 
 let truncate len bv =
-  let mask = Nativeint.(shift_left 1n len - 1n) in
-  { len; bits = Nativeint.(logand bv.bits mask) }
+  let mask = mk_mask len in
+  { len; bits = Z.(logand bv.bits mask); mask }
 
 let zero_extend len bv =
-  { len; bits = bv.bits }
+  let mask = mk_mask len in
+  { len; bits = bv.bits; mask }
 
 let sign_extend len bv =
   let s = sign_bit bv in
   let bits =
     if s then
-      let lmask = Nativeint.(shift_left 1n len - 1n) in
-      let smask = Nativeint.(shift_left 1n bv.len - 1n) in
-      Nativeint.(logor bv.bits (logxor lmask smask))
+      let lmask = Z.(shift_left one len - one) in
+      let smask = Z.(shift_left one bv.len - one) in
+      Z.(logor bv.bits (logxor lmask smask))
     else
       bv.bits
   in
-  { len; bits }
+  { len; bits; mask = mk_mask len }

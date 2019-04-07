@@ -264,7 +264,7 @@ let var_of_int i =
   else
     Temp (i - number_of_globals)
 
-type 'a lit =
+type _ lit =
   | BitvecLit : Bitvec.t lit
   | BoolLit : bool lit
 
