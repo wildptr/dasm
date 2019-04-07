@@ -20,7 +20,7 @@ let ssa_listing (cfg : Semant.Normal.stmt Cfg.cfg) =
   done;
   flush_str_formatter ()
 
-let cfa_listing cfa =
+(* let cfa_listing cfa =
   let open Format in
   let open Cfa in
   for i=0 to cfa.size-1 do
@@ -31,7 +31,8 @@ let cfa_listing cfa =
       fprintf str_formatter "goto %d [%a]@." succ pp_trans t
     end
   done;
-  flush_str_formatter ()
+  flush_str_formatter () *)
+
 (*
 type rect = { x : int; y : int; width : int; height : int }
 

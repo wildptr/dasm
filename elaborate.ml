@@ -317,11 +317,11 @@ let elaborate_cfg db_opt cfg =
   let pred = Array.copy cfg.pred in
   { cfg with node; succ; pred; temp_tab = env.temp_type_tab }
 
-let fail_with_parsing_error filename lexbuf msg =
+let syntax_error filename lexbuf msg =
   let curr = lexbuf.Lexing.lex_curr_p in
   let line = curr.Lexing.pos_lnum in
   let col = curr.Lexing.pos_cnum - curr.Lexing.pos_bol in
-  Printf.fprintf stderr "%s:%d:%d: %s\n" filename line col msg;
+  Printf.eprintf "%s:%d:%d: %s\n" filename line col msg;
   failwith "invalid spec"
 
 let load_spec filepath =
@@ -332,18 +332,16 @@ let load_spec filepath =
       Spec_parser.top Spec_lexer.read lexbuf
     with
     | Spec_parser.Error ->
-      fail_with_parsing_error filepath lexbuf "syntax error"
+      syntax_error filepath lexbuf "syntax error"
     | Spec_lexer.Error msg ->
-      fail_with_parsing_error filepath lexbuf msg
+      syntax_error filepath lexbuf msg
   in
   close_in in_chan;
   let symtab =
     try Translate.translate_ast spec_ast with
-    | Translate.Index_out_of_bounds ((e,w),b) ->
-      let open Format in
-      eprintf "width of expression %a is %d, %d is out of bounds@."
-        Spec_ast.pp_astexpr e w b;
-      exit 1
+    | Translate.Error msg ->
+      Printf.eprintf "%s\n" msg;
+      failwith "invalid spec"
   in
   symtab |> Map.String.iter begin fun key data ->
     match data with

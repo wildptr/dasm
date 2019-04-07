@@ -63,9 +63,9 @@ top:
   | decl*; EOF { $1 }
 
 decl:
-  | proc_def { Decl_proc $1 }
-  | proc_templ { Decl_proc_templ $1 }
-  | proc_inst { Decl_proc_inst $1 }
+  | proc_def    { D_Proc $1 }
+  | proc_templ  { D_Proc_Templ $1 }
+  | proc_inst   { D_Proc_Inst $1 }
 
 localdecl:
   | VAR; name = Ident; Colon; typ = typ; Semi
@@ -79,35 +79,35 @@ name_type_pair:
   | name = Ident; Colon; typ = typ { name, typ }
 
 proc_def:
-  | PROC; ap_name = Ident;
-    LParen; ap_params = separated_list(Comma, name_type_pair); RParen;
-    ap_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_type_pair)));
-    ap_body = block
-    {{ ap_name; ap_params; ap_body; ap_results }}
+  | PROC; p_name = Ident;
+    LParen; p_params = separated_list(Comma, name_type_pair); RParen;
+    p_results = loption(preceded(Arrow, separated_nonempty_list(Comma, name_type_pair)));
+    p_body = block
+    {{ p_name; p_params; p_body; p_results }}
 
 primary_expr:
   | name = Ident
-    { Expr_sym name }
+    { SE_sym name }
   | Bitvec
-    { Expr_literal $1 }
-  | FALSE { Expr_literal_bool false }
-  | TRUE { Expr_literal_bool true }
+    { SE_literal $1 }
+  | FALSE { SE_literal_bool false }
+  | TRUE { SE_literal_bool true }
   | Hash; v = primary_cexpr; Colon; w = primary_cexpr
-    { Expr_literal2 (v, w) }
+    { SE_literal2 (v, w) }
   | LParen; e = expr; RParen { e }
   | func_name = Ident; LParen; args = separated_list(Comma, expr); RParen
-    { Expr_apply (func_name, args) }
+    { SE_apply (func_name, args) }
   | UNDEFINED; LParen; typ = typ; RParen
-    { Expr_undef typ }
+    { SE_undef typ }
   | memloc
-    { Expr_load $1 }
+    { SE_load $1 }
   | LParen; e = expr; Colon; w = primary_cexpr; RParen
-    { Expr_extend (false, e, w) }
+    { SE_extend (false, e, w) }
   | SIGN_EXTEND; LParen; e = expr; Comma; w = cexpr; RParen
-    { Expr_extend (true, e, w) }
-  | PC { Expr_pc }
+    { SE_extend (true, e, w) }
+  | PC { SE_pc }
   | EXTRACT; LParen; e = expr; Comma; lo = cexpr; Comma; hi = cexpr; RParen
-    { Expr_extract (e, lo, hi) }
+    { SE_extract (e, lo, hi) }
 
 memloc:
   | LBrack; seg = primary_expr; Colon; off = primary_expr; RBrack; Colon;
@@ -124,79 +124,79 @@ unary_op:
 prefix_expr:
   | primary_expr {$1}
   | op = unary_op; e = prefix_expr
-    { Expr_unary (op, e) }
+    { SE_unary (op, e) }
 
 binary_expr:
   | prefix_expr {$1}
   | e1 = binary_expr; Dot; e2 = binary_expr
-    { Expr_binary (Concat, e1, e2) }
+    { SE_binary (Concat, e1, e2) }
   | e1 = binary_expr; Star; e2 = binary_expr
-    { Expr_binary (Mul, e1, e2) }
+    { SE_binary (Mul, e1, e2) }
   | e1 = binary_expr; Plus; e2 = binary_expr
-    { Expr_binary (Add, e1, e2) }
+    { SE_binary (Add, e1, e2) }
   | e1 = binary_expr; Minus; e2 = binary_expr
-    { Expr_binary (Sub, e1, e2) }
+    { SE_binary (Sub, e1, e2) }
   | e1 = binary_expr; EqEq; e2 = binary_expr
-    { Expr_binary (Spec_ast.Eq, e1, e2) }
+    { SE_binary (Spec_ast.Eq, e1, e2) }
   | e1 = binary_expr; BangEq; e2 = binary_expr
-    { Expr_binary (Spec_ast.NotEq, e1, e2) }
+    { SE_binary (Spec_ast.NotEq, e1, e2) }
   | e1 = binary_expr; Amp; e2 = binary_expr
-    { Expr_binary (And, e1, e2) }
+    { SE_binary (And, e1, e2) }
   | e1 = binary_expr; Caret; e2 = binary_expr
-    { Expr_binary (Xor, e1, e2) }
+    { SE_binary (Xor, e1, e2) }
   | e1 = binary_expr; Bar; e2 = binary_expr
-    { Expr_binary (Or, e1, e2) }
+    { SE_binary (Or, e1, e2) }
 
 expr: binary_expr {$1}
 
 lhs:
   | Ident
-    { Lhs_var $1 }
+    { Loc_Var $1 }
   | memloc
-    { Lhs_mem $1 }
+    { Loc_Mem $1 }
 
 stmt:
   | lhs = lhs; Eq; value = expr; Semi
-    { Stmt_set (lhs, value) }
+    { SS_set (lhs, value) }
   | proc_name = Ident; LParen; args = separated_list(Comma, expr); RParen; Semi
-    { Stmt_call (proc_name, args) }
+    { SS_call (proc_name, args) }
   | JUMP; addr = expr; Semi
-    { Stmt_jump addr }
+    { SS_jump addr }
 
 expr_top:
   | expr EOF {$1}
 
 c_unop:
-  | Tilde { CU_not }
+  | Tilde { C_not }
 
 primary_cexpr:
   | i = Int
-    { C_int i }
+    { CE_int i }
   | s = Ident
-    { C_sym s }
+    { CE_sym s }
   | LParen; e = cexpr; RParen {e}
 
 prefix_cexpr:
   | primary_cexpr {$1}
   | op = c_unop; e = prefix_cexpr
-    { C_unary (op, e) }
+    { CE_unary (op, e) }
 
 binary_cexpr:
   | prefix_cexpr {$1}
   | e1 = binary_cexpr; Plus; e2 = binary_cexpr
-    { C_binary (CB_add, e1, e2) }
+    { CE_binary (C_add, e1, e2) }
   | e1 = binary_cexpr; Minus; e2 = binary_cexpr
-    { C_binary (CB_sub, e1, e2) }
+    { CE_binary (C_sub, e1, e2) }
   | e1 = binary_cexpr; Star; e2 = binary_cexpr
-    { C_binary (CB_mul, e1, e2) }
+    { CE_binary (C_mul, e1, e2) }
   | e1 = binary_cexpr; Slash; e2 = binary_cexpr
-    { C_binary (CB_div, e1, e2) }
+    { CE_binary (C_div, e1, e2) }
   | e1 = binary_cexpr; Amp; e2 = binary_cexpr
-    { C_binary (CB_and, e1, e2) }
+    { CE_binary (C_and, e1, e2) }
   | e1 = binary_cexpr; Caret; e2 = binary_cexpr
-    { C_binary (CB_xor, e1, e2) }
+    { CE_binary (C_xor, e1, e2) }
   | e1 = binary_cexpr; Bar; e2 = binary_cexpr
-    { C_binary (CB_or, e1, e2) }
+    { CE_binary (C_or, e1, e2) }
 
 cexpr: binary_cexpr {$1}
 
