@@ -1,16 +1,16 @@
 open Batteries
 open Printf
 
-exception Invalid_offset
+exception Invalid_Offset
 
 let read_u16 s offset =
-  if String.length s < offset+2 then raise Invalid_offset;
+  if String.length s < offset+2 then raise Invalid_Offset;
   (int_of_char s.[offset  ]       ) lor
   (int_of_char s.[offset+1] lsl  8)
 
 let read_u32 s offset =
   let module I = Int32 in
-  if String.length s < offset+4 then raise Invalid_offset;
+  if String.length s < offset+4 then raise Invalid_Offset;
   (             (s.[offset  ] |> int_of_char |> I.of_int)   ) |> I.logor
   (I.shift_left (s.[offset+1] |> int_of_char |> I.of_int)  8) |> I.logor
   (I.shift_left (s.[offset+2] |> int_of_char |> I.of_int) 16) |> I.logor
@@ -47,5 +47,5 @@ let load path =
     end;
     let entry_point = read_u32 optional_header_raw 16 |> Nativeint.of_int32 in
     { code; entry_point; coff_header_raw; optional_header_raw }
-  with Invalid_offset ->
+  with Invalid_Offset ->
     failwith "invalid PE file\n";

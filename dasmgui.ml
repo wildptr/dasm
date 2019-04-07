@@ -1,7 +1,7 @@
 open Batteries
 open Analyze
 
-let asm_listing (cfg : Inst.inst Cfg.cfg) =
+let asm_listing (cfg : Inst.inst CFG.cfg) =
   let open Format in
   let n = Array.length cfg.node in
   for i=0 to n-1 do
@@ -10,7 +10,7 @@ let asm_listing (cfg : Inst.inst Cfg.cfg) =
   done;
   flush_str_formatter ()
 
-let ssa_listing (cfg : Semant.Normal.stmt Cfg.cfg) =
+let ssa_listing (cfg : Semant.Normal.stmt CFG.cfg) =
   let open Format in
   let n = Array.length cfg.node in
   for i=0 to n-1 do
@@ -257,7 +257,7 @@ let show_gui db =
     model#set ~row ~column:addr_col va32;
     model#set ~row ~column:compl_col proc.is_complete;
     model#set ~row ~column:leaf_col proc.is_leaf;
-    model#set ~row ~column:bb_col (Cfg.basic_block_count proc.inst_cfg);
+    model#set ~row ~column:bb_col (CFG.basic_block_count proc.inst_cfg);
     model#set ~row ~column:loop_col proc.has_loop;
   end;
   let va_data_func renderer (model:GTree.model) iter =
@@ -313,3 +313,8 @@ let show_gui db =
   in
   let _ = view#connect#row_activated ~callback:(on_row_activated view) in
   window#show ()
+
+let () =
+  let pe_path = Sys.argv.(1) in
+  let db = load_image pe_path in
+  show_gui db

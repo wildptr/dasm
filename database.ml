@@ -1,9 +1,7 @@
 open Batteries
 
 type proc = {
-  mutable inst_cfg : Inst.inst Cfg.cfg;
-(*   mutable stmt_cfg : Semant.Plain.stmt Cfg.cfg; *)
-(*   mutable span : nativeint Itree.t; *)
+  mutable inst_cfg : Inst.inst CFG.cfg;
   mutable is_complete : bool;
   mutable is_leaf : bool;
   mutable has_loop : bool;
@@ -18,7 +16,7 @@ type jump =
   | J_ret
 
 type db = {
-  image : Pe.pe;
+  image : PE.pe;
   jump_info : (nativeint, jump) Hashtbl.t;
   proc_table : (nativeint, proc) Hashtbl.t;
 }
@@ -47,7 +45,7 @@ let create_proc db va inst_cfg =
   proc
 
 let load_image path =
-  let image = Pe.load path in
+  let image = PE.load path in
   let jump_info = Hashtbl.create 0 in
   let proc_table = Hashtbl.create 0 in
   { image; jump_info; proc_table }

@@ -12,7 +12,7 @@ val neg : t -> t
 val of_string : string -> t
 val to_string : t -> string
 val of_bool : bool -> t
-val part : int * int -> t -> t
+val extract : int -> int -> t -> t
 val of_int : int -> int -> t
 val of_nativeint : int -> nativeint -> t
 val to_nativeint : t -> nativeint

@@ -43,12 +43,9 @@ let to_string bv =
 let of_bool b =
   { len = 1; bits = if b then Z.one else Z.zero; mask = Z.one }
 
-let part (lo, hi) bv =
-  let len = hi-lo in
+let extract off len bv =
   let mask = mk_mask len in
-  { len;
-    bits = Z.(logand mask (shift_right bv.bits lo));
-    mask }
+  { len; bits = Z.extract bv.bits off len; mask }
 
 let of_int len i =
   let mask = mk_mask len in

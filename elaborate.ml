@@ -295,7 +295,7 @@ let elaborate_inst env inst =
     Format.printf "elaborate_inst: not implemented: %a@." Inst.pp_inst inst
 
 let elaborate_basic_block env bb =
-  let open Cfg in
+  let open CFG in
   env.pc <- bb.start;
   bb.stmts |> List.iter begin fun inst ->
     elaborate_inst env inst;
@@ -310,7 +310,7 @@ let elaborate_basic_block env bb =
   { bb with stmts }
 
 let elaborate_cfg db_opt cfg =
-  let open Cfg in
+  let open CFG in
   let env = Elab_env.create db_opt in
   let node = cfg.node |> Array.map (elaborate_basic_block env) in
   let succ = Array.copy cfg.succ in
