@@ -23,13 +23,12 @@ let prim_of_unary_op = function
   | Not -> P1_not
   | Neg -> P1_neg
   | Reduce_and -> P1_foldand
-  | Reduce_xor -> P1_foldxor
   | Reduce_or -> P1_foldor
 
 let type_of_unary_op (op, t) =
   match op with
   | Not | Neg -> t
-  | Reduce_and | Reduce_xor | Reduce_or -> T_bitvec 1
+  | Reduce_and | Reduce_or -> T_bitvec 1
 
 let type_of_binary_op (op, t1, t2) =
   match op with
@@ -179,12 +178,12 @@ let rec translate_expr env expr =
         check_width w1 T_bool;
         check_width w2 w3;
         E_prim3 (P3_ite, a1', a2', a3'), w2
-      | "and" -> f_bin P2_and
-      | "xor" -> f_bin P2_xor
-      | "or"  -> f_bin P2_or
-      | "shl" -> f_bin P2_shiftleft
-      | "lshr" -> f_bin P2_logshiftright
-      | "ashr" -> f_bin P2_arishiftright
+      | "and" -> f_bin P2_logand
+      | "xor" -> f_bin P2_logxor
+      | "or"  -> f_bin P2_logor
+      | "shl" -> f_bin P2_shl
+      | "lshr" -> f_bin P2_lshr
+      | "ashr" -> f_bin P2_ashr
       | "less" -> f_pred P2_less
       | "below" -> f_pred P2_below
       | _ -> unknown_primitive func_name

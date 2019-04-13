@@ -1,5 +1,5 @@
 open Batteries
-open Cfg
+open CFG
 
 let write_dot fmtr cfg =
   let open Format in

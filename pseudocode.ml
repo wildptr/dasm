@@ -1,5 +1,5 @@
 open Batteries
-open Cfg
+open CFG
 open Control_flow
 open Semant
 open Normal

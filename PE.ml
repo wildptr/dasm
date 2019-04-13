@@ -18,9 +18,10 @@ let read_u32 s offset =
 
 type pe = {
   code : string;
-  entry_point : nativeint;
+  image_base : nativeint;
+  entry_point_rva : nativeint;
   coff_header_raw : string;
-  optional_header_raw : string;
+  optional_header_raw : string
 }
 
 let load path =
@@ -45,7 +46,8 @@ let load path =
     if opt_header_magic <> 0x10b then begin
       failwith "not a PE32 file\n";
     end;
-    let entry_point = read_u32 optional_header_raw 16 |> Nativeint.of_int32 in
-    { code; entry_point; coff_header_raw; optional_header_raw }
+    let entry_point_rva = read_u32 optional_header_raw 16 |> Nativeint.of_int32
+    and image_base = read_u32 optional_header_raw 28 |> Nativeint.of_int32 in
+    { code; image_base; entry_point_rva; coff_header_raw; optional_header_raw }
   with Invalid_Offset ->
     failwith "invalid PE file\n";

@@ -1,5 +1,5 @@
 open Batteries
-open Cfg
+open CFG
 open Inst
 
 let build_cfg db init_pc =
@@ -41,7 +41,7 @@ let build_cfg db init_pc =
           let inst = Dasm.(disassemble config code !pos) in
           pos := !pos + String.length inst.bytes;
           Hashtbl.add inst_table pc inst;
-          let l = length_of inst in
+          let l = inst_length inst in
           let pc' = Nativeint.(pc + of_int l) in
           match inst.operation with
           | I_JMP ->
@@ -81,6 +81,7 @@ let build_cfg db init_pc =
             end else loop pc'
         in
         let pc', dests, conc = loop pc in
+        (* Printf.printf "%nx -- %nx\n" pc pc'; *)
         span := Itree.add (pc,pc') !span;
         Hashtbl.add conc_table pc' conc;
         dests |> List.iter begin fun (dest, attr) ->
@@ -116,7 +117,7 @@ let build_cfg db init_pc =
       let rec loop pc insts =
         let inst = Hashtbl.find inst_table pc in
         let insts' = inst :: insts in
-        let pc' = Nativeint.(pc + of_int (length_of inst)) in
+        let pc' = Nativeint.(pc + of_int (inst_length inst)) in
         if pc' = stop then insts' else loop pc' insts'
       in
       let insts = List.rev (loop start []) in

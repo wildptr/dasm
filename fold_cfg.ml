@@ -1,5 +1,5 @@
 open Batteries
-open Cfg
+open CFG
 open Control_flow
 open Printf
 
@@ -449,7 +449,7 @@ and fold_generic g entry nodes =
     if debug then check_consistency g
   end
 
-let fold_cfg (cfg : 'a Cfg.cfg) =
+let fold_cfg (cfg : 'a CFG.cfg) =
   let size = Array.length cfg.node in
   let g =
     let parent = compute_idom cfg.succ cfg.pred in

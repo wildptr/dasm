@@ -117,7 +117,6 @@ memloc:
 unary_op:
   | Tilde { Not }
   | Amp { Reduce_and }
-  | Caret { Reduce_xor }
   | Bar { Reduce_or }
   | Minus { Neg }
 

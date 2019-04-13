@@ -6,7 +6,7 @@ let asm_listing (cfg : Inst.inst CFG.cfg) =
   let n = Array.length cfg.node in
   for i=0 to n-1 do
     fprintf str_formatter "%nx:\n" cfg.node.(i).start;
-    cfg.node.(i).stmts |> List.iter (fprintf str_formatter "%a@." Inst.pp)
+    cfg.node.(i).stmts |> List.iter (fprintf str_formatter "%a@." Inst.pp_inst)
   done;
   flush_str_formatter ()
 
@@ -118,7 +118,7 @@ let show_il db va32 =
   let va = Nativeint.of_int32 va32 in
   let proc = Database.get_proc db va in
   let icfg = proc.inst_cfg in
-  let scfg = Elaborate.elaborate_cfg db icfg in
+  let scfg = Elaborate.elaborate_cfg (Some db) icfg in
   let ssa_cfg = Dataflow.convert_to_ssa db scfg in
   Analyze.simplify_ssa_cfg ssa_cfg;
   let il_cfg = ssa_cfg |> Dataflow.convert_from_ssa in
@@ -225,7 +225,7 @@ let show_il db va32 =
       flush stderr
     end
   in
-  let _ =
+  (* let _ =
     let btn = GButton.button ~label:"CFA" ~packing:toolbar#add () in
     btn#connect#clicked begin fun () ->
       let cfa = Cfa.convert_from_cfg il_cfg in
@@ -235,7 +235,7 @@ let show_il db va32 =
       let text = cfa_listing cfa in
       text_view#buffer#set_text text
     end
-  in
+  in *)
   text_view#buffer#set_text il_text;
   window#show ()
 
@@ -312,9 +312,14 @@ let show_gui db =
     show_il db va
   in
   let _ = view#connect#row_activated ~callback:(on_row_activated view) in
+  let _ = window#connect#destroy ~callback:GMain.Main.quit in
   window#show ()
 
 let () =
+  Printexc.record_backtrace true;
   let pe_path = Sys.argv.(1) in
-  let db = load_image pe_path in
-  show_gui db
+  let db = Database.load_image pe_path in
+  let pe = db.image in
+  Analyze.auto_analyze db (Nativeint.add pe.image_base pe.entry_point_rva);
+  show_gui db;
+  GMain.Main.main ()

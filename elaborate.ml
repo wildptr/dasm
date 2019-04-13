@@ -51,7 +51,7 @@ let elaborate_mem_index (reg, scale) =
   if scale = 0 then e_reg
   else
     let e_scale = make_lit (size_of_global g) (Nativeint.of_int scale) in
-    E_prim2 (P2_shiftleft, e_reg, e_scale)
+    E_prim2 (P2_shl, e_reg, e_scale)
 
 let make_address addr = make_lit 32 addr
 

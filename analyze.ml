@@ -2,7 +2,7 @@ open Batteries
 open Semant
 open Normal
 open Pseudocode
-open Cfg
+open CFG
 
 let rec scan db va =
   if not (Database.has_proc db va) then begin
@@ -16,7 +16,7 @@ let rec scan db va =
         is_leaf := false;
         begin match List.hd inst.Inst.operands with
           | O_imm (dst, _) ->
-            Printf.printf "%nx calls %nx\n" va dst;
+            (* Printf.printf "%nx calls %nx\n" va dst; *)
             scan db dst
           | _ -> ()
         end
@@ -82,7 +82,7 @@ let simplify_ssa_cfg cfg =
   let changed = ref false in
   let rec loop () =
     if Dataflow.auto_subst cfg then changed := true;
-    if Simplify.simplify_cfg cfg then changed := true;
+(*     if Simplify.simplify_cfg cfg then changed := true; *)
     if Dataflow.remove_dead_code_ssa cfg then changed := true;
     if !changed then begin
       changed := false;
@@ -241,7 +241,7 @@ let auto_analyze db entry =
     if proc.is_complete && proc.is_leaf then begin
       let ssa_cfg =
         proc.inst_cfg |>
-        Elaborate.elaborate_cfg db |>
+        Elaborate.elaborate_cfg (Some db) |>
         Dataflow.convert_to_ssa db
       in
       simplify_ssa_cfg ssa_cfg;

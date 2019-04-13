@@ -1,4 +1,4 @@
-open Cfg
+open CFG
 
 let lca idom a b =
   let parent i =

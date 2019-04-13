@@ -31,14 +31,17 @@ let logand = bitwise Z.logand
 let logxor = bitwise Z.logxor
 let logor  = bitwise Z.logor
 
-let of_string s =
+let of_string_base base s =
   let len = String.length s in
-  let bits = Z.of_string_base 2 s in
+  let bits = Z.of_string_base base s in
   { len; bits; mask = mk_mask len }
 
-let to_string bv =
+(* let to_string bv =
   let fmt = Printf.sprintf "0%db" bv.len in
-  Z.format fmt bv.bits
+  Z.format fmt bv.bits *)
+
+let to_string bv =
+  Z.to_string bv.bits
 
 let of_bool b =
   { len = 1; bits = if b then Z.one else Z.zero; mask = Z.one }

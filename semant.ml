@@ -15,9 +15,9 @@ let size_of_reg_part = function
 
 type prim1 =
   | P1_not
+  | P1_lognot
   | P1_neg
   | P1_foldand
-  | P1_foldxor
   | P1_foldor
   | P1_part of reg_part
   | P1_extract of int * int
@@ -28,17 +28,25 @@ type prim2 =
   | P2_mul
   | P2_add
   | P2_sub
-  | P2_shiftleft
-  | P2_logshiftright
-  | P2_arishiftright
+  | P2_shl
+  | P2_lshr
+  | P2_ashr
   | P2_less
+  | P2_greater_eq
   | P2_less_eq
+  | P2_greater
   | P2_below
+  | P2_above_eq
   | P2_below_eq
+  | P2_above
   | P2_eq
+  | P2_neq
   | P2_and
   | P2_xor
   | P2_or
+  | P2_logand
+  | P2_logxor
+  | P2_logor
   | P2_updatepart of reg_part
   | P2_load of int
 
@@ -112,8 +120,8 @@ let string_of_global = function
 
 let number_of_globals = Obj.magic Memory + 1
 
-let int_of_global (g:global) = let (i:int) = Obj.magic g in i
-let global_of_int (i:int) = let (g:global) = Obj.magic i in g
+let int_of_global : global -> int = Obj.magic
+let global_of_int : int -> global = Obj.magic
 
 let all_globals =
   List.range 0 `To (number_of_globals - 1) |> List.map global_of_int
@@ -337,19 +345,18 @@ module Make(V : VarType) = struct
         pp f
     in
     let rec pp c f = function
-      | E_lit (BitvecLit, bv) -> fprintf f "%nd" (Bitvec.to_nativeint bv)
+      | E_lit (BitvecLit, bv) -> Bitvec.pp f bv
       | E_lit (BoolLit, b) -> pp_print_bool f b
       | E_const (name, _) -> pp_print_string f name
       | E_var var -> V.pp f var
       | E_nondet (typ, id) -> fprintf f "nondet(%a)#%d" pp_typ typ id
       | E_prim1 (p, e) ->
-        let sym_pp op_s = wrap c 1 (fun f -> fprintf f "(%s%a)" op_s (pp 1) e) in
+        let sym_pp op_s = wrap c 1 (fun f -> fprintf f "%s%a" op_s (pp 1) e) in
         let ident_pp op_s = fprintf f "%s(%a)" op_s (pp low) e in
         begin match p with
-          | P1_not -> sym_pp "~"
+          | P1_not | P1_lognot -> sym_pp "~"
           | P1_neg -> sym_pp "-"
           | P1_foldand -> sym_pp "&"
-          | P1_foldxor -> sym_pp "^"
           | P1_foldor -> sym_pp "|"
           | P1_part p -> ident_pp (string_of_reg_part p)
           | P1_extract (lo, hi) ->
@@ -359,22 +366,31 @@ module Make(V : VarType) = struct
               (pp low) e size
         end
       | E_prim2 (p, e1, e2) ->
+        let pp_binary prec sym =
+          wrap c prec
+            (fun f -> fprintf f "%a %s %a" (pp prec) e1 sym (pp (prec-1)) e2)
+        in
         begin match p with
-          | P2_concat -> wrap c 2 (fun f -> fprintf f "%a.%a" (pp 2) e1 (pp 1) e2)
-          | P2_mul -> wrap c 3 (fun f -> fprintf f "%a * %a" (pp 3) e1 (pp 2) e2)
-          | P2_add -> wrap c 4 (fun f -> fprintf f "%a + %a" (pp 4) e1 (pp 3) e2)
-          | P2_sub -> wrap c 4 (fun f -> fprintf f "%a - %a" (pp 4) e1 (pp 3) e2)
-          | P2_shiftleft -> wrap c 5 (fun f -> fprintf f "%a << %a" (pp 5) e1 (pp 4) e2)
-          | P2_logshiftright -> wrap c 5 (fun f -> fprintf f "%a >> %a" (pp 5) e1 (pp 4) e2)
-          | P2_arishiftright -> wrap c 5 (fun f -> fprintf f "%a ±>> %a" (pp 5) e1 (pp 4) e2)
-          | P2_less -> wrap c 6 (fun f -> fprintf f "%a ±< %a" (pp 6) e1 (pp 5) e2)
-          | P2_less_eq -> wrap c 6 (fun f -> fprintf f "%a ±<= %a" (pp 6) e1 (pp 5) e2)
-          | P2_below -> wrap c 6 (fun f -> fprintf f "%a < %a" (pp 6) e1 (pp 5) e2)
-          | P2_below_eq -> wrap c 6 (fun f -> fprintf f "%a <= %a" (pp 6) e1 (pp 5) e2)
-          | P2_eq ->  wrap c 7 (fun f -> fprintf f "%a == %a" (pp 7) e1 (pp 6) e2)
-          | P2_and -> wrap c 8 (fun f -> fprintf f "%a & %a" (pp 8) e1 (pp 7) e2)
-          | P2_xor -> wrap c 9 (fun f -> fprintf f "%a ^ %a" (pp 9) e1 (pp 8) e2)
-          | P2_or -> wrap c 10 (fun f -> fprintf f "%a | %a" (pp 10) e1 (pp 9) e2)
+          | P2_concat -> pp_binary 2 "."
+          | P2_mul -> pp_binary 3 "*"
+          | P2_add -> pp_binary 4 "+"
+          | P2_sub -> pp_binary 4 "-"
+          | P2_shl -> pp_binary 5 "<<"
+          | P2_lshr -> pp_binary 5 ">>u"
+          | P2_ashr -> pp_binary 5 ">>s"
+          | P2_less -> pp_binary 6 "<s"
+          | P2_greater_eq -> pp_binary 6 ">=s"
+          | P2_less_eq -> pp_binary 6 "<=s"
+          | P2_greater -> pp_binary 6 ">s"
+          | P2_below -> pp_binary 6 "<u"
+          | P2_above_eq -> pp_binary 6 ">=u"
+          | P2_below_eq -> pp_binary 6 "<=u"
+          | P2_above -> pp_binary 6 ">u"
+          | P2_eq -> pp_binary 7 "=="
+          | P2_neq -> pp_binary 7 "!="
+          | P2_and | P2_logand -> pp_binary 8 "&"
+          | P2_xor | P2_logxor -> pp_binary 9 "^"
+          | P2_or  | P2_logor  -> pp_binary 10 "|"
           | P2_updatepart p ->
             fprintf f "Update%s(%a, %a)" (string_of_reg_part p)
               (pp low) e1 (pp low) e2
@@ -480,8 +496,8 @@ let rec type_of_expr tab = function
   | E_nondet (typ, _) -> typ
   | E_prim1 (p, e) ->
     begin match p with
-      | P1_not | P1_neg -> type_of_expr tab e
-      | P1_foldand | P1_foldxor | P1_foldor -> T_bitvec 1
+      | P1_not | P1_lognot | P1_neg -> type_of_expr tab e
+      | P1_foldand | P1_foldor -> T_bitvec 1
       | P1_part LoByte | P1_part HiByte -> T_bitvec 8
       | P1_part LoWord -> T_bitvec 16
       | P1_extract (lo, hi) -> T_bitvec (hi-lo)
@@ -495,20 +511,20 @@ let rec type_of_expr tab = function
           T_bitvec (w1 + w2)
         end [@warning "-8"]
       | P2_mul | P2_add | P2_sub
-      | P2_shiftleft | P2_logshiftright | P2_arishiftright
-      | P2_and | P2_xor | P2_or | P2_updatepart _ ->
+      | P2_shl | P2_lshr | P2_ashr
+      | P2_and | P2_xor | P2_or
+      | P2_logand | P2_logxor | P2_logor | P2_updatepart _ ->
         type_of_expr tab e1
-      | P2_eq | P2_less | P2_less_eq | P2_below | P2_below_eq -> T_bool
+      | P2_eq | P2_neq
+      | P2_less | P2_greater_eq | P2_less_eq | P2_greater
+      | P2_below | P2_above_eq | P2_below_eq | P2_above -> T_bool
       | P2_load nbyte -> T_bitvec (nbyte*8)
     end
   | E_prim3 (p, e1, e2, e3) ->
     begin match p with
       | P3_carry -> T_bool
       | P3_ite -> type_of_expr tab e2
-      | P3_store _ ->
-        assert (type_of_expr tab e1 = T_mem);
-        assert (type_of_expr tab e2 = T_bitvec 32);
-        T_mem
+      | P3_store _ -> T_mem
     end
 
 module Transform (V : VarType) (V' : VarType) = struct

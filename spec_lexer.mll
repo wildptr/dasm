@@ -40,7 +40,7 @@ rule read = parse
   | comment { next_line lexbuf; read lexbuf }
   | newline { next_line lexbuf; read lexbuf }
   | int { Int (int_of_string (Lexing.lexeme lexbuf)) }
-  | '\'' (['0' '1']* as s) '\'' { Bitvec (Bitvec.of_string s) }
+  | '\'' (['0' '1']* as s) '\'' { Bitvec (Bitvec.of_string_base 2 s) }
   | id
     { let s = Lexing.lexeme lexbuf in
       try Map.String.find s keyword_map with Not_found -> Ident s }

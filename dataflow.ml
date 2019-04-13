@@ -1,5 +1,5 @@
 open Batteries
-open Cfg
+open CFG
 open Semant
 open Normal
 
