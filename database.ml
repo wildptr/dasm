@@ -9,20 +9,14 @@ type proc = {
   mutable uses : Semant.global list;
 }
 
-type jump =
-  | J_unknown
-  | J_resolved
-  | J_call
-  | J_ret
-
 type db = {
   image : PE.pe;
-  jump_info : (nativeint, jump) Hashtbl.t;
+  jump_info : (nativeint, Semant.jump) Hashtbl.t;
   proc_table : (nativeint, proc) Hashtbl.t;
 }
 
 let translate_va db va =
-  Nativeint.(to_int (va - 0x400000n)) (*TODO *)
+  Nativeint.(to_int (va - db.image.image_base))
 
 let get_proc db va =
   Hashtbl.find db.proc_table va

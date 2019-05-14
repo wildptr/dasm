@@ -320,6 +320,6 @@ let () =
   let pe_path = Sys.argv.(1) in
   let db = Database.load_image pe_path in
   let pe = db.image in
-  Analyze.auto_analyze db (Nativeint.add pe.image_base pe.entry_point_rva);
+  Analyze.scan db (Nativeint.add pe.image_base pe.entry_point_rva);
   show_gui db;
   GMain.Main.main ()

@@ -119,6 +119,7 @@ let def_stmt_table (cfg : stmt cfg) =
   end;
   tab
 
+(*
 let preserved_registers (cfg : stmt cfg) =
   let offset_table = Array.create number_of_globals 0n in
   let ok = Array.create number_of_globals false in
@@ -233,6 +234,7 @@ let defuse_of_proc (cfg : stmt cfg) =
     end
   in
   deflist, uselist
+*)
 
 let auto_analyze db entry =
   scan db entry;
@@ -244,10 +246,10 @@ let auto_analyze db entry =
         Elaborate.elaborate_cfg (Some db) |>
         Dataflow.convert_to_ssa db
       in
-      simplify_ssa_cfg ssa_cfg;
-      let defs, uses = defuse_of_proc ssa_cfg in
+      simplify_ssa_cfg ssa_cfg
+      (* let defs, uses = defuse_of_proc ssa_cfg in
       proc.defs <- defs;
-      proc.uses <- uses
+      proc.uses <- uses *)
     end
   end
 

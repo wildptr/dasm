@@ -24,7 +24,7 @@ let emit env stmt =
           begin match Database.get_jump_info db env.pc with
             | (J_call | J_ret as j) ->
               assert (cond = None);
-              S_jumpout (dest, j = J_call)
+              S_jumpout (dest, j, [], [])
             | _ -> stmt
           end
         | _ -> stmt

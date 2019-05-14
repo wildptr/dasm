@@ -164,4 +164,5 @@ let build_cfg db init_pc =
   in
   Printf.printf "%nx: %d basic %s\n" init_pc n
     (if n=1 then "block" else "blocks");
+  flush stdout;
   inst_cfg

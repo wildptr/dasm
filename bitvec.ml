@@ -55,7 +55,7 @@ let of_int len i =
   { len; bits = Z.(of_int i land mask); mask }
 
 let of_nativeint len bits =
-  let mask = mk_mask Sys.word_size in
+  let mask = mk_mask len in
   { len; bits = Z.(of_nativeint bits land mask); mask }
 
 let sign_bit bv =

@@ -276,6 +276,12 @@ type _ lit =
   | BitvecLit : Bitvec.t lit
   | BoolLit : bool lit
 
+type jump =
+  | J_unknown
+  | J_resolved
+  | J_call
+  | J_ret
+
 module Make(V : VarType) = struct
 
   type var = V.t
@@ -328,9 +334,7 @@ module Make(V : VarType) = struct
   type stmt =
     | S_set of var * expr
     | S_jump of expr option * expr
-    | S_jumpout of expr * bool
-    | S_call of expr * (global * expr) list * (global * var) list
-    | S_ret of expr * (global * expr) list
+    | S_jumpout of expr * jump * (global * expr) list * (global * var) list
     | S_phi of var * (nativeint, expr) Hashtbl.t
 
   let pp_var_part f (var, part) =
@@ -424,35 +428,15 @@ module Make(V : VarType) = struct
         | None -> ()
       end;
       fprintf f "goto %a" pp_expr_dest e
-    | S_jumpout (e, _) ->
-      fprintf f "jumpout %a" pp_expr_dest e
-    | S_call (dst, arglist, retlist) ->
-      retlist |> List.iter begin fun (r,v) ->
-        fprintf f "%a=%s " V.pp v (string_of_global r)
-      end;
-      fprintf f "call %a" pp_expr_dest dst;
-      let pp_pair f (r, v) =
-        fprintf f "%s=%a" (string_of_global r) pp_expr v
+    | S_jumpout (e, j, arglist, retlist) ->
+      let s =
+        match j with
+        | J_unknown -> "jump_out"
+        | J_resolved -> "goto"
+        | J_call -> "call"
+        | J_ret -> "return_to"
       in
-      begin match arglist with
-        | [] -> ()
-        | hd::tl ->
-          fprintf f " [%a" pp_pair hd;
-          tl |> List.iter (fprintf f " %a" pp_pair);
-          fprintf f "]"
-      end
-    | S_ret (dst, arglist) ->
-      fprintf f "return_to %a" pp_expr_dest dst;
-      let pp_pair f (r, v) =
-        fprintf f "%s=%a" (string_of_global r) pp_expr v
-      in
-      begin match arglist with
-        | [] -> ()
-        | hd::tl ->
-          fprintf f " [%a" pp_pair hd;
-          tl |> List.iter (fprintf f " %a" pp_pair);
-          fprintf f "]"
-      end
+      fprintf f "%s %a" s pp_expr_dest e
     | S_phi (lhs, rhs) ->
       let pp_pair f (a, e) =
         fprintf f "%nx: %a" a pp_expr e
@@ -555,17 +539,11 @@ module Transform (V : VarType) (V' : VarType) = struct
       let cond_opt' = Option.map fe cond_opt
       and dest' = fe dest in
       S'.S_jump (cond_opt', dest')
-    | S.S_jumpout (dest, j) ->
-      S'.S_jumpout (fe dest, j)
-    | S.S_call (dest, arglist, retlist) ->
+    | S.S_jumpout (dest, j, arglist, retlist) ->
       let dest' = fe dest
       and arglist' = arglist |> List.map (fun (r,v) -> r, fe v)
       and retlist' = retlist |> List.map (fun (r,v) -> r, fv v) in
-      S'.S_call (dest', arglist', retlist')
-    | S.S_ret (dest, arglist) ->
-      let dest' = fe dest
-      and arglist' = arglist |> List.map (fun (r,v) -> r, fe v) in
-      S'.S_ret (dest', arglist')
+      S'.S_jumpout (dest', j, arglist', retlist')
     | S.S_phi (lhs, rhs) ->
       S'.S_phi (fv lhs, Hashtbl.map (fun _ e -> fe e) rhs)
 

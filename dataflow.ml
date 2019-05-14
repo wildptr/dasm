@@ -11,11 +11,9 @@ module S = Set.Int
 let def_of_stmt = function
   | S_set (v, _) -> S.singleton (int_of_var v)
   | S_phi (v, _) -> S.singleton (int_of_var v)
-  | S_call (_, _, retlist) ->
+  | S_jumpout (_, _, _, retlist) ->
     retlist |> List.map (fun (r,v) -> int_of_var v) |> S.of_list
-  | S_ret _ -> S.empty
   | S_jump _ -> S.empty
-  | S_jumpout _ -> S.empty
 
 let count_uses_in_expr =
   let rec count t = function
@@ -46,10 +44,7 @@ and uses_expr_list es =
 
 let use_of_stmt = function
   | S_set (_, e) -> use_of_expr e
-  | S_call (e, l, _) ->
-    l |> List.fold_left (fun acc (_, v) -> S.union acc (use_of_expr v))
-      (use_of_expr e)
-  | S_ret (e, l) ->
+  | S_jumpout (e, _, l, _) ->
     l |> List.fold_left (fun acc (_, v) -> S.union acc (use_of_expr v))
       (use_of_expr e)
   | S_phi (_, rhs) ->
@@ -57,16 +52,12 @@ let use_of_stmt = function
   | S_jump (e_opt, e) ->
     e_opt |> (function Some e -> use_of_expr e | None -> S.empty) |>
     S.union (use_of_expr e)
-  | S_jumpout _ -> failwith "use_of_stmt: S_jumpout"
 
 let count_uses_in_cfg cfg =
   let t = Array.make (var_count cfg) 0 in
   cfg |> iter_stmt begin function
     | S_set (_, e) -> count_uses_in_expr t e
-    | S_call (dest, args, rets) ->
-      count_uses_in_expr t dest;
-      args |> List.iter (fun (_,e) -> count_uses_in_expr t e)
-    | S_ret (dest, args) ->
+    | S_jumpout (dest, _, args, rets) ->
       count_uses_in_expr t dest;
       args |> List.iter (fun (_,e) -> count_uses_in_expr t e)
     | S_phi (_, rhs) ->
@@ -74,7 +65,6 @@ let count_uses_in_cfg cfg =
     | S_jump (cond, dest) ->
       cond |> (function Some e -> count_uses_in_expr t e | _ -> ());
       count_uses_in_expr t dest
-    | _ -> assert false
   end;
   t
 
@@ -94,13 +84,13 @@ let remove_dead_code_bb bb live_out =
         | S_phi (v, _) ->
           let uid = int_of_var v in
           if live.(uid) then emit s
-        | S_call (dst, arglist, retlist) ->
+        | S_jumpout (dst, j, arglist, retlist) ->
           let retlist' =
             retlist |> List.filter begin fun (r,v) ->
               let uid = int_of_var v in live.(uid)
             end
           in
-          S_call (dst, arglist, retlist') |> emit
+          S_jumpout (dst, j, arglist, retlist') |> emit
         | _ -> emit s
       end;
       def_of_stmt s |> S.iter begin fun uid ->
@@ -317,8 +307,8 @@ let convert_to_ssa db cfg =
   for i=0 to n-1 do
     node.(i).stmts <-
       cfg.node.(i).stmts |> List.map begin function
-        | S_jumpout (dst, is_call) ->
-          if is_call then
+        | S_jumpout (dst, j, _, _) ->
+          if j = J_call then
             let arglist, retlist =
               match dst with
               | E_lit (BitvecLit, dst_bv) ->
@@ -326,10 +316,10 @@ let convert_to_ssa db cfg =
               | _ ->
                 jumpout_io db None
             in
-            S_call (dst, arglist, retlist)
+            S_jumpout (dst, J_call, arglist, retlist)
           else
             let arglist = make_arglist all_globals in
-            S_ret (dst, arglist)
+            S_jumpout (dst, J_ret, arglist, [])
         | s -> s
       end
   done;
@@ -409,21 +399,16 @@ let convert_to_ssa db cfg =
       node.(i).stmts |> List.map begin function
         | S_set (v, e) ->
           S_set (rename_lhs v, rename_rhs_in e)
-        | S_call (dst, arglist, retlist) ->
+        | S_jumpout (dst, j, arglist, retlist) ->
           let dst' = rename_rhs_in dst in
           let arglist' = arglist |> List.map (fun (r,v) -> r, rename_rhs_in v) in
           let retlist' = retlist |> List.map (fun (r,v) -> r, rename_lhs v) in
-          S_call (dst', arglist', retlist')
-        | S_ret (dst, arglist) ->
-          let dst' = rename_rhs_in dst in
-          let arglist' = arglist |> List.map (fun (r,v) -> r, rename_rhs_in v) in
-          S_ret (dst', arglist')
+          S_jumpout (dst', j, arglist', retlist')
         | S_phi (lhs, rhs) ->
           (* rhs is renamed later *)
           S_phi (rename_lhs lhs, rhs)
         | S_jump (cond, dest) ->
           S_jump (Option.map rename_rhs_in cond, rename_rhs_in dest)
-        | _ -> assert false
       end
     end;
     (* rename variables in RHS of phi-functions *)
@@ -461,29 +446,28 @@ let convert_to_ssa db cfg =
 
 let convert_from_ssa cfg =
   let n = basic_block_count cfg in
-  let n_var = var_count cfg in
+  (* let n_var = var_count cfg in *)
   let new_stmts = Array.make n [] in
   let emit i s = new_stmts.(i) <- s :: new_stmts.(i) in
   for i=0 to n-1 do
     cfg.node.(i).stmts |> List.iter begin function
       | S_phi _ -> ()
-      | S_call (dest, arglist, retlist) ->
+      | S_jumpout (dest, j, arglist, retlist) ->
         let arglist' =
           arglist |> List.filter (fun (r,v) -> v <> E_var (Global r))
         in
         let retlist' =
           retlist |> List.filter (fun (r,v) -> v <> Global r)
         in
-        S_call (dest, arglist', retlist') |> emit i
-      | S_ret (dest, arglist) ->
+        S_jumpout (dest, j, arglist', retlist') |> emit i
+      (* | S_ret (dest, arglist) ->
         arglist |> List.iter begin fun (r,e) ->
           if e <> E_var (Global r) then
             let v = var_of_int (n_var + int_of_global r) in
             emit i (S_set (v, e))
         end;
-        S_ret (dest, []) |> emit i
+        S_ret (dest, []) |> emit i *)
       | S_set _ | S_jump _ as s -> emit i s
-      | S_jumpout _ -> failwith "S_jumpout"
     end
   done;
   for i=0 to n-1 do

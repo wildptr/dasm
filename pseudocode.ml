@@ -13,8 +13,7 @@ type pstmt =
   | P_do_while of pstmt list * expr
   | P_label of nativeint
   | P_comment of string
-  | P_call of expr * (global * expr) list * (global * var) list
-  | P_return of expr * (global * expr) list
+  | P_jumpout of expr * jump * (global * expr) list * (global * var) list
 
 let rec convert_stmt = function
   | S_set (var, e) ->
@@ -26,12 +25,8 @@ let rec convert_stmt = function
       | None ->
         P_goto dst
     end
-  | S_jumpout (dst, _) ->
-    P_goto dst
-  | S_call (dst, ins, outs) ->
-    P_call (dst, ins, outs)
-  | S_ret (dst, ins) ->
-    P_return (dst, ins)
+  | S_jumpout (dst, j, ins, outs) ->
+    P_jumpout (dst, j, ins, outs)
   | _ -> invalid_arg "convert_stmt"
 
 and convert_stmt_list stmts = stmts |> List.map convert_stmt
@@ -144,7 +139,7 @@ let rec pp_pstmt' indent f = function
     fprintf f "%s%a = %a;\n" indent pp_var v pp_expr e
   | P_goto e ->
     fprintf f "%sgoto %a;\n" indent pp_label_expr e
-  | P_call (dst, ins, outs) ->
+  (* | P_call (dst, ins, outs) ->
     pp_print_string f indent;
     outs |> List.iter begin fun (r,v) ->
       fprintf f "%a=%s " pp_var v (string_of_global r)
@@ -160,9 +155,9 @@ let rec pp_pstmt' indent f = function
         tl |> List.iter (fprintf f ", %a" pp_pair);
         fprintf f "}"
     end;
-    pp_print_string f "\n"
-  | P_return (dst, ins) ->
-    fprintf f "%sreturn_to %a" indent pp_expr dst;
+    pp_print_string f "\n" *)
+  | P_jumpout (dst, j, ins, outs) ->
+    fprintf f "%sjump_out %a" indent pp_expr dst;
     let pp_pair f (r, v) =
       fprintf f "%s=%a" (string_of_global r) pp_expr v
     in
