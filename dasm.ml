@@ -9,11 +9,11 @@ type prefix =
   | Prefix_3e (* DS or branch taken *)
   | Prefix_64 (* FS *)
   | Prefix_65 (* GS *)
-  | Prefix_66
-  | Prefix_67
-  | Prefix_f0
-  | Prefix_f2
-  | Prefix_f3
+  | Prefix_66 (* data size *)
+  | Prefix_67 (* address size *)
+  | Prefix_f0 (* LOCK *)
+  | Prefix_f2 (* REPNE *)
+  | Prefix_f3 (* REP *)
 
 (* prefixes can be packed into 7 bits *)
 let prefix_mask = function
@@ -22,12 +22,12 @@ let prefix_mask = function
   | Prefix_36
   | Prefix_3e
   | Prefix_64
-  | Prefix_65 -> 0x1c
-  | Prefix_66 -> 0x20
-  | Prefix_67 -> 0x40
+  | Prefix_65 -> 0x1c (* Group 2 *)
+  | Prefix_66 -> 0x20 (* Group 3 *)
+  | Prefix_67 -> 0x40 (* Group 4 *)
   | Prefix_f0
   | Prefix_f2
-  | Prefix_f3 -> 3
+  | Prefix_f3 -> 3 (* Group 1 *)
 
 let prefix_value = function
   | Prefix_26 -> 1 lsl 2
@@ -999,7 +999,11 @@ let format_of_inst optable mode prefix b x =
   in
   let lw = log_word_size mode prefix in
   let var =
-    if ent.var land 15 = 15 then lw else ent.var
+    let v = ent.var in
+    if v land 15 = 15 then lw else
+      let p = prefix land 3 in
+      if p = 0 then (* no LOCK/REP/REPNE prefix *) v else
+        v lor (p lsl 4)
   in
   let fmt =
     match ent.fmt with

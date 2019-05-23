@@ -375,6 +375,12 @@ type operation =
 type inst = {
   bytes : string;
   operation : operation;
+  (*
+   * Bits 0-1 indicate operand size.
+   * For string instructions, bit 4 indicates presence of REP/REPNE prefix;
+   * bit 5 is 1 if the prefix is REP.
+   * For branch instructions, bits 4-7 indicate the condition.
+   *)
   variant : int;
   operands : operand list;
 }
@@ -396,11 +402,15 @@ let suffix_of_size = function
   | 4 -> "O"
   | _ -> assert false
 
-let prefix_of_size = function
+(* let prefix_of_size = function
   | 1 -> "o16 "
   | 2 -> "o32 "
   | 3 -> "o64 "
-  | _ -> assert false
+  | _ -> assert false *)
+
+let rep_prefix v =
+  if v land 16 = 0 then "" else
+    if v land 32 = 0 then "REPNE " else "REP "
 
 let mnemonic_of_inst inst =
   match inst.operation with
@@ -423,7 +433,7 @@ let mnemonic_of_inst inst =
   | I_CLI -> "CLI"
   | I_CMC -> "CMC"
   | I_CMP -> "CMP"
-  | I_CMPS -> "CMPS" ^ suffix_of_size inst.variant
+  | I_CMPS -> rep_prefix inst.variant ^ "CMPS" ^ suffix_of_size (inst.variant land 15)
   | I_CPUID -> "CPUID"
   | I_CWD -> "CWD"
   | I_DAA -> "DAA"
@@ -528,7 +538,7 @@ let mnemonic_of_inst inst =
   | I_IMUL | I_IMUL2 | I_IMUL3 -> "IMUL"
   | I_IN -> "IN"
   | I_INC -> "INC"
-  | I_INS -> "INS" ^ suffix_of_size inst.variant
+  | I_INS -> rep_prefix inst.variant ^ "INS" ^ suffix_of_size (inst.variant land 15)
   | I_INT -> "INT"
   | I_INT1 -> "INT1"
   | I_INT3 -> "INT3"
@@ -542,15 +552,15 @@ let mnemonic_of_inst inst =
   | I_LEA -> "LEA"
   | I_LEAVE -> "LEAVE"
   | I_LES -> "LES"
-  | I_LODS -> "LODS" ^ suffix_of_size inst.variant
+  | I_LODS -> rep_prefix inst.variant ^ "LODS" ^ suffix_of_size (inst.variant land 15)
   | I_LOOP -> "LOOP"
   | I_LOOPNZ -> "LOOPNZ"
   | I_LOOPZ -> "LOOPZ"
   | I_MOV -> "MOV"
   | I_MFS -> "MOV"
-  | I_MOVS -> "MOVS" ^ suffix_of_size inst.variant
+  | I_MOVS -> rep_prefix inst.variant ^ "MOVS" ^ suffix_of_size (inst.variant land 15)
   | I_MOVSX -> "MOVSX"
-  | I_MTS -> prefix_of_size inst.variant ^ "MOV"
+  | I_MTS -> (* prefix_of_size inst.variant ^ *) "MOV"
   | I_MOVUPS -> "MOVUPS"
   | I_MOVZX -> "MOVZX"
   | I_MUL -> "MUL"
@@ -558,12 +568,12 @@ let mnemonic_of_inst inst =
   | I_NOT -> "NOT"
   | I_OR -> "OR"
   | I_OUT -> "OUT"
-  | I_OUTS -> "OUTS" ^ suffix_of_size inst.variant
-  | I_POP -> prefix_of_size inst.variant ^ "POP"
-  | I_POPA -> prefix_of_size inst.variant ^ "POPA"
+  | I_OUTS -> rep_prefix inst.variant ^ "OUTS" ^ suffix_of_size (inst.variant land 15)
+  | I_POP -> (* prefix_of_size inst.variant ^ *) "POP"
+  | I_POPA -> (* prefix_of_size inst.variant ^ *) "POPA"
   | I_POPF -> "POPF"
-  | I_PUSH -> prefix_of_size inst.variant ^ "PUSH"
-  | I_PUSHA -> prefix_of_size inst.variant ^ "PUSHA"
+  | I_PUSH -> (* prefix_of_size inst.variant ^ *) "PUSH"
+  | I_PUSHA -> (* prefix_of_size inst.variant ^ *) "PUSHA"
   | I_PUSHF -> "PUSHF"
   | I_RCL -> "RCL"
   | I_RCR -> "RCR"
@@ -579,7 +589,7 @@ let mnemonic_of_inst inst =
   | I_SAHF -> "SAHF"
   | I_SAR -> "SAR"
   | I_SBB -> "SBB"
-  | I_SCAS -> "SCAS" ^ suffix_of_size inst.variant
+  | I_SCAS -> rep_prefix inst.variant ^ "SCAS" ^ suffix_of_size (inst.variant land 15)
   | I_SET -> "SET"^cond_code.(inst.variant lsr 4)
   | I_SHL -> "SHL"
   | I_SHLD -> "SHLD"
@@ -588,7 +598,7 @@ let mnemonic_of_inst inst =
   | I_STC -> "STC"
   | I_STD -> "STD"
   | I_STI -> "STI"
-  | I_STOS -> "STOS" ^ suffix_of_size inst.variant
+  | I_STOS -> rep_prefix inst.variant ^ "STOS" ^ suffix_of_size (inst.variant land 15)
   | I_SUB -> "SUB"
   | I_TEST -> "TEST"
   | I_WAIT -> "WAIT"
